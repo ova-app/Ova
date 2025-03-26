@@ -8,9 +8,9 @@ Une application mobile intelligente permettant de générer et suivre des menus 
 
 ---
 
-![GitHub last commit](https://img.shields.io/github/last-commit/USERNAME/orava?style=flat-square)
-![Issues](https://img.shields.io/github/issues/USERNAME/orava?style=flat-square)
-![License](https://img.shields.io/github/license/USERNAME/orava?style=flat-square)
+![GitHub last commit](https://img.shields.io/github/last-commit/Loxizide/orava?style=flat-square)
+![Issues](https://img.shields.io/github/issues/Loxizide/orava?style=flat-square)
+![License](https://img.shields.io/github/license/Loxizide/orava?style=flat-square)
 
 *(Remplace `USERNAME` par ton pseudo GitHub dans les liens ci-dessus)*
 
