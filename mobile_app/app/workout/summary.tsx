@@ -111,6 +111,7 @@ export default function SummaryScreen() {
           ended_at: new Date().toISOString(),
           duration_seconds: workout.elapsedSeconds,
           gym_id: selectedGymId,
+          is_public: true,
         })
         .select('id')
         .single()
