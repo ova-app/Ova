@@ -61,6 +61,7 @@ export default function SummaryScreen() {
   const [title, setTitle] = useState('')
   const [gyms, setGyms] = useState<Gym[]>([])
   const [selectedGymId, setSelectedGymId] = useState<string | null>(null)
+  const [isPublic, setIsPublic] = useState(false)
   const [saving, setSaving] = useState(false)
 
   // Exercices avec au moins une série validée
@@ -111,7 +112,7 @@ export default function SummaryScreen() {
           ended_at: new Date().toISOString(),
           duration_seconds: workout.elapsedSeconds,
           gym_id: selectedGymId,
-          is_public: true,
+          is_public: isPublic,
         })
         .select('id')
         .single()
@@ -256,6 +257,22 @@ export default function SummaryScreen() {
             </View>
           </>
         )}
+        {/* Visibilité */}
+        <TouchableOpacity
+          style={styles.visibilityRow}
+          onPress={() => setIsPublic(v => !v)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.visibilityInfo}>
+            <Text style={styles.visibilityLabel}>Partager dans le feed</Text>
+            <Text style={styles.visibilitySubLabel}>
+              {isPublic ? 'Visible par tes abonnés' : 'Séance privée'}
+            </Text>
+          </View>
+          <View style={[styles.toggle, isPublic && styles.toggleOn]}>
+            <View style={[styles.toggleKnob, isPublic && styles.toggleKnobOn]} />
+          </View>
+        </TouchableOpacity>
       </ScrollView>
 
       {/* Boutons */}
@@ -389,6 +406,37 @@ const styles = StyleSheet.create({
   gymChipActive: { backgroundColor: '#D85A3022', borderColor: '#D85A30' },
   gymChipText: { color: '#888', fontSize: 14 },
   gymChipTextActive: { color: '#D85A30', fontWeight: '600' },
+
+  visibilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#111',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+    padding: 14,
+    marginTop: 8,
+    gap: 12,
+  },
+  visibilityInfo: { flex: 1, gap: 2 },
+  visibilityLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  visibilitySubLabel: { color: '#555', fontSize: 12 },
+  toggle: {
+    width: 44,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#2A2A2A',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  toggleOn: { backgroundColor: '#D85A30' },
+  toggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#555',
+  },
+  toggleKnobOn: { backgroundColor: '#fff', alignSelf: 'flex-end' },
 
   actionsContainer: {
     flexDirection: 'row',

@@ -151,14 +151,17 @@ export default function FeedScreen() {
         : p
     ))
 
-    if (currentlyLiked) {
-      await supabase.from('likes')
-        .delete()
-        .eq('workout_id', postId)
-        .eq('user_id', userId)
-    } else {
-      await supabase.from('likes')
-        .insert({ workout_id: postId, user_id: userId })
+    const { error } = currentlyLiked
+      ? await supabase.from('likes').delete().eq('workout_id', postId).eq('user_id', userId)
+      : await supabase.from('likes').insert({ workout_id: postId, user_id: userId })
+
+    if (error) {
+      // Rollback optimistic update on failure
+      setPosts(prev => prev.map(p =>
+        p.id === postId
+          ? { ...p, is_liked: currentlyLiked, like_count: p.like_count + (currentlyLiked ? 1 : -1) }
+          : p
+      ))
     }
   }
 
