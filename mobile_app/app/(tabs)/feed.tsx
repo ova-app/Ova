@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   ActivityIndicator, RefreshControl, Modal, TextInput,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Image,
 } from 'react-native'
 import { router, useFocusEffect } from 'expo-router'
 import { Zap, Flame, Trophy, MapPin } from 'lucide-react-native'
@@ -31,6 +31,7 @@ interface FeedPost {
   is_liked: boolean
   is_own: boolean
   location_city: string | null
+  photo_url: string | null
 }
 
 interface Comment {
@@ -98,7 +99,7 @@ export default function FeedScreen() {
     const { data: workoutsData, error } = await supabase
       .from('workouts')
       .select(`
-        id, title, started_at, duration_sec, user_id, location_city,
+        id, title, started_at, duration_sec, user_id, location_city, photo_url,
         workout_exercises (
           workout_sets ( weight_kg, reps, is_pr, pr_charge, pr_serie, pr_1rm )
         ),
@@ -147,6 +148,7 @@ export default function FeedScreen() {
         is_liked: (w.likes ?? []).some((l: any) => l.user_id === user.id),
         is_own: w.user_id === user.id,
         location_city: w.location_city ?? null,
+        photo_url: w.photo_url ?? null,
       }
     })
 
@@ -282,6 +284,13 @@ function PostCard({ post, colors, onLike, onComment, onLikers, onPress }: {
 
       {/* Titre + ville */}
       <Text style={[styles.workoutTitle, { color: colors.textPrimary }]}>{post.title}</Text>
+      {post.photo_url && (
+        <Image
+          source={{ uri: post.photo_url }}
+          style={styles.postPhoto}
+          resizeMode="cover"
+        />
+      )}
       {post.location_city && (
         <View style={styles.locationRow}>
           <MapPin size={11} color={colors.textSecondary} />
@@ -601,6 +610,7 @@ const styles = StyleSheet.create({
   duration: { fontSize: 13 },
 
   workoutTitle: { fontSize: 17, fontWeight: '700' },
+  postPhoto: { width: '100%', height: 200, borderRadius: 10, marginTop: 4 },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   locationText: { fontSize: 11 },
 

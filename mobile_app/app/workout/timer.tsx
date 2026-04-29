@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, Vibration,
-  AppState, AppStateStatus, TextInput,
+  AppState, AppStateStatus, FlatList,
 } from 'react-native'
 import { router } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -19,6 +19,108 @@ const PRESETS = [
 
 const FACTORY_DEFAULT = 90
 
+const MIN_VALUES = Array.from({ length: 11 }, (_, i) => i)   // 0..10 min
+const SEC_VALUES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
+const PICKER_ITEM_H = 44
+
+function nearestSec(s: number): number {
+  return SEC_VALUES.reduce((best, v) => Math.abs(v - s) < Math.abs(best - s) ? v : best, 0)
+}
+
+// ─── TimerWheelColumn ─────────────────────────────────────────────────────────
+
+function TimerWheelColumn({ values, selected, onSelect, colors, label, format }: {
+  values: number[]
+  selected: number
+  onSelect: (v: number) => void
+  colors: ReturnType<typeof useTheme>['colors']
+  label: string
+  format: (v: number) => string
+}) {
+  const flatRef = useRef<FlatList<number>>(null)
+
+  useEffect(() => {
+    const idx = Math.max(0, values.indexOf(selected))
+    const timer = setTimeout(() => {
+      flatRef.current?.scrollToOffset({ offset: idx * PICKER_ITEM_H, animated: false })
+    }, 80)
+    return () => clearTimeout(timer)
+  }, [selected])
+
+  function snap(offsetY: number) {
+    const idx = Math.max(0, Math.min(Math.round(offsetY / PICKER_ITEM_H), values.length - 1))
+    onSelect(values[idx])
+    flatRef.current?.scrollToOffset({ offset: idx * PICKER_ITEM_H, animated: true })
+  }
+
+  return (
+    <View style={twStyles.col}>
+      <Text style={[twStyles.colLabel, { color: colors.textSecondary }]}>{label}</Text>
+      <View style={[twStyles.wheel, { borderColor: colors.separator }]}>
+        <View
+          pointerEvents="none"
+          style={[twStyles.highlight, { borderColor: colors.accent, backgroundColor: colors.accent + '15' }]}
+        />
+        <FlatList
+          ref={flatRef}
+          data={values}
+          keyExtractor={v => String(v)}
+          showsVerticalScrollIndicator={false}
+          snapToInterval={PICKER_ITEM_H}
+          decelerationRate="fast"
+          contentContainerStyle={{ paddingVertical: PICKER_ITEM_H * 2 }}
+          onScrollEndDrag={e => snap(e.nativeEvent.contentOffset.y)}
+          onMomentumScrollEnd={e => snap(e.nativeEvent.contentOffset.y)}
+          renderItem={({ item, index }) => {
+            const isSel = item === selected
+            return (
+              <TouchableOpacity
+                style={{ height: PICKER_ITEM_H, alignItems: 'center', justifyContent: 'center' }}
+                onPress={() => {
+                  onSelect(item)
+                  flatRef.current?.scrollToOffset({ offset: index * PICKER_ITEM_H, animated: true })
+                }}
+              >
+                <Text style={[
+                  twStyles.itemText,
+                  { color: isSel ? colors.accent : colors.textSecondary },
+                  isSel && twStyles.itemTextSelected,
+                ]}>
+                  {format(item)}
+                </Text>
+              </TouchableOpacity>
+            )
+          }}
+        />
+      </View>
+    </View>
+  )
+}
+
+const twStyles = StyleSheet.create({
+  col: { flex: 1, alignItems: 'center', gap: 8 },
+  colLabel: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  wheel: {
+    width: '100%',
+    height: PICKER_ITEM_H * 5,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    position: 'relative',
+  },
+  highlight: {
+    position: 'absolute',
+    top: PICKER_ITEM_H * 2,
+    left: 0, right: 0,
+    height: PICKER_ITEM_H,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    zIndex: 1,
+  },
+  itemText: { fontSize: 20, fontVariant: ['tabular-nums'] },
+  itemTextSelected: { fontSize: 26, fontWeight: '700' },
+})
+
 // ─── Composant ───────────────────────────────────────────────────────────────
 
 export default function TimerScreen() {
@@ -26,8 +128,8 @@ export default function TimerScreen() {
   const [selected, setSelected] = useState(FACTORY_DEFAULT)
   const [remaining, setRemaining] = useState(FACTORY_DEFAULT)
   const [running, setRunning] = useState(false)
-  const [customMin, setCustomMin] = useState('')
-  const [customSec, setCustomSec] = useState('')
+  const [pickerMin, setPickerMin] = useState(Math.floor(FACTORY_DEFAULT / 60))
+  const [pickerSec, setPickerSec] = useState(nearestSec(FACTORY_DEFAULT % 60))
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimestampRef = useRef<number | null>(null)
@@ -35,16 +137,19 @@ export default function TimerScreen() {
   const runningRef = useRef(false)
   runningRef.current = running
 
-  // Read default from AsyncStorage and auto-start
+  // Read default from AsyncStorage then always auto-start
   useEffect(() => {
     AsyncStorage.getItem('default_rest').then(value => {
-      if (!value || value === 'disabled') return
-      const secs = parseInt(value, 10)
-      if (!isNaN(secs) && secs > 0) {
-        setSelected(secs)
-        setRemaining(secs)
-        setRunning(true)
+      if (value && value !== 'disabled') {
+        const secs = parseInt(value, 10)
+        if (!isNaN(secs) && secs > 0) {
+          setSelected(secs)
+          setRemaining(secs)
+          setPickerMin(Math.floor(secs / 60))
+          setPickerSec(nearestSec(secs % 60))
+        }
       }
+      setRunning(true)
     })
   }, [])
 
@@ -95,33 +200,29 @@ export default function TimerScreen() {
     setRunning(false)
     setSelected(seconds)
     setRemaining(seconds)
+    setPickerMin(Math.floor(seconds / 60))
+    setPickerSec(nearestSec(seconds % 60))
+    setTimeout(() => setRunning(true), 50)
+  }
+
+  function applyWheel(min: number, sec: number) {
+    const total = min * 60 + sec
+    if (total <= 0) return
+    if (intervalRef.current) clearInterval(intervalRef.current)
+    setRunning(false)
+    setSelected(total)
+    setRemaining(total)
     setTimeout(() => setRunning(true), 50)
   }
 
   function togglePause() {
     if (remaining === 0) return
     if (running) {
-      // Pause: record how much time is left
       startRemainingRef.current = remaining
       setRunning(false)
     } else {
-      // Resume
       setRunning(true)
     }
-  }
-
-  function applyCustom() {
-    const m = parseInt(customMin || '0', 10)
-    const s = parseInt(customSec || '0', 10)
-    const total = (isNaN(m) ? 0 : m) * 60 + (isNaN(s) ? 0 : s)
-    if (total <= 0) return
-    if (intervalRef.current) clearInterval(intervalRef.current)
-    setRunning(false)
-    setSelected(total)
-    setRemaining(total)
-    setCustomMin('')
-    setCustomSec('')
-    setTimeout(() => setRunning(true), 50)
   }
 
   function formatTime(s: number): string {
@@ -144,7 +245,7 @@ export default function TimerScreen() {
       <View style={styles.circleContainer}>
         <View style={[styles.circleOuter, { borderColor: colors.backgroundSecondary }]}>
           <View style={[styles.circleInner, {
-            borderColor: isDone ? colors.accent : colors.accent,
+            borderColor: colors.accent,
             opacity: isDone ? 0.3 : 1,
           }]} />
           <View style={styles.circleContent}>
@@ -158,7 +259,7 @@ export default function TimerScreen() {
         </View>
       </View>
 
-      {/* Pause / Reprendre button — prominent orange */}
+      {/* Pause / Reprendre button */}
       {!isDone && (
         <TouchableOpacity
           style={[styles.pauseBtn, { backgroundColor: running ? colors.accent : colors.backgroundSecondary }]}
@@ -194,38 +295,25 @@ export default function TimerScreen() {
         ))}
       </View>
 
-      {/* Custom duration input */}
-      <View style={[styles.customRow, { backgroundColor: colors.card, borderColor: colors.separator }]}>
-        <Text style={[styles.customLabel, { color: colors.textSecondary }]}>Durée custom</Text>
-        <View style={styles.customInputs}>
-          <TextInput
-            style={[styles.customInput, { backgroundColor: colors.backgroundSecondary, color: colors.textPrimary, borderColor: colors.separator }]}
-            value={customMin}
-            onChangeText={v => setCustomMin(v.replace(/[^0-9]/g, ''))}
-            placeholder="0"
-            placeholderTextColor={colors.textSecondary}
-            keyboardType="number-pad"
-            maxLength={2}
-          />
-          <Text style={[styles.customSep, { color: colors.textSecondary }]}>min</Text>
-          <TextInput
-            style={[styles.customInput, { backgroundColor: colors.backgroundSecondary, color: colors.textPrimary, borderColor: colors.separator }]}
-            value={customSec}
-            onChangeText={v => setCustomSec(v.replace(/[^0-9]/g, ''))}
-            placeholder="0"
-            placeholderTextColor={colors.textSecondary}
-            keyboardType="number-pad"
-            maxLength={2}
-          />
-          <Text style={[styles.customSep, { color: colors.textSecondary }]}>sec</Text>
-        </View>
-        <TouchableOpacity
-          style={[styles.customOkBtn, { backgroundColor: colors.accent }, (!customMin && !customSec) && styles.customOkDisabled]}
-          onPress={applyCustom}
-          disabled={!customMin && !customSec}
-        >
-          <Text style={styles.customOkText}>OK</Text>
-        </TouchableOpacity>
+      {/* Wheel picker */}
+      <View style={styles.wheelRow}>
+        <TimerWheelColumn
+          values={MIN_VALUES}
+          selected={pickerMin}
+          onSelect={min => { setPickerMin(min); applyWheel(min, pickerSec) }}
+          colors={colors}
+          label="min"
+          format={v => String(v)}
+        />
+        <Text style={[styles.wheelColon, { color: colors.textSecondary }]}>:</Text>
+        <TimerWheelColumn
+          values={SEC_VALUES}
+          selected={pickerSec}
+          onSelect={sec => { setPickerSec(sec); applyWheel(pickerMin, sec) }}
+          colors={colors}
+          label="sec"
+          format={v => v.toString().padStart(2, '0')}
+        />
       </View>
 
       {/* Stop button */}
@@ -258,27 +346,27 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 32,
+    marginBottom: 24,
     letterSpacing: 0.3,
   },
   circleContainer: {
-    marginBottom: 32,
+    marginBottom: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
   circleOuter: {
-    width: 220,
-    height: 220,
-    borderRadius: 110,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
     borderWidth: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   circleInner: {
     position: 'absolute',
-    width: 204,
-    height: 204,
-    borderRadius: 102,
+    width: 184,
+    height: 184,
+    borderRadius: 92,
     borderWidth: 4,
   },
   circleContent: {
@@ -286,7 +374,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   timerText: {
-    fontSize: 72,
+    fontSize: 64,
     fontWeight: '700',
     letterSpacing: -2,
     fontVariant: ['tabular-nums'],
@@ -296,11 +384,11 @@ const styles = StyleSheet.create({
   },
   pauseBtn: {
     width: '100%',
-    height: 56,
+    height: 52,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   pauseBtnText: {
     fontSize: 17,
@@ -309,64 +397,32 @@ const styles = StyleSheet.create({
   },
   presets: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 20,
+    gap: 8,
+    marginBottom: 16,
     flexWrap: 'wrap',
     justifyContent: 'center',
   },
   preset: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: 12,
     borderWidth: 1,
   },
   presetText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  customRow: {
-    width: '100%',
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 16,
-  },
-  customLabel: {
     fontSize: 13,
-    fontWeight: '500',
-    flex: 1,
-  },
-  customInputs: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  customInput: {
-    width: 44,
-    height: 36,
-    borderRadius: 8,
-    borderWidth: 1,
-    textAlign: 'center',
-    fontSize: 16,
     fontWeight: '600',
   },
-  customSep: {
-    fontSize: 12,
+  wheelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+    marginBottom: 20,
   },
-  customOkBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  customOkDisabled: { opacity: 0.4 },
-  customOkText: {
-    color: '#fff',
-    fontSize: 14,
+  wheelColon: {
+    fontSize: 28,
     fontWeight: '700',
+    paddingBottom: 28,
   },
   stopBtn: {
     paddingVertical: 14,

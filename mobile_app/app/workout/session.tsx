@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   TextInput, Modal, ActivityIndicator, Alert, ScrollView,
-  KeyboardAvoidingView, Platform, NativeScrollEvent, NativeSyntheticEvent,
+  KeyboardAvoidingView, Platform,
 } from 'react-native'
 import { router } from 'expo-router'
 import { supabase } from '../../lib/supabase'
@@ -83,36 +83,47 @@ interface ScrollPickerProps {
 
 function ScrollPicker({ values, selected, onSelect, colors, label, barreSubLabel }: ScrollPickerProps) {
   const scrollRef = useRef<ScrollView>(null)
+  const snapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selectedIdx = Math.max(0, values.indexOf(selected))
 
+  // Scroll to current selection when values change (new exercise)
   useEffect(() => {
     const timer = setTimeout(() => {
       scrollRef.current?.scrollTo({ y: selectedIdx * ITEM_HEIGHT, animated: false })
-    }, 50)
+    }, 80)
     return () => clearTimeout(timer)
   }, [values])
 
-  function handleScrollEnd(e: NativeSyntheticEvent<NativeScrollEvent>) {
-    const y = e.nativeEvent.contentOffset.y
-    const idx = Math.round(y / ITEM_HEIGHT)
-    const clamped = Math.max(0, Math.min(idx, values.length - 1))
-    onSelect(values[clamped])
-    scrollRef.current?.scrollTo({ y: clamped * ITEM_HEIGHT, animated: true })
+  function snapTo(y: number) {
+    const idx = Math.max(0, Math.min(Math.round(y / ITEM_HEIGHT), values.length - 1))
+    onSelect(values[idx])
+    scrollRef.current?.scrollTo({ y: idx * ITEM_HEIGHT, animated: true })
+  }
+
+  // Slow drag: scheduleSnap fires after 80ms unless momentum cancels it
+  function scheduleSnap(y: number) {
+    if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current)
+    snapTimeoutRef.current = setTimeout(() => snapTo(y), 80)
   }
 
   return (
     <View style={pickerStyles.container}>
       <Text style={[pickerStyles.label, { color: colors.textSecondary }]}>{label}</Text>
       <View style={[pickerStyles.wheel, { borderColor: colors.separator }]}>
-        {/* Selection highlight */}
-        <View style={[pickerStyles.highlight, { borderColor: colors.accent, backgroundColor: colors.accent + '15' }]} />
+        <View
+          pointerEvents="none"
+          style={[pickerStyles.highlight, { borderColor: colors.accent, backgroundColor: colors.accent + '15' }]}
+        />
         <ScrollView
           ref={scrollRef}
           showsVerticalScrollIndicator={false}
-          snapToInterval={ITEM_HEIGHT}
           decelerationRate="fast"
-          onMomentumScrollEnd={handleScrollEnd}
           contentContainerStyle={{ paddingVertical: ITEM_HEIGHT * 2 }}
+          onScrollEndDrag={e => scheduleSnap(e.nativeEvent.contentOffset.y)}
+          onMomentumScrollEnd={e => {
+            if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current)
+            snapTo(e.nativeEvent.contentOffset.y)
+          }}
         >
           {values.map((v, idx) => {
             const isSelected = v === selected
@@ -162,7 +173,6 @@ const pickerStyles = StyleSheet.create({
     right: 0,
     height: ITEM_HEIGHT,
     zIndex: 1,
-    pointerEvents: 'none',
     borderTopWidth: 1,
     borderBottomWidth: 1,
   },

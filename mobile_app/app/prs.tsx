@@ -63,7 +63,6 @@ export default function PRVaultScreen() {
       `)
       .eq('workout_exercises.workouts.user_id', user.id)
       .not('pr_level', 'is', null)
-      .order('workout_exercises(workouts(started_at))', { ascending: false })
 
     setLoading(false)
     if (error || !data) return

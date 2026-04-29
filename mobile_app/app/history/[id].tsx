@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Image,
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { Zap, Flame, Trophy } from 'lucide-react-native'
@@ -29,6 +29,11 @@ interface ExerciseDetail {
   sets: SetDetail[]
 }
 
+interface MuscleShare {
+  group: string
+  pct: number
+}
+
 interface WorkoutDetail {
   id: string
   title: string
@@ -38,6 +43,8 @@ interface WorkoutDetail {
   total_volume: number
   total_sets: number
   pr_count: number
+  photo_url: string | null
+  muscle_breakdown: MuscleShare[]
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -81,7 +88,7 @@ export default function WorkoutDetailScreen() {
     const { data, error } = await supabase
       .from('workouts')
       .select(`
-        id, title, started_at, duration_sec,
+        id, title, started_at, duration_sec, photo_url,
         workout_exercises (
           id, order_index, exercise_id,
           workout_sets ( set_number, weight_kg, reps, is_pr, pr_charge, pr_serie, pr_1rm, pr_level )
@@ -130,6 +137,30 @@ export default function WorkoutDetailScreen() {
 
     const allSets = exercises.flatMap(e => e.sets)
 
+    // Step 3: muscle breakdown (primary counts double)
+    let muscle_breakdown: MuscleShare[] = []
+    if (exerciseIds.length > 0) {
+      const { data: muscleData } = await supabase
+        .from('exercise_muscles')
+        .select('exercise_id, role, muscles(muscle_group)')
+        .in('exercise_id', exerciseIds)
+
+      if (muscleData) {
+        const score: Record<string, number> = {}
+        for (const em of muscleData as any[]) {
+          const group: string = (em.muscles as any)?.muscle_group ?? 'Autre'
+          score[group] = (score[group] ?? 0) + (em.role === 'primary' ? 2 : 1)
+        }
+        const total = Object.values(score).reduce((a, b) => a + b, 0)
+        if (total > 0) {
+          muscle_breakdown = Object.entries(score)
+            .map(([group, s]) => ({ group, pct: Math.round(s / total * 100) }))
+            .sort((a, b) => b.pct - a.pct)
+            .slice(0, 6)
+        }
+      }
+    }
+
     setWorkout({
       id: data.id,
       title: data.title ?? 'Séance',
@@ -139,6 +170,8 @@ export default function WorkoutDetailScreen() {
       total_volume: allSets.reduce((sum, s) => sum + s.weight_kg * s.reps, 0),
       total_sets: allSets.length,
       pr_count: allSets.filter(s => s.is_pr).length,
+      photo_url: (data as any).photo_url ?? null,
+      muscle_breakdown,
     })
   }
 
@@ -179,6 +212,15 @@ export default function WorkoutDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* Photo */}
+        {workout.photo_url && (
+          <Image
+            source={{ uri: workout.photo_url }}
+            style={styles.workoutPhoto}
+            resizeMode="cover"
+          />
+        )}
+
         {/* Stats */}
         <View style={styles.statsRow}>
           <StatBox label="Durée" value={formatDuration(workout.duration_sec)} colors={colors} />
@@ -194,6 +236,22 @@ export default function WorkoutDetailScreen() {
             <StatBox label="PRs" value={String(workout.pr_count)} colors={colors} highlight />
           )}
         </View>
+
+        {/* Muscles travaillés */}
+        {workout.muscle_breakdown.length > 0 && (
+          <View style={[mbStyles.card, { backgroundColor: colors.card, borderColor: colors.separator }]}>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 0 }]}>Muscles travaillés</Text>
+            {workout.muscle_breakdown.map(({ group, pct }) => (
+              <View key={group} style={mbStyles.row}>
+                <Text style={[mbStyles.name, { color: colors.textPrimary }]}>{group}</Text>
+                <View style={[mbStyles.barBg, { backgroundColor: colors.backgroundSecondary }]}>
+                  <View style={[mbStyles.barFill, { width: `${pct}%` as any, backgroundColor: colors.accent }]} />
+                </View>
+                <Text style={[mbStyles.pct, { color: colors.textSecondary }]}>{pct}%</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Exercices */}
         <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Exercices</Text>
@@ -284,6 +342,15 @@ function StatBox({ label, value, colors, highlight = false }: {
   )
 }
 
+const mbStyles = StyleSheet.create({
+  card: { borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, gap: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  name: { fontSize: 13, fontWeight: '500', width: 96 },
+  barBg: { flex: 1, height: 7, borderRadius: 4, overflow: 'hidden' },
+  barFill: { height: 7, borderRadius: 4 },
+  pct: { fontSize: 12, width: 34, textAlign: 'right' },
+})
+
 const statStyles = StyleSheet.create({
   box: { flex: 1, borderRadius: 12, padding: 12, alignItems: 'center', gap: 4, borderWidth: 1 },
   value: { fontSize: 17, fontWeight: '700' },
@@ -310,6 +377,7 @@ const styles = StyleSheet.create({
 
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 60, gap: 4 },
+  workoutPhoto: { width: '100%', height: 220, borderRadius: 14, marginBottom: 8 },
 
   statsRow: { flexDirection: 'row', gap: 8, marginBottom: 20 },
 
