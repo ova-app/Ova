@@ -1,36 +1,33 @@
-/**
- * ORAVA — Session 06
- * app/workout/summary.tsx
- * Résumé de séance + save Supabase
- */
-
 import { useEffect, useState } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, ActivityIndicator, Alert,
 } from 'react-native'
 import { router } from 'expo-router'
+import { Zap, Flame, Trophy } from 'lucide-react-native'
 import { supabase } from '../../lib/supabase'
-import { useWorkout } from '../../context/WorkoutContext'
+import { useWorkout, WorkoutExercise } from '../../context/WorkoutContext'
+import { useTheme } from '../../context/ThemeContext'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface Gym {
-  id: string
-  name: string
-}
+interface Gym { id: string; name: string }
 
-// ─── Constantes ──────────────────────────────────────────────────────────────
-
-const MUSCLE_GROUP_LABELS: Record<string, string> = {
-  chest: 'Pectoraux', back: 'Dos', shoulders: 'Épaules',
-  arms: 'Bras', legs: 'Jambes', core: 'Abdos',
-  glutes: 'Fessiers', calves: 'Mollets',
+interface PREntry {
+  exerciseName: string
+  type: 'charge' | 'serie' | '1rm'
+  value: number
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function generateName(exercises: ReturnType<typeof useWorkout>['exercises']): string {
+function generateName(exercises: WorkoutExercise[]): string {
+  const MUSCLE_GROUP_LABELS: Record<string, string> = {
+    pectoraux: 'Pectoraux', dos: 'Dos', epaules: 'Épaules',
+    biceps: 'Biceps', triceps: 'Triceps', quadriceps: 'Quadriceps',
+    ischio_jambiers: 'Ischio', fessiers: 'Fessiers',
+    mollets: 'Mollets', abdominaux: 'Abdos', avant_bras: 'Avant-bras',
+  }
   const groups = [...new Set(
     exercises.map(e => e.muscle_group).filter((g): g is string => Boolean(g))
   )]
@@ -53,9 +50,14 @@ function formatDuration(s: number): string {
   return `${sec}s`
 }
 
+function formatWeight(v: number): string {
+  return v % 1 === 0 ? String(v) : v.toFixed(1)
+}
+
 // ─── Composant ───────────────────────────────────────────────────────────────
 
 export default function SummaryScreen() {
+  const { colors } = useTheme()
   const workout = useWorkout()
 
   const [title, setTitle] = useState('')
@@ -64,21 +66,23 @@ export default function SummaryScreen() {
   const [isPublic, setIsPublic] = useState(true)
   const [saving, setSaving] = useState(false)
 
-  // Exercices avec au moins une série validée
   const doneExercises = workout.exercises.filter(ex => ex.sets.some(s => s.validated))
 
-  const totalSets = doneExercises.reduce(
-    (sum, ex) => sum + ex.sets.filter(s => s.validated).length, 0
-  )
+  const totalSets = doneExercises.reduce((sum, ex) => sum + ex.sets.filter(s => s.validated).length, 0)
   const totalVolume = doneExercises.reduce(
-    (sum, ex) => sum + ex.sets
-      .filter(s => s.validated)
-      .reduce((v, s) => v + s.weight_kg * s.reps, 0),
+    (sum, ex) => sum + ex.sets.filter(s => s.validated).reduce((v, s) => v + s.weight_kg * s.reps, 0),
     0
   )
-  const totalPRs = doneExercises.reduce(
-    (sum, ex) => sum + ex.sets.filter(s => s.is_pr).length, 0
-  )
+
+  // Collecte tous les PRs réalisés pendant la séance
+  const sessionPRs: PREntry[] = []
+  for (const ex of doneExercises) {
+    for (const s of ex.sets.filter(s => s.validated)) {
+      if (s.pr_charge) sessionPRs.push({ exerciseName: ex.name, type: 'charge', value: s.weight_kg })
+      if (s.pr_serie) sessionPRs.push({ exerciseName: ex.name, type: 'serie', value: s.weight_kg * s.reps })
+      if (s.pr_1rm) sessionPRs.push({ exerciseName: ex.name, type: '1rm', value: s.weight_kg * (1 + s.reps / 30) })
+    }
+  }
 
   useEffect(() => {
     setTitle(generateName(doneExercises))
@@ -95,14 +99,11 @@ export default function SummaryScreen() {
       Alert.alert('Séance vide', 'Aucune série à enregistrer.')
       return
     }
-
     setSaving(true)
-
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Non authentifié')
 
-      // 1. Créer la séance
       const { data: workoutData, error: workoutError } = await supabase
         .from('workouts')
         .insert({
@@ -119,17 +120,11 @@ export default function SummaryScreen() {
 
       if (workoutError || !workoutData) throw workoutError ?? new Error('Erreur création séance')
 
-      // 2. Créer workout_exercises + workout_sets
       for (let i = 0; i < doneExercises.length; i++) {
         const ex = doneExercises[i]
-
         const { data: weData, error: weError } = await supabase
           .from('workout_exercises')
-          .insert({
-            workout_id: workoutData.id,
-            exercise_id: ex.exercise_id,
-            order_index: i,
-          })
+          .insert({ workout_id: workoutData.id, exercise_id: ex.exercise_id, order_index: i })
           .select('id')
           .single()
 
@@ -145,6 +140,9 @@ export default function SummaryScreen() {
             weight_kg: s.weight_kg,
             reps: s.reps,
             is_pr: s.is_pr,
+            pr_charge: s.pr_charge,
+            pr_serie: s.pr_serie,
+            pr_1rm: s.pr_1rm,
             logged_at: new Date().toISOString(),
           }))
         )
@@ -153,7 +151,7 @@ export default function SummaryScreen() {
       workout.resetWorkout()
       router.replace('/(tabs)/feed')
     } catch (err: any) {
-      Alert.alert('Erreur', err.message ?? 'Impossible d\'enregistrer la séance.')
+      Alert.alert('Erreur', err.message ?? "Impossible d'enregistrer la séance.")
     } finally {
       setSaving(false)
     }
@@ -165,22 +163,18 @@ export default function SummaryScreen() {
       'Toutes les séries seront perdues.',
       [
         { text: 'Continuer la séance', style: 'cancel' },
-        {
-          text: 'Abandonner', style: 'destructive',
-          onPress: () => { workout.resetWorkout(); router.replace('/(tabs)/feed') }
-        },
+        { text: 'Abandonner', style: 'destructive', onPress: () => { workout.resetWorkout(); router.replace('/(tabs)/feed') } },
       ]
     )
   }
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { borderBottomColor: colors.separator }]}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backText}>‹</Text>
+          <Text style={[styles.backText, { color: colors.accent }]}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Résumé</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Résumé</Text>
         <View style={{ width: 28 }} />
       </View>
 
@@ -190,41 +184,54 @@ export default function SummaryScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Nom de la séance */}
-        <Text style={styles.sectionLabel}>Nom de la séance</Text>
+        {/* Nom */}
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Nom de la séance</Text>
         <TextInput
-          style={styles.titleInput}
+          style={[styles.titleInput, { backgroundColor: colors.card, borderColor: colors.separator, color: colors.textPrimary }]}
           value={title}
           onChangeText={setTitle}
           placeholder="Nom de la séance"
-          placeholderTextColor="#444"
+          placeholderTextColor={colors.textSecondary}
           maxLength={60}
         />
 
         {/* Stats */}
         <View style={styles.statsRow}>
-          <StatCard label="Durée" value={formatDuration(workout.elapsedSeconds)} />
-          <StatCard label="Séries" value={String(totalSets)} />
-          <StatCard label="Volume" value={`${totalVolume.toLocaleString('fr')} kg`} />
-          {totalPRs > 0 && <StatCard label="PRs" value={String(totalPRs)} highlight />}
+          <StatCard label="Durée" value={formatDuration(workout.elapsedSeconds)} colors={colors} />
+          <StatCard label="Séries" value={String(totalSets)} colors={colors} />
+          <StatCard label="Volume" value={`${totalVolume.toLocaleString('fr')} kg`} colors={colors} />
+          {sessionPRs.length > 0 && (
+            <StatCard label="PRs" value={String(sessionPRs.length)} colors={colors} highlight />
+          )}
         </View>
 
+        {/* Bloc PRs */}
+        {sessionPRs.length > 0 && (
+          <>
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Records battus aujourd'hui</Text>
+            <View style={[styles.prBlock, { backgroundColor: colors.card, borderColor: colors.separator }]}>
+              {sessionPRs.map((pr, idx) => (
+                <PRRow key={idx} pr={pr} colors={colors} />
+              ))}
+            </View>
+          </>
+        )}
+
         {/* Exercices */}
-        <Text style={styles.sectionLabel}>Exercices</Text>
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Exercices</Text>
         {doneExercises.map((ex, eIdx) => (
-          <View key={eIdx} style={styles.exerciseCard}>
-            <Text style={styles.exerciseName}>{ex.name}</Text>
+          <View key={eIdx} style={[styles.exerciseCard, { backgroundColor: colors.card, borderColor: colors.separator }]}>
+            <Text style={[styles.exerciseName, { color: colors.textPrimary }]}>{ex.name}</Text>
             {ex.sets.filter(s => s.validated).map((set, sIdx) => (
-              <View key={sIdx} style={styles.setRow}>
-                <Text style={styles.setNumber}>Série {set.set_number}</Text>
-                <Text style={styles.setData}>
-                  {set.weight_kg % 1 === 0 ? set.weight_kg : set.weight_kg.toFixed(1)} kg × {set.reps} reps
+              <View key={sIdx} style={[styles.setRow, { borderTopColor: colors.separator }]}>
+                <Text style={[styles.setNumber, { color: colors.textSecondary }]}>Série {set.set_number}</Text>
+                <Text style={[styles.setData, { color: colors.textPrimary }]}>
+                  {set.weight_kg > 0
+                    ? `${formatWeight(set.weight_kg)} kg × ${set.reps} reps`
+                    : `${set.reps} reps`}
                 </Text>
-                {set.is_pr && (
-                  <View style={styles.prBadge}>
-                    <Text style={styles.prBadgeText}>PR</Text>
-                  </View>
-                )}
+                {set.pr_charge && <Zap color="#FFD700" size={13} fill="#FFD700" />}
+                {set.pr_serie && <Flame color="#D85A30" size={13} fill="#D85A30" />}
               </View>
             ))}
           </View>
@@ -233,234 +240,173 @@ export default function SummaryScreen() {
         {/* Salle */}
         {gyms.length > 0 && (
           <>
-            <Text style={styles.sectionLabel}>Salle</Text>
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Salle</Text>
             <View style={styles.gymList}>
               <TouchableOpacity
-                style={[styles.gymChip, selectedGymId === null && styles.gymChipActive]}
+                style={[styles.gymChip, { backgroundColor: colors.card, borderColor: selectedGymId === null ? colors.accent : colors.separator }]}
                 onPress={() => setSelectedGymId(null)}
               >
-                <Text style={[styles.gymChipText, selectedGymId === null && styles.gymChipTextActive]}>
-                  Aucune
-                </Text>
+                <Text style={[styles.gymChipText, { color: selectedGymId === null ? colors.accent : colors.textSecondary }]}>Aucune</Text>
               </TouchableOpacity>
               {gyms.map(gym => (
                 <TouchableOpacity
                   key={gym.id}
-                  style={[styles.gymChip, selectedGymId === gym.id && styles.gymChipActive]}
+                  style={[styles.gymChip, { backgroundColor: colors.card, borderColor: selectedGymId === gym.id ? colors.accent : colors.separator }]}
                   onPress={() => setSelectedGymId(gym.id)}
                 >
-                  <Text style={[styles.gymChipText, selectedGymId === gym.id && styles.gymChipTextActive]}>
-                    {gym.name}
-                  </Text>
+                  <Text style={[styles.gymChipText, { color: selectedGymId === gym.id ? colors.accent : colors.textSecondary }]}>{gym.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           </>
         )}
+
         {/* Visibilité */}
         <TouchableOpacity
-          style={styles.visibilityRow}
+          style={[styles.visibilityRow, { backgroundColor: colors.card, borderColor: colors.separator }]}
           onPress={() => setIsPublic(v => !v)}
           activeOpacity={0.7}
         >
           <View style={styles.visibilityInfo}>
-            <Text style={styles.visibilityLabel}>Partager dans le feed</Text>
-            <Text style={styles.visibilitySubLabel}>
+            <Text style={[styles.visibilityLabel, { color: colors.textPrimary }]}>Partager dans le fil</Text>
+            <Text style={[styles.visibilitySub, { color: colors.textSecondary }]}>
               {isPublic ? 'Visible par tes abonnés' : 'Séance privée'}
             </Text>
           </View>
-          <View style={[styles.toggle, isPublic && styles.toggleOn]}>
+          <View style={[styles.toggle, isPublic && { backgroundColor: colors.accent }]}>
             <View style={[styles.toggleKnob, isPublic && styles.toggleKnobOn]} />
           </View>
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Boutons */}
-      <View style={styles.actionsContainer}>
-        <TouchableOpacity style={styles.discardBtn} onPress={handleDiscard}>
-          <Text style={styles.discardBtnText}>Abandonner</Text>
+      <View style={[styles.actions, { borderTopColor: colors.separator }]}>
+        <TouchableOpacity style={[styles.discardBtn, { backgroundColor: colors.backgroundSecondary }]} onPress={handleDiscard}>
+          <Text style={[styles.discardBtnText, { color: colors.textSecondary }]}>Abandonner</Text>
         </TouchableOpacity>
-
         <TouchableOpacity
-          style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+          style={[styles.saveBtn, { backgroundColor: colors.accent }, saving && styles.saveBtnDisabled]}
           onPress={handleSave}
           disabled={saving}
         >
-          {saving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.saveBtnText}>Enregistrer</Text>
-          )}
+          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Enregistrer</Text>}
         </TouchableOpacity>
       </View>
     </View>
   )
 }
 
+// ─── PRRow ────────────────────────────────────────────────────────────────────
+
+const PR_CONFIG = {
+  charge: { icon: Zap, color: '#FFD700', label: 'PR Charge', fill: true },
+  serie:  { icon: Flame, color: '#D85A30', label: 'PR Série', fill: true },
+  '1rm':  { icon: Trophy, color: '#FFD700', label: 'PR 1RM estimé', fill: false },
+}
+
+function PRRow({ pr, colors }: { pr: PREntry; colors: ReturnType<typeof useTheme>['colors'] }) {
+  const cfg = PR_CONFIG[pr.type]
+  const Icon = cfg.icon
+  return (
+    <View style={prStyles.row}>
+      <Icon color={cfg.color} size={16} fill={cfg.fill ? cfg.color : 'none'} />
+      <Text style={[prStyles.label, { color: cfg.color }]}>{cfg.label}</Text>
+      <Text style={[prStyles.exName, { color: colors.textPrimary }]} numberOfLines={1}>{pr.exerciseName}</Text>
+      <Text style={[prStyles.value, { color: colors.textSecondary }]}>
+        {pr.type === 'serie' ? `${Math.round(pr.value)} kg` : `${pr.value.toFixed(1)} kg`}
+      </Text>
+    </View>
+  )
+}
+
+const prStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  label: { fontSize: 12, fontWeight: '700', width: 90 },
+  exName: { flex: 1, fontSize: 13 },
+  value: { fontSize: 13, fontWeight: '600' },
+})
+
 // ─── StatCard ─────────────────────────────────────────────────────────────────
 
-function StatCard({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+function StatCard({ label, value, colors, highlight = false }: {
+  label: string; value: string; colors: ReturnType<typeof useTheme>['colors']; highlight?: boolean
+}) {
   return (
-    <View style={[statStyles.card, highlight && statStyles.cardHighlight]}>
-      <Text style={[statStyles.value, highlight && statStyles.valueHighlight]}>{value}</Text>
-      <Text style={statStyles.label}>{label}</Text>
+    <View style={[
+      statStyles.card,
+      { backgroundColor: colors.card, borderColor: highlight ? colors.prGold + '50' : colors.separator },
+      highlight && { backgroundColor: colors.prGold + '15' },
+    ]}>
+      <Text style={[statStyles.value, { color: highlight ? colors.prGold : colors.textPrimary }]}>{value}</Text>
+      <Text style={[statStyles.label, { color: colors.textSecondary }]}>{label}</Text>
     </View>
   )
 }
 
 const statStyles = StyleSheet.create({
-  card: {
-    flex: 1,
-    backgroundColor: '#111',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: 1,
-    borderColor: '#1A1A1A',
-  },
-  cardHighlight: {
-    backgroundColor: '#FAC77510',
-    borderColor: '#FAC77530',
-  },
-  value: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  valueHighlight: { color: '#FAC775' },
-  label: { color: '#555', fontSize: 11 },
+  card: { flex: 1, borderRadius: 12, padding: 14, alignItems: 'center', gap: 4, borderWidth: 1 },
+  value: { fontSize: 18, fontWeight: '700' },
+  label: { fontSize: 11 },
 })
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-
+  container: { flex: 1 },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 58,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1A1A1A',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 58, paddingHorizontal: 16, paddingBottom: 14, borderBottomWidth: 1,
   },
-  backText: { color: '#D85A30', fontSize: 28, fontWeight: '300', lineHeight: 30 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
-
+  backText: { fontSize: 28, fontWeight: '300', lineHeight: 30 },
+  headerTitle: { fontSize: 18, fontWeight: '700' },
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 24, gap: 8 },
-
   sectionLabel: {
-    color: '#555',
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: 16,
-    marginBottom: 8,
+    fontSize: 12, fontWeight: '600', textTransform: 'uppercase',
+    letterSpacing: 0.5, marginTop: 16, marginBottom: 8,
   },
-
   titleInput: {
-    backgroundColor: '#111',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#1A1A1A',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '600',
+    borderRadius: 12, borderWidth: 1,
+    paddingHorizontal: 16, paddingVertical: 14,
+    fontSize: 17, fontWeight: '600',
   },
-
   statsRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
-
+  prBlock: {
+    borderRadius: 14, borderWidth: 1,
+    paddingHorizontal: 16, paddingVertical: 4,
+  },
   exerciseCard: {
-    backgroundColor: '#111',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#1A1A1A',
-    padding: 14,
-    marginBottom: 8,
-    gap: 4,
+    borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 4, gap: 0,
   },
-  exerciseName: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 6 },
-  setRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3, gap: 8 },
-  setNumber: { color: '#555', fontSize: 13, width: 54 },
-  setData: { color: '#ccc', fontSize: 13, flex: 1 },
-  prBadge: {
-    backgroundColor: '#FAC77520',
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+  exerciseName: { fontSize: 15, fontWeight: '600', marginBottom: 8 },
+  setRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 4, borderTopWidth: StyleSheet.hairlineWidth, gap: 6,
   },
-  prBadgeText: { color: '#FAC775', fontSize: 10, fontWeight: '700' },
-
+  setNumber: { fontSize: 13, width: 54 },
+  setData: { fontSize: 13, flex: 1 },
   gymList: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  gymChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#2A2A2A',
-  },
-  gymChipActive: { backgroundColor: '#D85A3022', borderColor: '#D85A30' },
-  gymChipText: { color: '#888', fontSize: 14 },
-  gymChipTextActive: { color: '#D85A30', fontWeight: '600' },
-
+  gymChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
+  gymChipText: { fontSize: 14 },
   visibilityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#111',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#1A1A1A',
-    padding: 14,
-    marginTop: 8,
-    gap: 12,
+    flexDirection: 'row', alignItems: 'center',
+    borderRadius: 12, borderWidth: 1, padding: 14, marginTop: 4, gap: 12,
   },
   visibilityInfo: { flex: 1, gap: 2 },
-  visibilityLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  visibilitySubLabel: { color: '#555', fontSize: 12 },
+  visibilityLabel: { fontSize: 15, fontWeight: '600' },
+  visibilitySub: { fontSize: 12 },
   toggle: {
-    width: 44,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#2A2A2A',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
+    width: 44, height: 26, borderRadius: 13,
+    backgroundColor: '#2A2A2A', justifyContent: 'center', paddingHorizontal: 3,
   },
-  toggleOn: { backgroundColor: '#D85A30' },
-  toggleKnob: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#555',
-  },
+  toggleKnob: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#555' },
   toggleKnobOn: { backgroundColor: '#fff', alignSelf: 'flex-end' },
-
-  actionsContainer: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#1A1A1A',
-    paddingBottom: 32,
+  actions: {
+    flexDirection: 'row', padding: 16, gap: 12,
+    borderTopWidth: 1, paddingBottom: 32,
   },
-  discardBtn: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 14,
-    backgroundColor: '#1A1A1A',
-    alignItems: 'center',
-  },
-  discardBtnText: { color: '#888', fontSize: 16, fontWeight: '600' },
-  saveBtn: {
-    flex: 2,
-    paddingVertical: 16,
-    borderRadius: 14,
-    backgroundColor: '#D85A30',
-    alignItems: 'center',
-  },
+  discardBtn: { flex: 1, paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
+  discardBtnText: { fontSize: 16, fontWeight: '600' },
+  saveBtn: { flex: 2, paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
   saveBtnDisabled: { opacity: 0.6 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 })

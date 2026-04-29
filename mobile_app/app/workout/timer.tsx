@@ -1,38 +1,51 @@
-/**
- * ORAVA — Session 06
- * app/workout/timer.tsx
- * Timer repos — modal route
- */
-
 import { useEffect, useRef, useState } from 'react'
 import {
-  View, Text, TouchableOpacity, StyleSheet, Vibration, SafeAreaView, AppState,
+  View, Text, TouchableOpacity, StyleSheet, Vibration,
+  AppState, AppStateStatus,
 } from 'react-native'
 import { router } from 'expo-router'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { useTheme } from '../../context/ThemeContext'
 
 // ─── Presets ─────────────────────────────────────────────────────────────────
 
 const PRESETS = [
-  { label: '1:00', seconds: 60 },
-  { label: '1:30', seconds: 90 },
-  { label: '2:00', seconds: 120 },
-  { label: '3:00', seconds: 180 },
+  { label: '45s', seconds: 45 },
+  { label: '60s', seconds: 60 },
+  { label: '90s', seconds: 90 },
+  { label: '120s', seconds: 120 },
 ]
 
-const DEFAULT_SECONDS = 90
+const FACTORY_DEFAULT = 90
 
 // ─── Composant ───────────────────────────────────────────────────────────────
 
 export default function TimerScreen() {
-  const [selected, setSelected] = useState(DEFAULT_SECONDS)
-  const [remaining, setRemaining] = useState(DEFAULT_SECONDS)
+  const { colors } = useTheme()
+  const [selected, setSelected] = useState(FACTORY_DEFAULT)
+  const [remaining, setRemaining] = useState(FACTORY_DEFAULT)
   const [running, setRunning] = useState(false)
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimestampRef = useRef<number | null>(null)
-  const startRemainingRef = useRef<number>(DEFAULT_SECONDS)
+  const startRemainingRef = useRef<number>(FACTORY_DEFAULT)
   const runningRef = useRef(false)
   runningRef.current = running
 
+  // Lire la durée par défaut depuis AsyncStorage et auto-démarrer
+  useEffect(() => {
+    AsyncStorage.getItem('default_rest').then(value => {
+      if (!value || value === 'disabled') return
+      const secs = parseInt(value, 10)
+      if (!isNaN(secs) && secs > 0) {
+        setSelected(secs)
+        setRemaining(secs)
+        setRunning(true)
+      }
+    })
+  }, [])
+
+  // Interval de décompte
   useEffect(() => {
     if (running) {
       startTimestampRef.current = Date.now()
@@ -43,7 +56,7 @@ export default function TimerScreen() {
             clearInterval(intervalRef.current!)
             setRunning(false)
             Vibration.vibrate([0, 300, 150, 300, 150, 500])
-            setTimeout(() => router.back(), 1200)
+            setTimeout(() => router.back(), 1000)
             return 0
           }
           return prev - 1
@@ -55,8 +68,9 @@ export default function TimerScreen() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [running])
 
+  // Résistance mise en fond
   useEffect(() => {
-    const sub = AppState.addEventListener('change', nextState => {
+    const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
       if (nextState === 'active' && runningRef.current && startTimestampRef.current !== null) {
         const elapsed = Math.floor((Date.now() - startTimestampRef.current) / 1000)
         const newRemaining = Math.max(0, startRemainingRef.current - elapsed)
@@ -66,7 +80,7 @@ export default function TimerScreen() {
         if (newRemaining === 0) {
           setRunning(false)
           Vibration.vibrate([0, 300, 150, 300, 150, 500])
-          setTimeout(() => router.back(), 1200)
+          setTimeout(() => router.back(), 1000)
         }
       }
     })
@@ -78,21 +92,8 @@ export default function TimerScreen() {
     setRunning(false)
     setSelected(seconds)
     setRemaining(seconds)
-  }
-
-  function adjust(delta: number) {
-    const next = Math.max(10, remaining + delta)
-    setRemaining(next)
-    if (!running) setSelected(next)
-  }
-
-  function toggle() {
-    if (remaining === 0) {
-      setRemaining(selected)
-      setRunning(true)
-    } else {
-      setRunning(r => !r)
-    }
+    // Auto-start on preset selection
+    setTimeout(() => setRunning(true), 50)
   }
 
   function formatTime(s: number): string {
@@ -101,169 +102,145 @@ export default function TimerScreen() {
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
 
-  const progress = selected > 0 ? remaining / selected : 0
   const isDone = remaining === 0
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.92)' }]}>
       {/* Handle */}
       <View style={styles.handle} />
 
-      <Text style={styles.title}>Repos</Text>
+      <Text style={[styles.title, { color: colors.textPrimary }]}>Repos</Text>
+
+      {/* Cercle principal */}
+      <View style={styles.circleContainer}>
+        {/* SVG-like circle using borders */}
+        <View style={[styles.circleOuter, { borderColor: colors.backgroundSecondary }]}>
+          <View style={[styles.circleInner, {
+            borderColor: isDone ? colors.accent : colors.accent,
+            opacity: isDone ? 0.3 : 1,
+          }]} />
+          <View style={styles.circleContent}>
+            <Text style={[styles.timerText, { color: isDone ? colors.accent : colors.textPrimary }]}>
+              {formatTime(remaining)}
+            </Text>
+            <Text style={[styles.timerHint, { color: colors.textSecondary }]}>
+              {isDone ? 'Terminé !' : running ? 'En cours' : 'Pausé'}
+            </Text>
+          </View>
+        </View>
+      </View>
 
       {/* Presets */}
       <View style={styles.presets}>
         {PRESETS.map(p => (
           <TouchableOpacity
             key={p.seconds}
-            style={[styles.preset, selected === p.seconds && styles.presetActive]}
+            style={[
+              styles.preset,
+              { backgroundColor: colors.card, borderColor: colors.separator },
+              selected === p.seconds && { backgroundColor: colors.accent + '22', borderColor: colors.accent },
+            ]}
             onPress={() => selectPreset(p.seconds)}
           >
-            <Text style={[styles.presetText, selected === p.seconds && styles.presetTextActive]}>
+            <Text style={[
+              styles.presetText,
+              { color: selected === p.seconds ? colors.accent : colors.textSecondary },
+              selected === p.seconds && { fontWeight: '700' },
+            ]}>
               {p.label}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* Adjust + Display */}
-      <View style={styles.timerRow}>
-        <TouchableOpacity style={styles.adjustBtn} onPress={() => adjust(-15)}>
-          <Text style={styles.adjustText}>−15s</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.timerDisplay} onPress={toggle} activeOpacity={0.8}>
-          <Text style={[styles.timerText, isDone && styles.timerTextDone]}>
-            {formatTime(remaining)}
-          </Text>
-          <Text style={styles.timerHint}>
-            {isDone ? 'Terminé !' : running ? 'Appuyer pour pause' : 'Appuyer pour démarrer'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.adjustBtn} onPress={() => adjust(15)}>
-          <Text style={styles.adjustText}>+15s</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Barre de progression */}
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-      </View>
-
-      <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
-        <Text style={styles.closeBtnText}>Fermer</Text>
+      {/* Bouton Arrêter */}
+      <TouchableOpacity
+        style={[styles.stopBtn, { backgroundColor: colors.card }]}
+        onPress={() => router.back()}
+      >
+        <Text style={[styles.stopBtnText, { color: colors.textSecondary }]}>Arrêter</Text>
       </TouchableOpacity>
-    </SafeAreaView>
+    </View>
   )
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
+  overlay: {
     flex: 1,
-    backgroundColor: '#111',
     alignItems: 'center',
-    paddingTop: 12,
-    paddingBottom: 32,
+    paddingTop: 16,
+    paddingBottom: 48,
     paddingHorizontal: 24,
   },
   handle: {
     width: 40,
     height: 4,
-    backgroundColor: '#333',
+    backgroundColor: '#444',
     borderRadius: 2,
-    marginBottom: 24,
+    marginBottom: 20,
   },
   title: {
-    color: '#fff',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    marginBottom: 28,
+    marginBottom: 32,
+    letterSpacing: 0.3,
   },
-  presets: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 48,
-  },
-  preset: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: '#1A1A1A',
-    borderWidth: 1,
-    borderColor: '#2A2A2A',
-  },
-  presetActive: {
-    backgroundColor: '#D85A3022',
-    borderColor: '#D85A30',
-  },
-  presetText: {
-    color: '#888',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  presetTextActive: {
-    color: '#D85A30',
-  },
-  timerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
+  circleContainer: {
     marginBottom: 40,
-  },
-  adjustBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#1A1A1A',
-  },
-  adjustText: {
-    color: '#aaa',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  timerDisplay: {
     alignItems: 'center',
-    minWidth: 130,
+    justifyContent: 'center',
+  },
+  circleOuter: {
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    borderWidth: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  circleInner: {
+    position: 'absolute',
+    width: 204,
+    height: 204,
+    borderRadius: 102,
+    borderWidth: 4,
+  },
+  circleContent: {
+    alignItems: 'center',
+    gap: 6,
   },
   timerText: {
-    color: '#fff',
     fontSize: 64,
     fontWeight: '700',
     letterSpacing: -2,
     fontVariant: ['tabular-nums'],
   },
-  timerTextDone: {
-    color: '#D85A30',
-  },
   timerHint: {
-    color: '#555',
-    fontSize: 12,
-    marginTop: 4,
+    fontSize: 13,
   },
-  progressTrack: {
-    width: '100%',
-    height: 4,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 2,
-    overflow: 'hidden',
+  presets: {
+    flexDirection: 'row',
+    gap: 12,
     marginBottom: 40,
   },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#D85A30',
-    borderRadius: 2,
+  preset: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
   },
-  closeBtn: {
+  presetText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  stopBtn: {
     paddingVertical: 16,
-    paddingHorizontal: 48,
+    paddingHorizontal: 56,
     borderRadius: 14,
-    backgroundColor: '#1A1A1A',
   },
-  closeBtnText: {
-    color: '#fff',
+  stopBtnText: {
     fontSize: 16,
     fontWeight: '600',
   },

@@ -1,56 +1,87 @@
-/**
- * ORAVA — Session 06
- * app/(tabs)/_layout.tsx
- * Navigation tabs + FAB orange centré
- */
-
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
+import { useState } from 'react'
+import { View, Text, TouchableOpacity, Modal, StyleSheet } from 'react-native'
 import { Tabs, router } from 'expo-router'
+import { Users, Dumbbell, CirclePlus, CalendarDays, CircleUser } from 'lucide-react-native'
 import { useWorkout } from '../../context/WorkoutContext'
+import { useTheme } from '../../context/ThemeContext'
 
 // ─── FAB ─────────────────────────────────────────────────────────────────────
 
 function FABButton() {
   const workout = useWorkout()
+  const { colors } = useTheme()
+  const [showConfirm, setShowConfirm] = useState(false)
 
   function handlePress() {
     if (workout.status === 'active') {
-      // Reprendre la séance en cours
       router.push('/workout/session')
     } else {
-      router.push('/workout/session')
+      setShowConfirm(true)
     }
   }
 
+  function handleConfirm() {
+    setShowConfirm(false)
+    router.push('/workout/session')
+  }
+
   return (
-    <TouchableOpacity style={styles.fabWrapper} onPress={handlePress} activeOpacity={0.85}>
-      <View style={styles.fab}>
-        <Text style={styles.fabIcon}>+</Text>
-        {workout.status === 'active' && <View style={styles.activeDot} />}
-      </View>
-    </TouchableOpacity>
+    <>
+      <TouchableOpacity style={styles.fabWrapper} onPress={handlePress} activeOpacity={0.85}>
+        <View style={styles.fab}>
+          <CirclePlus color="#fff" size={28} strokeWidth={1.8} />
+          {workout.status === 'active' && (
+            <View style={[styles.activeDot, { borderColor: colors.background }]} />
+          )}
+        </View>
+      </TouchableOpacity>
+
+      <Modal
+        visible={showConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Lancer une séance ?</Text>
+            <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
+              Ton timer et tes sets seront enregistrés.
+            </Text>
+            <TouchableOpacity style={styles.modalBtnPrimary} onPress={handleConfirm}>
+              <Text style={styles.modalBtnPrimaryText}>Commencer</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalBtnSecondary} onPress={() => setShowConfirm(false)}>
+              <Text style={[styles.modalBtnSecondaryText, { color: colors.textSecondary }]}>Annuler</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </>
   )
 }
 
 // ─── Layout ──────────────────────────────────────────────────────────────────
 
 export default function TabsLayout() {
+  const { colors } = useTheme()
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarActiveTintColor: '#D85A30',
-        tabBarInactiveTintColor: '#666',
-        tabBarLabelStyle: styles.tabLabel,
+        tabBarStyle: { backgroundColor: colors.background, borderTopColor: colors.separator, height: 80, paddingBottom: 16 },
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.textSecondary,
+        tabBarLabelStyle: { fontSize: 10 },
       }}
     >
       <Tabs.Screen
         name="feed"
         options={{
-          title: 'Feed',
-          tabBarLabel: 'Feed',
-          tabBarIcon: ({ color }) => <TabIcon label="◎" color={color} />,
+          title: 'Fil',
+          tabBarLabel: 'Fil',
+          tabBarIcon: ({ color, size }) => <Users color={color} size={size - 2} />,
         }}
       />
       <Tabs.Screen
@@ -58,7 +89,7 @@ export default function TabsLayout() {
         options={{
           title: 'Historique',
           tabBarLabel: 'Historique',
-          tabBarIcon: ({ color }) => <TabIcon label="◷" color={color} />,
+          tabBarIcon: ({ color, size }) => <CalendarDays color={color} size={size - 2} />,
         }}
       />
       <Tabs.Screen
@@ -74,7 +105,7 @@ export default function TabsLayout() {
         options={{
           title: 'Bibliothèque',
           tabBarLabel: 'Biblio.',
-          tabBarIcon: ({ color }) => <TabIcon label="☰" color={color} />,
+          tabBarIcon: ({ color, size }) => <Dumbbell color={color} size={size - 2} />,
         }}
       />
       <Tabs.Screen
@@ -82,29 +113,16 @@ export default function TabsLayout() {
         options={{
           title: 'Profil',
           tabBarLabel: 'Profil',
-          tabBarIcon: ({ color }) => <TabIcon label="◯" color={color} />,
+          tabBarIcon: ({ color, size }) => <CircleUser color={color} size={size - 2} />,
         }}
       />
     </Tabs>
   )
 }
 
-function TabIcon({ label, color }: { label: string; color: string }) {
-  return <Text style={{ color, fontSize: 18 }}>{label}</Text>
-}
-
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  tabBar: {
-    backgroundColor: '#0F0F0F',
-    borderTopColor: '#1C1C1C',
-    height: 80,
-    paddingBottom: 16,
-  },
-  tabLabel: {
-    fontSize: 10,
-  },
   fabWrapper: {
     flex: 1,
     alignItems: 'center',
@@ -124,13 +142,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  fabIcon: {
-    color: '#fff',
-    fontSize: 30,
-    fontWeight: '300',
-    lineHeight: 34,
-    marginTop: -2,
-  },
   activeDot: {
     position: 'absolute',
     top: 6,
@@ -140,6 +151,49 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: '#FAC775',
     borderWidth: 2,
-    borderColor: '#0F0F0F',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  modalCard: {
+    width: '100%',
+    borderRadius: 20,
+    padding: 24,
+    gap: 12,
+    alignItems: 'stretch',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  modalBtnPrimary: {
+    backgroundColor: '#D85A30',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  modalBtnPrimaryText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  modalBtnSecondary: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalBtnSecondaryText: {
+    fontSize: 15,
+    fontWeight: '500',
   },
 })

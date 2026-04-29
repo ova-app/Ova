@@ -1,45 +1,215 @@
-/**
- * ORAVA — Session 06
- * app/workout/session.tsx
- * Écran de log de séance
- */
-
 import { useEffect, useRef, useState } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   TextInput, Modal, ActivityIndicator, Alert, ScrollView,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, NativeScrollEvent, NativeSyntheticEvent,
 } from 'react-native'
 import { router } from 'expo-router'
 import { supabase } from '../../lib/supabase'
 import { useWorkout, WorkoutExercise, WorkoutSet } from '../../context/WorkoutContext'
+import { useTheme } from '../../context/ThemeContext'
+import { Zap, Flame } from 'lucide-react-native'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ExerciseResult {
   id: string
-  name: string
+  name_fr: string
   muscle_group: string | null
-  equipment: string | null
+  equipment_type: string | null
 }
 
-// ─── Constantes ──────────────────────────────────────────────────────────────
+// ─── Picker wheel helpers ─────────────────────────────────────────────────────
 
-const EQUIPMENT_SHORT: Record<string, string> = {
-  barbell: 'Barre', dumbbell: 'Haltères', machine: 'Machine',
-  cable: 'Poulie', bodyweight: 'Poids corps', kettlebell: 'KB',
-  band: 'Élastique', other: 'Autre',
+function generateWeightValues(equipmentType: string | null): number[] {
+  switch (equipmentType) {
+    case 'halteres':
+      return Array.from({ length: 30 }, (_, i) => (i + 1) * 2)           // 2..60
+    case 'poulie':
+      return Array.from({ length: 40 }, (_, i) => (i + 1) * 2.5)         // 2.5..100
+    case 'machine':
+      return Array.from({ length: 80 }, (_, i) => (i + 1) * 2.5)         // 2.5..200
+    case 'smith':
+      return Array.from({ length: 60 }, (_, i) => (i + 1) * 2.5)         // 2.5..150
+    case 'kettlebell':
+      return Array.from({ length: 12 }, (_, i) => (i + 1) * 4)           // 4..48
+    case 'barre': {
+      const plates = [0, 1.25, 2.5, 5, 10, 20]
+      const weights = new Set<number>()
+      for (let i = 0; i < plates.length; i++) {
+        for (let j = 0; j < plates.length; j++) {
+          for (let k = 0; k < plates.length; k++) {
+            const perSide = plates[i] + plates[j] + plates[k]
+            const total = 20 + perSide * 2
+            if (total <= 220) weights.add(Math.round(total * 100) / 100)
+          }
+        }
+      }
+      return Array.from(weights).sort((a, b) => a - b)
+    }
+    default:
+      return Array.from({ length: 80 }, (_, i) => (i + 1) * 2.5)
+  }
 }
 
-// ─── Composant ───────────────────────────────────────────────────────────────
+function formatWeight(v: number): string {
+  return v % 1 === 0 ? String(v) : v.toFixed(1)
+}
+
+const ITEM_HEIGHT = 48
+
+// ─── ScrollPicker ─────────────────────────────────────────────────────────────
+
+interface ScrollPickerProps {
+  values: number[]
+  selected: number
+  onSelect: (v: number) => void
+  colors: ReturnType<typeof useTheme>['colors']
+  label: string
+  barreSubLabel?: string | null
+}
+
+function ScrollPicker({ values, selected, onSelect, colors, label, barreSubLabel }: ScrollPickerProps) {
+  const scrollRef = useRef<ScrollView>(null)
+  const selectedIdx = Math.max(0, values.indexOf(selected))
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: selectedIdx * ITEM_HEIGHT, animated: false })
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [values])
+
+  function handleScrollEnd(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    const y = e.nativeEvent.contentOffset.y
+    const idx = Math.round(y / ITEM_HEIGHT)
+    const clamped = Math.max(0, Math.min(idx, values.length - 1))
+    onSelect(values[clamped])
+    scrollRef.current?.scrollTo({ y: clamped * ITEM_HEIGHT, animated: true })
+  }
+
+  return (
+    <View style={pickerStyles.container}>
+      <Text style={[pickerStyles.label, { color: colors.textSecondary }]}>{label}</Text>
+      <View style={[pickerStyles.wheel, { borderColor: colors.separator }]}>
+        {/* Selection highlight */}
+        <View style={[pickerStyles.highlight, { borderColor: colors.accent, backgroundColor: colors.accent + '15' }]} />
+        <ScrollView
+          ref={scrollRef}
+          showsVerticalScrollIndicator={false}
+          snapToInterval={ITEM_HEIGHT}
+          decelerationRate="fast"
+          onMomentumScrollEnd={handleScrollEnd}
+          contentContainerStyle={{ paddingVertical: ITEM_HEIGHT * 2 }}
+        >
+          {values.map((v, idx) => {
+            const isSelected = v === selected
+            return (
+              <TouchableOpacity
+                key={v}
+                style={pickerStyles.item}
+                onPress={() => {
+                  onSelect(v)
+                  scrollRef.current?.scrollTo({ y: idx * ITEM_HEIGHT, animated: true })
+                }}
+              >
+                <Text style={[
+                  pickerStyles.itemText,
+                  { color: isSelected ? colors.accent : colors.textSecondary },
+                  isSelected && pickerStyles.itemTextSelected,
+                ]}>
+                  {formatWeight(v)}
+                </Text>
+              </TouchableOpacity>
+            )
+          })}
+        </ScrollView>
+      </View>
+      {barreSubLabel && (
+        <Text style={[pickerStyles.subLabel, { color: colors.textSecondary }]}>{barreSubLabel}</Text>
+      )}
+    </View>
+  )
+}
+
+const pickerStyles = StyleSheet.create({
+  container: { flex: 1, alignItems: 'center', gap: 6 },
+  label: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  wheel: {
+    width: '100%',
+    height: ITEM_HEIGHT * 5,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    position: 'relative',
+  },
+  highlight: {
+    position: 'absolute',
+    top: ITEM_HEIGHT * 2,
+    left: 0,
+    right: 0,
+    height: ITEM_HEIGHT,
+    zIndex: 1,
+    pointerEvents: 'none',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+  },
+  item: { height: ITEM_HEIGHT, alignItems: 'center', justifyContent: 'center' },
+  itemText: { fontSize: 20, fontVariant: ['tabular-nums'] },
+  itemTextSelected: { fontSize: 24, fontWeight: '700' },
+  subLabel: { fontSize: 11, textAlign: 'center' },
+})
+
+// ─── Reps stepper ─────────────────────────────────────────────────────────────
+
+interface RepsStepperProps {
+  value: number
+  onChange: (v: number) => void
+  colors: ReturnType<typeof useTheme>['colors']
+}
+
+function RepsStepper({ value, onChange, colors }: RepsStepperProps) {
+  return (
+    <View style={repsStyles.container}>
+      <Text style={[repsStyles.label, { color: colors.textSecondary }]}>REPS</Text>
+      <View style={repsStyles.stepper}>
+        <TouchableOpacity
+          style={[repsStyles.btn, { backgroundColor: colors.backgroundSecondary }]}
+          onPress={() => onChange(Math.max(0, value - 1))}
+        >
+          <Text style={[repsStyles.btnText, { color: colors.textPrimary }]}>−</Text>
+        </TouchableOpacity>
+        <Text style={[repsStyles.value, { color: colors.textPrimary }]}>{value}</Text>
+        <TouchableOpacity
+          style={[repsStyles.btn, { backgroundColor: colors.backgroundSecondary }]}
+          onPress={() => onChange(value + 1)}
+        >
+          <Text style={[repsStyles.btnText, { color: colors.textPrimary }]}>+</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
+}
+
+const repsStyles = StyleSheet.create({
+  container: { flex: 1, alignItems: 'center', gap: 6 },
+  label: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 0 },
+  btn: { width: 48, height: ITEM_HEIGHT * 5, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
+  btnText: { fontSize: 28, fontWeight: '300' },
+  value: { fontSize: 40, fontWeight: '700', minWidth: 64, textAlign: 'center', fontVariant: ['tabular-nums'] },
+})
+
+// ─── Composant principal ──────────────────────────────────────────────────────
 
 export default function WorkoutSessionScreen() {
+  const { colors } = useTheme()
   const workout = useWorkout()
   const [showPicker, setShowPicker] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<ExerciseResult[]>([])
   const [searching, setSearching] = useState(false)
-  const [prFlash, setPrFlash] = useState(false)
+  const [prFlash, setPrFlash] = useState<{ isPrCharge: boolean; isPrSerie: boolean; isPr1rm: boolean } | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Démarrage automatique si on arrive depuis le FAB
@@ -48,15 +218,23 @@ export default function WorkoutSessionScreen() {
     else if (workout.status === 'done') router.replace('/workout/summary')
   }, [])
 
-  // ─── Exercice courant ─────────────────────────────────────────────────────
-
-  const currentExercise: WorkoutExercise | null =
-    workout.exercises[workout.currentIndex] ?? null
-
+  const currentExercise: WorkoutExercise | null = workout.exercises[workout.currentIndex] ?? null
   const validatedSets = currentExercise?.sets.filter(s => s.validated) ?? []
   const draft = currentExercise?.sets.find(s => !s.validated) ?? null
 
-  // ─── Chrono ──────────────────────────────────────────────────────────────
+  const weightValues = generateWeightValues(currentExercise?.equipment_type ?? null)
+  const isBodyweight = currentExercise?.equipment_type === 'poids_corps'
+
+  // Barbell subtitle
+  const barreSubLabel = currentExercise?.equipment_type === 'barre' && draft
+    ? (() => {
+        const disques = (draft.weight_kg - 20) / 2
+        if (disques <= 0) return 'Barre 20 kg seule'
+        return `Barre 20 kg + ${formatWeight(disques)} kg de chaque côté`
+      })()
+    : null
+
+  // ─── Chrono ────────────────────────────────────────────────────────────────
 
   function formatChrono(s: number): string {
     const h = Math.floor(s / 3600)
@@ -66,14 +244,10 @@ export default function WorkoutSessionScreen() {
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
 
-  // ─── Recherche exercice ───────────────────────────────────────────────────
+  // ─── Recherche exercice ────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!showPicker) {
-      setSearchQuery('')
-      setSearchResults([])
-      return
-    }
+    if (!showPicker) { setSearchQuery(''); setSearchResults([]); return }
     fetchExercises('')
   }, [showPicker])
 
@@ -88,51 +262,50 @@ export default function WorkoutSessionScreen() {
     setSearching(true)
     let query = supabase
       .from('exercises')
-      .select(`
-        id, name, equipment,
-        exercise_muscles!inner ( role, muscles ( muscle_group ) )
-      `)
-      .eq('exercise_muscles.role', 'primary')
-      .order('name')
-      .limit(30)
+      .select('id, name_fr, equipment_type, muscle_group')
+      .order('name_fr')
+      .limit(40)
 
-    if (q.trim().length > 0) {
-      query = query.ilike('name', `%${q.trim()}%`)
-    }
+    if (q.trim().length > 0) query = query.ilike('name_fr', `%${q.trim()}%`)
 
     const { data } = await query
     setSearching(false)
 
     const results: ExerciseResult[] = (data ?? []).map((ex: any) => ({
       id: ex.id,
-      name: ex.name,
-      equipment: ex.equipment,
-      muscle_group: ex.exercise_muscles?.[0]?.muscles?.muscle_group ?? null,
+      name_fr: ex.name_fr,
+      equipment_type: ex.equipment_type,
+      muscle_group: ex.muscle_group ?? null,
     }))
-
     setSearchResults(results)
   }
 
   async function handleSelectExercise(ex: ExerciseResult) {
     setShowPicker(false)
-    await workout.addExercise(ex.id, ex.name, ex.muscle_group)
+    await workout.addExercise(ex.id, ex.name_fr, ex.muscle_group, ex.equipment_type)
   }
 
-  // ─── Validation série ─────────────────────────────────────────────────────
+  // ─── Validation série ──────────────────────────────────────────────────────
 
   function handleValidate() {
-    if (!draft || draft.weight_kg <= 0 || draft.reps <= 0) {
-      Alert.alert('Série incomplète', 'Saisis un poids et un nombre de répétitions.')
+    if (!draft || draft.reps <= 0) {
+      Alert.alert('Série incomplète', 'Saisis un nombre de répétitions.')
       return
     }
-    const isPr = workout.validateSet(workout.currentIndex)
-    if (isPr) {
-      setPrFlash(true)
-      setTimeout(() => setPrFlash(false), 2000)
+    if (!isBodyweight && draft.weight_kg <= 0) {
+      Alert.alert('Série incomplète', 'Saisis un poids.')
+      return
     }
+    const result = workout.validateSet(workout.currentIndex)
+    if (result.isPrCharge || result.isPrSerie || result.isPr1rm) {
+      setPrFlash(result)
+      setTimeout(() => setPrFlash(null), 2500)
+    }
+    // Auto-launch rest timer after set validation
+    router.push('/workout/timer')
   }
 
-  // ─── Fin de séance ────────────────────────────────────────────────────────
+  // ─── Fin de séance ─────────────────────────────────────────────────────────
 
   function handleFinish() {
     const totalValidated = workout.exercises.reduce(
@@ -141,13 +314,10 @@ export default function WorkoutSessionScreen() {
     if (totalValidated === 0) {
       Alert.alert(
         'Aucune série enregistrée',
-        'Tu n\'as validé aucune série. Abandonner la séance ?',
+        "Tu n'as validé aucune série. Abandonner la séance ?",
         [
           { text: 'Continuer', style: 'cancel' },
-          {
-            text: 'Abandonner', style: 'destructive',
-            onPress: () => { workout.resetWorkout(); router.back() }
-          },
+          { text: 'Abandonner', style: 'destructive', onPress: () => { workout.resetWorkout(); router.back() } },
         ]
       )
       return
@@ -156,27 +326,25 @@ export default function WorkoutSessionScreen() {
     router.push('/workout/summary')
   }
 
-  // ─── Rendu ensemble vide ──────────────────────────────────────────────────
+  // ─── État vide ────────────────────────────────────────────────────────────
 
   if (workout.exercises.length === 0) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.chrono}>{formatChrono(workout.elapsedSeconds)}</Text>
-          <TouchableOpacity style={styles.finishBtn} onPress={handleFinish}>
-            <Text style={styles.finishBtnText}>Fin</Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.header, { borderBottomColor: colors.separator }]}>
+          <Text style={[styles.chrono, { color: colors.textPrimary }]}>{formatChrono(workout.elapsedSeconds)}</Text>
+          <TouchableOpacity style={[styles.finishBtn, { backgroundColor: colors.accent }]} onPress={handleFinish}>
+            <Text style={styles.finishBtnText}>Terminer</Text>
           </TouchableOpacity>
         </View>
-
         <View style={styles.emptyState}>
           <Text style={styles.emptyIcon}>💪</Text>
-          <Text style={styles.emptyTitle}>Aucun exercice</Text>
-          <Text style={styles.emptySubtitle}>Ajoute ton premier exercice pour commencer</Text>
-          <TouchableOpacity style={styles.addFirstBtn} onPress={() => setShowPicker(true)}>
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Aucun exercice</Text>
+          <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>Ajoute ton premier exercice pour commencer</Text>
+          <TouchableOpacity style={[styles.addFirstBtn, { backgroundColor: colors.accent }]} onPress={() => setShowPicker(true)}>
             <Text style={styles.addFirstBtnText}>+ Ajouter un exercice</Text>
           </TouchableOpacity>
         </View>
-
         <ExercisePicker
           visible={showPicker}
           query={searchQuery}
@@ -185,6 +353,7 @@ export default function WorkoutSessionScreen() {
           onChangeQuery={setSearchQuery}
           onSelect={handleSelectExercise}
           onClose={() => setShowPicker(false)}
+          colors={colors}
         />
       </View>
     )
@@ -194,68 +363,60 @@ export default function WorkoutSessionScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.chrono}>{formatChrono(workout.elapsedSeconds)}</Text>
+      <View style={[styles.header, { borderBottomColor: colors.separator }]}>
+        <Text style={[styles.chrono, { color: colors.textPrimary }]}>{formatChrono(workout.elapsedSeconds)}</Text>
         <TouchableOpacity
-          style={styles.timerBtn}
+          style={[styles.timerBtn, { backgroundColor: colors.backgroundSecondary }]}
           onPress={() => router.push('/workout/timer')}
         >
           <Text style={styles.timerBtnText}>⏱</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.finishBtn} onPress={handleFinish}>
-          <Text style={styles.finishBtnText}>Fin</Text>
+        <TouchableOpacity style={[styles.finishBtn, { backgroundColor: colors.accent }]} onPress={handleFinish}>
+          <Text style={styles.finishBtnText}>Terminer</Text>
         </TouchableOpacity>
       </View>
 
       {/* Navigation exercice */}
-      <View style={styles.exerciseNav}>
+      <View style={[styles.exerciseNav, { borderBottomColor: colors.separator }]}>
         <TouchableOpacity
           style={[styles.navBtn, workout.currentIndex === 0 && styles.navBtnDisabled]}
           onPress={() => workout.setCurrentIndex(workout.currentIndex - 1)}
           disabled={workout.currentIndex === 0}
         >
-          <Text style={styles.navBtnText}>‹</Text>
+          <Text style={[styles.navBtnText, { color: colors.accent }]}>‹</Text>
         </TouchableOpacity>
-
         <View style={styles.exerciseTitleContainer}>
-          <Text style={styles.exerciseName} numberOfLines={1}>
+          <Text style={[styles.exerciseName, { color: colors.textPrimary }]} numberOfLines={1}>
             {currentExercise?.name}
           </Text>
-          <Text style={styles.exerciseCounter}>
+          <Text style={[styles.exerciseCounter, { color: colors.textSecondary }]}>
             {workout.currentIndex + 1} / {workout.exercises.length}
           </Text>
         </View>
-
         <TouchableOpacity
-          style={[
-            styles.navBtn,
-            workout.currentIndex === workout.exercises.length - 1 && styles.navBtnDisabled,
-          ]}
+          style={[styles.navBtn, workout.currentIndex === workout.exercises.length - 1 && styles.navBtnDisabled]}
           onPress={() => workout.setCurrentIndex(workout.currentIndex + 1)}
           disabled={workout.currentIndex === workout.exercises.length - 1}
         >
-          <Text style={styles.navBtnText}>›</Text>
+          <Text style={[styles.navBtnText, { color: colors.accent }]}>›</Text>
         </TouchableOpacity>
       </View>
 
       {/* Séries validées */}
-      <ScrollView
-        style={styles.setsScroll}
-        contentContainerStyle={styles.setsContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView style={styles.setsScroll} contentContainerStyle={styles.setsContent} showsVerticalScrollIndicator={false}>
         {validatedSets.length === 0 ? (
-          <Text style={styles.noSetsText}>Première série — c'est parti !</Text>
+          <Text style={[styles.noSetsText, { color: colors.textSecondary }]}>Première série — c'est parti !</Text>
         ) : (
           validatedSets.map((set, idx) => (
             <SetRow
               key={idx}
               set={set}
               onRemove={() => workout.removeSet(workout.currentIndex, idx)}
+              colors={colors}
             />
           ))
         )}
@@ -264,75 +425,68 @@ export default function WorkoutSessionScreen() {
       {/* PR Flash */}
       {prFlash && (
         <View style={styles.prFlashBanner}>
-          <Text style={styles.prFlashText}>🏆 Nouveau PR !</Text>
+          {prFlash.isPrCharge && (
+            <View style={styles.prFlashItem}>
+              <Zap color="#FFD700" size={16} fill="#FFD700" />
+              <Text style={[styles.prFlashText, { color: '#FFD700' }]}>PR Charge !</Text>
+            </View>
+          )}
+          {prFlash.isPrSerie && (
+            <View style={styles.prFlashItem}>
+              <Flame color="#D85A30" size={16} fill="#D85A30" />
+              <Text style={[styles.prFlashText, { color: '#D85A30' }]}>PR Série !</Text>
+            </View>
+          )}
+          {prFlash.isPr1rm && (
+            <View style={styles.prFlashItem}>
+              <Text style={[styles.prFlashText, { color: '#FFD700' }]}>🏆 PR 1RM !</Text>
+            </View>
+          )}
         </View>
       )}
 
-      {/* Série en cours (draft) */}
+      {/* Série en cours */}
       {draft && (
-        <View style={styles.draftContainer}>
-          <Text style={styles.draftLabel}>Série {draft.set_number}</Text>
+        <View style={[styles.draftContainer, { backgroundColor: colors.backgroundSecondary, borderTopColor: colors.separator }]}>
+          <Text style={[styles.draftLabel, { color: colors.textSecondary }]}>Série {draft.set_number}</Text>
 
-          <View style={styles.stepperRow}>
-            {/* Poids */}
-            <View style={styles.stepperGroup}>
-              <Text style={styles.stepperLabel}>Poids (kg)</Text>
-              <View style={styles.stepper}>
-                <TouchableOpacity
-                  style={styles.stepBtn}
-                  onPress={() => workout.updateDraftSet(workout.currentIndex, 'weight_kg', draft.weight_kg - 2.5)}
-                >
-                  <Text style={styles.stepBtnText}>−</Text>
-                </TouchableOpacity>
-                <Text style={styles.stepValue}>
-                  {draft.weight_kg % 1 === 0 ? draft.weight_kg : draft.weight_kg.toFixed(1)}
-                </Text>
-                <TouchableOpacity
-                  style={styles.stepBtn}
-                  onPress={() => workout.updateDraftSet(workout.currentIndex, 'weight_kg', draft.weight_kg + 2.5)}
-                >
-                  <Text style={styles.stepBtnText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.stepperDivider} />
-
-            {/* Reps */}
-            <View style={styles.stepperGroup}>
-              <Text style={styles.stepperLabel}>Répétitions</Text>
-              <View style={styles.stepper}>
-                <TouchableOpacity
-                  style={styles.stepBtn}
-                  onPress={() => workout.updateDraftSet(workout.currentIndex, 'reps', draft.reps - 1)}
-                >
-                  <Text style={styles.stepBtnText}>−</Text>
-                </TouchableOpacity>
-                <Text style={styles.stepValue}>{draft.reps}</Text>
-                <TouchableOpacity
-                  style={styles.stepBtn}
-                  onPress={() => workout.updateDraftSet(workout.currentIndex, 'reps', draft.reps + 1)}
-                >
-                  <Text style={styles.stepBtnText}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+          <View style={styles.inputsRow}>
+            {!isBodyweight ? (
+              <ScrollPicker
+                values={weightValues}
+                selected={draft.weight_kg || weightValues[0]}
+                onSelect={v => workout.updateDraftSet(workout.currentIndex, 'weight_kg', v)}
+                colors={colors}
+                label="Poids (kg)"
+                barreSubLabel={barreSubLabel}
+              />
+            ) : (
+              <View style={{ flex: 1 }} />
+            )}
+            <View style={[styles.divider, { backgroundColor: colors.separator }]} />
+            <RepsStepper
+              value={draft.reps}
+              onChange={v => workout.updateDraftSet(workout.currentIndex, 'reps', v)}
+              colors={colors}
+            />
           </View>
 
-          <TouchableOpacity style={styles.validateBtn} onPress={handleValidate}>
+          <TouchableOpacity style={[styles.validateBtn, { backgroundColor: colors.accent }]} onPress={handleValidate}>
             <Text style={styles.validateBtnText}>✓  Valider la série</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* Pied : ajouter exercice */}
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.addExerciseBtn} onPress={() => setShowPicker(true)}>
-          <Text style={styles.addExerciseBtnText}>+ Ajouter un exercice</Text>
+      {/* Footer */}
+      <View style={[styles.footer, { borderTopColor: colors.separator }]}>
+        <TouchableOpacity
+          style={[styles.addExerciseBtn, { backgroundColor: colors.backgroundSecondary }]}
+          onPress={() => setShowPicker(true)}
+        >
+          <Text style={[styles.addExerciseBtnText, { color: colors.textSecondary }]}>+ Ajouter un exercice</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Modal sélection exercice */}
       <ExercisePicker
         visible={showPicker}
         query={searchQuery}
@@ -341,6 +495,7 @@ export default function WorkoutSessionScreen() {
         onChangeQuery={setSearchQuery}
         onSelect={handleSelectExercise}
         onClose={() => setShowPicker(false)}
+        colors={colors}
       />
     </KeyboardAvoidingView>
   )
@@ -348,20 +503,24 @@ export default function WorkoutSessionScreen() {
 
 // ─── SetRow ──────────────────────────────────────────────────────────────────
 
-function SetRow({ set, onRemove }: { set: WorkoutSet; onRemove: () => void }) {
+function SetRow({ set, onRemove, colors }: { set: WorkoutSet; onRemove: () => void; colors: ReturnType<typeof useTheme>['colors'] }) {
   return (
-    <View style={setStyles.row}>
-      <Text style={setStyles.number}>Série {set.set_number}</Text>
-      <Text style={setStyles.data}>
-        {set.weight_kg % 1 === 0 ? set.weight_kg : set.weight_kg.toFixed(1)} kg × {set.reps} reps
+    <View style={[setStyles.row, { borderBottomColor: colors.separator }]}>
+      <Text style={[setStyles.number, { color: colors.textSecondary }]}>Série {set.set_number}</Text>
+      <Text style={[setStyles.data, { color: colors.textPrimary }]}>
+        {set.weight_kg > 0
+          ? `${formatWeight(set.weight_kg)} kg × ${set.reps} reps`
+          : `${set.reps} reps`}
       </Text>
-      {set.is_pr && (
+      {set.pr_charge && <Zap color="#FFD700" size={14} fill="#FFD700" />}
+      {set.pr_serie && <Flame color="#D85A30" size={14} fill="#D85A30" />}
+      {set.is_pr && !set.pr_charge && !set.pr_serie && (
         <View style={setStyles.prBadge}>
           <Text style={setStyles.prBadgeText}>PR</Text>
         </View>
       )}
       <TouchableOpacity style={setStyles.deleteBtn} onPress={onRemove} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-        <Text style={setStyles.deleteText}>×</Text>
+        <Text style={[setStyles.deleteText, { color: colors.textSecondary }]}>×</Text>
       </TouchableOpacity>
     </View>
   )
@@ -374,22 +533,14 @@ const setStyles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1A1A1A',
     gap: 8,
   },
-  number: { color: '#555', fontSize: 13, width: 54 },
-  data: { color: '#ccc', fontSize: 15, fontWeight: '500', flex: 1 },
-  prBadge: {
-    backgroundColor: '#FAC77520',
-    borderWidth: 1,
-    borderColor: '#FAC77540',
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
+  number: { fontSize: 13, width: 54 },
+  data: { fontSize: 15, fontWeight: '500', flex: 1 },
+  prBadge: { backgroundColor: '#FAC77520', borderWidth: 1, borderColor: '#FAC77540', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
   prBadgeText: { color: '#FAC775', fontSize: 11, fontWeight: '700' },
   deleteBtn: { paddingHorizontal: 4 },
-  deleteText: { color: '#444', fontSize: 20, lineHeight: 22 },
+  deleteText: { fontSize: 20, lineHeight: 22 },
 })
 
 // ─── ExercisePicker ──────────────────────────────────────────────────────────
@@ -402,49 +553,50 @@ interface ExercisePickerProps {
   onChangeQuery: (q: string) => void
   onSelect: (ex: ExerciseResult) => void
   onClose: () => void
+  colors: ReturnType<typeof useTheme>['colors']
 }
 
-function ExercisePicker({
-  visible, query, results, searching, onChangeQuery, onSelect, onClose,
-}: ExercisePickerProps) {
+const EQUIPMENT_SHORT: Record<string, string> = {
+  barre: 'Barre', halteres: 'Haltères', machine: 'Machine',
+  poulie: 'Poulie', poids_corps: 'Poids du corps', kettlebell: 'KB', smith: 'Smith',
+}
+
+function ExercisePicker({ visible, query, results, searching, onChangeQuery, onSelect, onClose, colors }: ExercisePickerProps) {
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={pickerStyles.container}>
-        <View style={pickerStyles.header}>
-          <Text style={pickerStyles.title}>Exercice</Text>
+      <View style={[pStyles.container, { backgroundColor: colors.background }]}>
+        <View style={[pStyles.header, { borderBottomColor: colors.separator }]}>
+          <Text style={[pStyles.title, { color: colors.textPrimary }]}>Exercice</Text>
           <TouchableOpacity onPress={onClose}>
-            <Text style={pickerStyles.closeText}>Annuler</Text>
+            <Text style={[pStyles.closeText, { color: colors.accent }]}>Annuler</Text>
           </TouchableOpacity>
         </View>
-
         <TextInput
-          style={pickerStyles.search}
+          style={[pStyles.search, { backgroundColor: colors.backgroundSecondary, color: colors.textPrimary }]}
           placeholder="Rechercher..."
-          placeholderTextColor="#555"
+          placeholderTextColor={colors.textSecondary}
           value={query}
           onChangeText={onChangeQuery}
           autoFocus
           clearButtonMode="while-editing"
         />
-
         {searching ? (
-          <ActivityIndicator color="#D85A30" style={{ marginTop: 40 }} />
+          <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
         ) : (
           <FlatList
             data={results}
             keyExtractor={item => item.id}
             keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
-              <TouchableOpacity style={pickerStyles.row} onPress={() => onSelect(item)}>
-                <Text style={pickerStyles.rowName}>{item.name}</Text>
-                {item.equipment && (
-                  <Text style={pickerStyles.rowSub}>
-                    {EQUIPMENT_SHORT[item.equipment] ?? item.equipment}
+              <TouchableOpacity style={[pStyles.row, { borderBottomColor: colors.separator }]} onPress={() => onSelect(item)}>
+                <Text style={[pStyles.rowName, { color: colors.textPrimary }]}>{item.name_fr}</Text>
+                {item.equipment_type && (
+                  <Text style={[pStyles.rowSub, { color: colors.textSecondary }]}>
+                    {EQUIPMENT_SHORT[item.equipment_type] ?? item.equipment_type}
                   </Text>
                 )}
               </TouchableOpacity>
             )}
-            ItemSeparatorComponent={() => <View style={pickerStyles.separator} />}
             contentContainerStyle={{ paddingBottom: 40 }}
           />
         )}
@@ -453,8 +605,8 @@ function ExercisePicker({
   )
 }
 
-const pickerStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+const pStyles = StyleSheet.create({
+  container: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -462,30 +614,27 @@ const pickerStyles = StyleSheet.create({
     paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 16,
+    borderBottomWidth: 1,
   },
-  title: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  closeText: { color: '#D85A30', fontSize: 16 },
+  title: { fontSize: 20, fontWeight: '700' },
+  closeText: { fontSize: 16 },
   search: {
-    backgroundColor: '#1A1A1A',
     marginHorizontal: 16,
-    marginBottom: 8,
+    marginVertical: 10,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: '#fff',
     fontSize: 15,
   },
-  row: { paddingVertical: 14, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  rowName: { color: '#fff', fontSize: 15, fontWeight: '500', flex: 1 },
-  rowSub: { color: '#555', fontSize: 12 },
-  separator: { height: 1, backgroundColor: '#1A1A1A', marginLeft: 20 },
+  row: { paddingVertical: 14, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  rowName: { fontSize: 15, fontWeight: '500', flex: 1 },
+  rowSub: { fontSize: 12 },
 })
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-
+  container: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -493,127 +642,59 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1A1A1A',
     gap: 10,
   },
-  chrono: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-    flex: 1,
-    fontVariant: ['tabular-nums'],
-  },
-  timerBtn: {
-    padding: 8,
-    borderRadius: 10,
-    backgroundColor: '#1A1A1A',
-  },
+  chrono: { fontSize: 18, fontWeight: '700', flex: 1, fontVariant: ['tabular-nums'] },
+  timerBtn: { padding: 8, borderRadius: 10 },
   timerBtnText: { fontSize: 18 },
-  finishBtn: {
-    backgroundColor: '#D85A30',
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
+  finishBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 10 },
   finishBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-
   exerciseNav: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1A1A1A',
   },
-  navBtn: {
-    padding: 10,
-    width: 44,
-    alignItems: 'center',
-  },
+  navBtn: { padding: 10, width: 44, alignItems: 'center' },
   navBtnDisabled: { opacity: 0.2 },
-  navBtnText: { color: '#D85A30', fontSize: 28, fontWeight: '300', lineHeight: 30 },
+  navBtnText: { fontSize: 28, fontWeight: '300', lineHeight: 30 },
   exerciseTitleContainer: { flex: 1, alignItems: 'center', gap: 2 },
-  exerciseName: { color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center' },
-  exerciseCounter: { color: '#555', fontSize: 12 },
-
+  exerciseName: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
+  exerciseCounter: { fontSize: 12 },
   setsScroll: { flex: 1 },
   setsContent: { paddingTop: 4, paddingBottom: 16 },
-  noSetsText: { color: '#444', fontSize: 14, textAlign: 'center', marginTop: 24 },
-
+  noSetsText: { fontSize: 14, textAlign: 'center', marginTop: 24 },
   prFlashBanner: {
     position: 'absolute',
-    top: 140,
+    top: 130,
     alignSelf: 'center',
-    backgroundColor: '#FAC775',
-    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 14,
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    gap: 6,
+    zIndex: 99,
   },
-  prFlashText: { color: '#412402', fontSize: 16, fontWeight: '700' },
-
+  prFlashItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  prFlashText: { fontSize: 15, fontWeight: '700' },
   draftContainer: {
-    backgroundColor: '#0F0F0F',
     borderTopWidth: 1,
-    borderTopColor: '#1A1A1A',
     padding: 16,
     gap: 14,
   },
-  draftLabel: { color: '#888', fontSize: 13, fontWeight: '600', textAlign: 'center' },
-  stepperRow: { flexDirection: 'row', alignItems: 'center' },
-  stepperGroup: { flex: 1, alignItems: 'center', gap: 8 },
-  stepperLabel: { color: '#555', fontSize: 12 },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 0 },
-  stepBtn: {
-    width: 48,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1A1A1A',
-    borderRadius: 10,
-  },
-  stepBtnText: { color: '#fff', fontSize: 24, fontWeight: '300' },
-  stepValue: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '700',
-    minWidth: 72,
-    textAlign: 'center',
-    fontVariant: ['tabular-nums'],
-  },
-  stepperDivider: { width: 1, height: 48, backgroundColor: '#1A1A1A', marginHorizontal: 8 },
-
-  validateBtn: {
-    backgroundColor: '#D85A30',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
+  draftLabel: { fontSize: 13, fontWeight: '600', textAlign: 'center' },
+  inputsRow: { flexDirection: 'row', alignItems: 'center', gap: 0 },
+  divider: { width: 1, height: ITEM_HEIGHT * 5, marginHorizontal: 8 },
+  validateBtn: { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   validateBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
-
-  footer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#111',
-  },
-  addExerciseBtn: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  addExerciseBtnText: { color: '#888', fontSize: 15, fontWeight: '600' },
-
+  footer: { paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1 },
+  addExerciseBtn: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  addExerciseBtnText: { fontSize: 15, fontWeight: '600' },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 },
   emptyIcon: { fontSize: 48 },
-  emptyTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  emptySubtitle: { color: '#555', fontSize: 14, textAlign: 'center' },
-  addFirstBtn: {
-    marginTop: 8,
-    backgroundColor: '#D85A30',
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-  },
+  emptyTitle: { fontSize: 20, fontWeight: '700' },
+  emptySubtitle: { fontSize: 14, textAlign: 'center' },
+  addFirstBtn: { marginTop: 8, borderRadius: 14, paddingVertical: 16, paddingHorizontal: 32 },
   addFirstBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 })

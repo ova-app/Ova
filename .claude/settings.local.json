@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm start *)"
+      "Bash(npm start *)",
+      "Read(//c/c/Users/SofianeBESSILA/orava/mobile_app/**)",
+      "Bash(npx expo *)",
+      "Bash(npm install *)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(k,v\\) for k,v in d.get\\('dependencies',{}\\).items\\(\\)]\")"
     ]
   }
 }
