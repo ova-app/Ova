@@ -157,14 +157,19 @@ scripts/import-exercises.ts  — ⚠️ NE PAS RELANCER — remplacé par orava_
 | S13 | À définir | 🔄 À venir |
 
 ## Priorités S13
-- 🔴 Swipe modifier/supprimer série (non implémenté — le code existe mais buggué)
-- 🟠 Photo de profil (bucket Supabase `profiles` + avatar_url)
-- 🟠 Library — filtre groupe musculaire en plus des filtres équipement
-- 🟡 Feed — voir la liste des gens qui ont liké une publication
-- 🟡 Settings — timer par défaut (lire/écrire depuis AsyncStorage dans timer.tsx)
-- 🟡 Géolocalisation auto (location_city) — déjà dans summary.tsx, vérifier le save Supabase
-- 🟢 "Comment ça marche" — onglet ou modale onboarding
-- 🟢 Follows — améliorer UX recherche utilisateurs / suggestions
+- Swipe modifier/supprimer série (non implémenté — le code existe mais buggué)
+- Photo de profil (bucket Supabase `profiles` + avatar_url)
+- Library — filtre groupe musculaire en plus des filtres équipement
+- Settings — timer par défaut (lire/écrire depuis AsyncStorage dans timer.tsx)
+- Géolocalisation auto (location_city) — déjà dans summary.tsx, vérifier le save Supabase
+- "Comment ça marche" — onglet ou modale onboarding
+- Follows — améliorer UX recherche utilisateurs / suggestions
+- Changer la roue car elle ne fonctionne pas
+- On ne voit pas les photos des seances dans le feed
+- Calculer proprement le mapping musculaire des séances
+- Détailler ce qu'il y a dans les analytics
+- Bug dans l'affichage des catégories de la bibliothèque
+- Recherche non exhaustive pour les exos
 
 ## Règles impératives
 - Poids toujours en kg en base — conversion kg/lbs à l'affichage uniquement
