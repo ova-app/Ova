@@ -38,11 +38,15 @@ exercises         : id, name_fr, slug, equipment_type, muscle_group, mechanics, 
                     ⚠️ 113 exercices manuels — Wger abandonné — NE PAS relancer import-exercises.ts
 exercise_muscles  : exercise_id, muscle_id, role(primary|secondary|stabilizer), activation_pct, source, confidence
 workouts          : id, user_id, gym_id, title, started_at, ended_at, duration_sec, total_volume_kg,
-                    is_public(DEFAULT false), note, lat, lng, avg_rest_seconds, photo_url, location_city
-workout_exercises : id, workout_id, exercise_id, order_index, note
+                    is_public(DEFAULT false), note, lat, lng, avg_rest_seconds, photo_url, location_city,
+                    pr_seance(text NULL — 'gold'|'silver'|'bronze')
+workout_exercises : id, workout_id, exercise_id, order_index, note,
+                    pr_exercice(text NULL — 'gold'|'silver'|'bronze')
 workout_sets      : id, workout_exercise_id, set_type(warmup|working|dropset|failure), set_number,
-                    reps, weight_kg, rest_seconds, rpe, is_pr, pr_charge, pr_serie, pr_1rm,
-                    pr_level(text NULL — 'gold'|'silver'|'bronze'), parent_set_id, is_continuation, logged_at
+                    reps, weight_kg, rest_seconds, rpe, is_pr,
+                    pr_charge(text NULL — 'gold'|'silver'|'bronze'),
+                    pr_serie(text NULL — 'gold'|'silver'|'bronze'),
+                    parent_set_id, is_continuation, logged_at
 likes             : user_id, workout_id, created_at
 comments          : id, workout_id, user_id, content, created_at
 ```
@@ -63,7 +67,7 @@ CREATE INDEX idx_workouts_user_date ON workouts(user_id, started_at DESC);
 -- trg_update_volume → recalcul total_volume_kg sur INSERT/UPDATE/DELETE workout_sets
 ```
 
-## Structure fichiers (état S12 — validé par scan)
+## Structure fichiers (état S14 — validé par scan)
 ```
 app/
 ├── _layout.tsx              — guard auth + WorkoutProvider + ThemeProvider + StatusBar
@@ -75,42 +79,52 @@ app/
 ├── (tabs)/
 │   ├── _layout.tsx          — navbar 5 tabs (Users/Dumbbell/CirclePlus/CalendarDays/CircleUser)
 │   ├── feed.tsx             — timeline sociale (likes + commentaires + photo_url)
+│   │                          icônes PR : Zap(charge) Flame(série) Trophy(pr_seance)
 │   ├── history.tsx          — liste séances par mois (SectionList antichronologique)
+│   │                          icônes PR : Zap(charge) Flame(série) Trophy(pr_seance)
 │   ├── library.tsx          — 113 exercices, SectionList par muscle,
 │   │                          filtres chips équipement + type, badges Poly/gris
+│   │                          chips en View flexWrap:'wrap' (pas ScrollView horizontal)
+│   │                          recherche insensible aux accents via normalize() (NFD)
+│   │                          en-têtes sections : backgroundSecondary + borderLeft accent + textPrimary
 │   ├── profile.tsx          — stats mois, PRs top 20, déconnexion
 │   └── start.tsx            — placeholder FAB → redirect /workout/session
 ├── workout/
 │   ├── _layout.tsx
-│   ├── session.tsx          — log séance, ScrollPicker custom par équipement,
-│   │                          confirmation modale avant lancement
-│   ├── timer.tsx            — roue custom TimerWheelColumn,
-│   │                          auto-start, presets 45s/60s/90s/120s, fix AppState
-│   └── summary.tsx          — résumé + nom intelligent auto + bloc PRs battus
+│   ├── session.tsx          — log séance, WheelPicker (poids + reps) par équipement,
+│   │                          flash PR avec niveau 🥇🥈🥉 pour charge et série
+│   ├── timer.tsx            — roue custom TimerWheelColumn (ScrollView),
+│   │                          auto-start, presets 45s/60s/90s/120s/3min, fix AppState
+│   └── summary.tsx          — résumé + nom intelligent auto + bloc PRs battus (4 types)
 │                              + toggle is_public + photo (ImagePicker) + géoloc
-│                              + save Supabase (pr_level, rest_seconds inclus)
+│                              + save Supabase (pr_charge/pr_serie/pr_exercice/pr_seance)
+│                              pr_exercice calculé par exercice, pr_seance chargé async
 ├── history/
 │   ├── _layout.tsx
 │   └── [id].tsx             — détail séance + photo_url + barres muscles travaillés
+│                              badges Zap+Flame par set avec niveau podium
 ├── exercise/
 │   ├── _layout.tsx
 │   └── [id].tsx             — fiche exercice + barres musculaires (primary/secondary/stabilizer)
 ├── analytics.tsx            — stats complètes : résumé, volume/semaine (bar chart custom),
 │                              vue musculaire, régularité + mini-calendrier 28j,
 │                              progression des charges, top 5 exercices,
-│                              déséquilibres Push/Pull/Haut/Bas, compteurs PRs + podium
+│                              déséquilibres Push/Pull/Haut/Bas,
+│                              PRs par type (charge/série/exercice/séance) avec 🥇🥈🥉
 │                              ⚠️ PAS Victory Native — charts dessinés avec View RN
 ├── prs.tsx                  — Armurerie des PRs : podium Or/Argent/Bronze par exercice
+│                              basé sur pr_charge (poids), 1 card par exercice
 ├── edit-profile.tsx         — modifier username + full_name
 └── settings.tsx             — kg/lbs, dark/light, vibration, timer défaut,
-                               visibilité séances, modifier profil, supprimer compte
+                               visibilité séances, modifier profil, supprimer compte,
+                               "Comment ça marche" avec 4 types PR + analytics détaillés
 context/
 ├── WorkoutContext.tsx        — status(idle|active|done), startedAt, exercises,
 │                              currentIndex, elapsedSeconds
-│                              PR types : pr_charge, pr_serie, pr_1rm (booleans)
-│                              pr_level : 'gold'|'silver'|'bronze'|null (top-3 poids historiques)
+│                              PR : pr_charge/pr_serie = PrLevel (text null|gold|silver|bronze)
+│                              3 top-3 chargés par addExercise : charge, serie, exercice
+│                              computePodium() exporté et utilisé dans summary.tsx
 │                              rest_seconds : delta ms depuis dernier set validé (global workout)
-│                              Epley 1RM : w × (1 + r/30)
 └── ThemeContext.tsx          — dark/light + persistance AsyncStorage
 lib/supabase.ts              — client Supabase (SecureStore fragmenté chunks 1800b, autoRefreshToken)
 constants/theme.ts           — dark/light objets + ThemeName + ThemeColors types
@@ -120,15 +134,32 @@ components/                  — VIDE (pas de composants partagés)
 scripts/import-exercises.ts  — ⚠️ NE PAS RELANCER — remplacé par orava_exercises_bdd.sql (S10)
 ```
 
-## Système PR (implémenté S11/S12)
-| Type | Définition | Icône | Couleur |
-|---|---|---|---|
-| PR Charge (`pr_charge`) | Poids max toutes reps | Zap | #FFD700 Or |
-| PR Série (`pr_serie`) | Max (poids × reps) sur 1 set | Flame | #D85A30 Orange |
-| PR 1RM estimé (`pr_1rm`) | Epley : w × (1 + r/30) | Trophy | #FAC775 Ambre |
-| Podium (`pr_level`) | Top-3 poids historiques → gold/silver/bronze | 🥇🥈🥉 | Or/Argent/Bronze |
+## Système PR (redesigné S14)
 
-`prs.tsx` = Armurerie : 1 card par exercice, 3 médailles avec poids × reps + date.
+4 types, chacun avec podium Or/Argent/Bronze (`'gold'|'silver'|'bronze'|null`) :
+
+| Type | Échelle | Définition | Stockage | Icône |
+|---|---|---|---|---|
+| PR Charge (`pr_charge`) | Set | Poids le plus lourd, toutes séances | `workout_sets` | Zap #FAC775 |
+| PR Série (`pr_serie`) | Set | Max(poids × reps) sur 1 set, toutes séances | `workout_sets` | Flame #D85A30 |
+| PR Exercice (`pr_exercice`) | Exercice/séance | Volume total exercice dans la séance vs historique | `workout_exercises` | Flame #9B59B6 |
+| PR Séance (`pr_seance`) | Séance | Volume total séance vs historique | `workouts` | Trophy #FAC775 |
+
+**Podium** : gold = nouveau record absolu, silver = 2e meilleur, bronze = 3e meilleur.  
+Calculé via `computePodium(value, top3)` exporté depuis `WorkoutContext.tsx`.
+
+**Chargement dans `addExercise`** : 3 top-3 historiques chargés depuis Supabase :
+- `pr_top3_charge` — top-3 poids distincts
+- `pr_top3_serie` — top-3 valeurs (poids × reps) distinctes
+- `pr_top3_exercice` — top-3 volumes d'exercice par séance (groupés par workout_id en JS)
+
+**Calcul au save** (dans `summary.tsx`) :
+- `pr_exercice` : `computePodium(Σ poids×reps des sets, ex.pr_top3_exercice)` → sauvé dans `workout_exercises`
+- `pr_seance` : `computePodium(volume total séance, seanceTop3)` → top-3 chargé depuis `workouts.total_volume_kg`, sauvé dans `workouts`
+
+**Armurerie (`prs.tsx`)** : affiche le podium de charge (pr_charge) par exercice.
+
+`is_pr` (boolean sur workout_sets) = `pr_charge IS NOT NULL OR pr_serie IS NOT NULL`
 
 ## Picker poids — granulométrie (S10)
 | Équipement | Pas | Plage |
@@ -138,6 +169,17 @@ scripts/import-exercises.ts  — ⚠️ NE PAS RELANCER — remplacé par orava_
 | Barre | 20kg + disques ×2 | 20 → ~220 kg |
 | Poids du corps | Reps only | — |
 | Kettlebell | 4 kg | 4 → 48 kg |
+
+## WheelPicker — pattern (S13)
+Composant `WheelPicker` unifié dans `session.tsx`, `TimerWheelColumn` dans `timer.tsx`.
+Règles impératives pour ne pas recasser la roue :
+- `readValue(y)` lit la valeur uniquement — **ne jamais appeler `scrollTo` après un scroll utilisateur**
+- `snapToInterval={ITEM_HEIGHT}` gère le positionnement nativement (pas besoin de JS)
+- Pattern `hasMomentum` ref : `onScrollEndDrag` ne snap que si pas de momentum, `onMomentumScrollEnd` prend le relais
+- `weightValues` memoïsé avec `useMemo([equipment_type])` — évite de déclencher le `useEffect` à chaque re-render
+- `REPS_VALUES` = 1..50 (constante module, jamais recréée)
+- `useEffect([values])` : scroll programmatique uniquement au changement d'exercice/équipement, pas après interaction utilisateur
+- Timer : flag `isUserScroll` empêche le `useEffect([selected])` de rescroller après que l'utilisateur a scrollé (mais laisse les presets rescroller normalement)
 
 ## Avancement sessions
 | Session | Contenu | Statut |
@@ -154,22 +196,20 @@ scripts/import-exercises.ts  — ⚠️ NE PAS RELANCER — remplacé par orava_
 | S10 | BDD 113 exos manuels, ThemeContext, PRs, Analytics, Settings, Splash | ✅ |
 | S11 | Fix picker poids, timer réécrit, photos feed/détail, muscles détail | ✅ |
 | S12 | Migration pr_level/rest_seconds, PRs podium, analytics complet, nom séance auto, photos summary | ✅ |
-| S13 | À définir | 🔄 À venir |
+| S13 | Réécriture WheelPicker (poids + reps + timer) — fix freeze et tremblement | ✅ |
+| S14 | Redesign système PR : 4 types (charge/série/exercice/séance) × podium 3 niveaux, "Comment ça marche" enrichi | ✅ |
+| S15 | Fix filtres bibliothèque : View flexWrap wrap à la place de ScrollView horizontal (chips coupées) | ✅ |
+| S16 | Bibliothèque — recherche insensible aux accents (normalize NFD) + en-têtes sections plus visibles (fond backgroundSecondary + trait accent + textPrimary) | ✅ |
+| S17 | Session — picker exercice aligné sur bibliothèque : chargement one-shot au montage, filtrage local JS, insensible aux accents (normalize NFD), chips groupe musculaire (flexWrap wrap) | ✅ |
 
-## Priorités S13
+## Priorités
 - Swipe modifier/supprimer série (non implémenté — le code existe mais buggué)
 - Photo de profil (bucket Supabase `profiles` + avatar_url)
 - Library — filtre groupe musculaire en plus des filtres équipement
-- Settings — timer par défaut (lire/écrire depuis AsyncStorage dans timer.tsx)
-- Géolocalisation auto (location_city) — déjà dans summary.tsx, vérifier le save Supabase
-- "Comment ça marche" — onglet ou modale onboarding
-- Follows — améliorer UX recherche utilisateurs / suggestions
-- Changer la roue car elle ne fonctionne pas
-- On ne voit pas les photos des seances dans le feed
+- On ne voit pas les photos des séances dans le feed
 - Calculer proprement le mapping musculaire des séances
-- Détailler ce qu'il y a dans les analytics
-- Bug dans l'affichage des catégories de la bibliothèque
-- Recherche non exhaustive pour les exos
+- Faire une simple déclinaison de couleurs pour le podium, pas de d'addition de deux icones
+  
 
 ## Règles impératives
 - Poids toujours en kg en base — conversion kg/lbs à l'affichage uniquement

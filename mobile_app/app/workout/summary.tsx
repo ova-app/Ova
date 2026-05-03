@@ -8,7 +8,7 @@ import * as ImagePicker from 'expo-image-picker'
 import * as Location from 'expo-location'
 import { Zap, Flame, Trophy, Camera, X, MapPin } from 'lucide-react-native'
 import { supabase } from '../../lib/supabase'
-import { useWorkout, WorkoutExercise, PrLevel } from '../../context/WorkoutContext'
+import { useWorkout, WorkoutExercise, PrLevel, computePodium } from '../../context/WorkoutContext'
 import { useTheme } from '../../context/ThemeContext'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -17,8 +17,8 @@ interface Gym { id: string; name: string }
 
 interface PREntry {
   exerciseName: string
-  type: 'charge' | 'serie' | '1rm'
-  prLevel: PrLevel
+  type: 'charge' | 'serie' | 'exercice' | 'seance'
+  prLevel: NonNullable<PrLevel>
   value: number
 }
 
@@ -105,16 +105,13 @@ function generateSuggestions(exercises: WorkoutExercise[]): string[] {
 
   const candidates: string[] = []
 
-  // Push/Pull/Legs label
   if (totalVol > 0 && pushVol / totalVol > 0.55) candidates.push('Push')
   else if (totalVol > 0 && pullVol / totalVol > 0.55) candidates.push('Pull')
   else if (totalVol > 0 && lowerVol / totalVol > 0.55) candidates.push('Legs')
   else candidates.push('Full Body')
 
-  // Time label
   candidates.push(`Séance du ${timeLabel}`)
 
-  // Weekday
   const weekday = today.toLocaleDateString('fr-FR', { weekday: 'long' })
   candidates.push(weekday.charAt(0).toUpperCase() + weekday.slice(1))
 
@@ -175,6 +172,8 @@ export default function SummaryScreen() {
   const [selectedGymId, setSelectedGymId] = useState<string | null>(null)
   const [isPublic, setIsPublic] = useState(true)
   const [saving, setSaving] = useState(false)
+  // Top-3 volumes historiques de séance (chargé en async)
+  const [seanceTop3, setSeanceTop3] = useState<{ pr1: number; pr2: number | null; pr3: number | null }>({ pr1: 0, pr2: null, pr3: null })
 
   const doneExercises = workout.exercises.filter(ex => ex.sets.some(s => s.validated))
 
@@ -184,7 +183,6 @@ export default function SummaryScreen() {
     0
   )
 
-  // Average rest time across all sets
   const allRestSeconds = doneExercises
     .flatMap(ex => ex.sets.filter(s => s.validated && s.rest_seconds !== null && s.rest_seconds < 600))
     .map(s => s.rest_seconds as number)
@@ -194,20 +192,30 @@ export default function SummaryScreen() {
 
   const muscleStats = computeMuscleStats(doneExercises)
 
-  // Collect all PRs from the session
+  // ── PRs de la séance (calculés à la volée) ──────────────────────────────
   const sessionPRs: PREntry[] = []
+
   for (const ex of doneExercises) {
     for (const s of ex.sets.filter(s => s.validated)) {
-      if (s.pr_charge || s.pr_level) {
-        sessionPRs.push({ exerciseName: ex.name, type: 'charge', prLevel: s.pr_level, value: s.weight_kg })
+      if (s.pr_charge !== null) {
+        sessionPRs.push({ exerciseName: ex.name, type: 'charge', prLevel: s.pr_charge, value: s.weight_kg })
       }
-      if (s.pr_serie && !s.pr_charge) {
-        sessionPRs.push({ exerciseName: ex.name, type: 'serie', prLevel: null, value: s.weight_kg * s.reps })
-      }
-      if (s.pr_1rm && !s.pr_charge && !s.pr_serie) {
-        sessionPRs.push({ exerciseName: ex.name, type: '1rm', prLevel: null, value: s.weight_kg * (1 + s.reps / 30) })
+      if (s.pr_serie !== null) {
+        sessionPRs.push({ exerciseName: ex.name, type: 'serie', prLevel: s.pr_serie, value: s.weight_kg * s.reps })
       }
     }
+    // PR Exercice : volume total de cet exercice dans la séance
+    const exVol = ex.sets.filter(s => s.validated).reduce((sum, s) => sum + s.weight_kg * s.reps, 0)
+    const prExercice = computePodium(exVol, ex.pr_top3_exercice)
+    if (prExercice !== null) {
+      sessionPRs.push({ exerciseName: ex.name, type: 'exercice', prLevel: prExercice, value: exVol })
+    }
+  }
+
+  // PR Séance : volume total de la séance
+  const prSeance = computePodium(totalVolume, seanceTop3)
+  if (prSeance !== null) {
+    sessionPRs.push({ exerciseName: 'Séance complète', type: 'seance', prLevel: prSeance, value: totalVolume })
   }
 
   useEffect(() => {
@@ -215,7 +223,26 @@ export default function SummaryScreen() {
     setTitle(name)
     setSuggestions(generateSuggestions(doneExercises).filter(s => s !== name))
     fetchGyms()
+    loadSeanceTop3()
   }, [])
+
+  async function loadSeanceTop3() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase
+        .from('workouts')
+        .select('total_volume_kg')
+        .eq('user_id', user.id)
+        .gt('total_volume_kg', 0)
+        .order('total_volume_kg', { ascending: false })
+        .limit(10)
+      if (data) {
+        const vols = [...new Set((data as any[]).map((w: any) => w.total_volume_kg).filter((v: any) => v > 0))].sort((a: any, b: any) => b - a) as number[]
+        setSeanceTop3({ pr1: vols[0] ?? 0, pr2: vols[1] ?? null, pr3: vols[2] ?? null })
+      }
+    } catch (_) {}
+  }
 
   async function fetchGyms() {
     const { data } = await supabase.from('gyms').select('id, name').order('name').limit(20)
@@ -285,6 +312,9 @@ export default function SummaryScreen() {
         }
       }
 
+      // Calcul PR Séance (volume total vs historique)
+      const finalPrSeance = computePodium(totalVolume, seanceTop3)
+
       const { data: workoutData, error: workoutError } = await supabase
         .from('workouts')
         .insert({
@@ -298,6 +328,7 @@ export default function SummaryScreen() {
           avg_rest_seconds: avgRestSeconds,
           photo_url: photoUrl,
           location_city: locationCity,
+          pr_seance: finalPrSeance,
         })
         .select('id')
         .single()
@@ -306,9 +337,19 @@ export default function SummaryScreen() {
 
       for (let i = 0; i < doneExercises.length; i++) {
         const ex = doneExercises[i]
+
+        // Calcul PR Exercice (volume total de l'exercice dans la séance)
+        const exVol = ex.sets.filter(s => s.validated).reduce((sum, s) => sum + s.weight_kg * s.reps, 0)
+        const finalPrExercice = computePodium(exVol, ex.pr_top3_exercice)
+
         const { data: weData, error: weError } = await supabase
           .from('workout_exercises')
-          .insert({ workout_id: workoutData.id, exercise_id: ex.exercise_id, order_index: i })
+          .insert({
+            workout_id: workoutData.id,
+            exercise_id: ex.exercise_id,
+            order_index: i,
+            pr_exercice: finalPrExercice,
+          })
           .select('id')
           .single()
 
@@ -323,11 +364,9 @@ export default function SummaryScreen() {
             set_number: s.set_number,
             weight_kg: s.weight_kg,
             reps: s.reps,
-            is_pr: s.is_pr,
+            is_pr: s.pr_charge !== null || s.pr_serie !== null,
             pr_charge: s.pr_charge,
             pr_serie: s.pr_serie,
-            pr_1rm: s.pr_1rm,
-            pr_level: s.pr_level,
             rest_seconds: s.rest_seconds,
             logged_at: new Date().toISOString(),
           }))
@@ -445,9 +484,8 @@ export default function SummaryScreen() {
           <View key={eIdx} style={[styles.exerciseCard, { backgroundColor: colors.card, borderColor: colors.separator }]}>
             <Text style={[styles.exerciseName, { color: colors.textPrimary }]}>{ex.name}</Text>
             {ex.sets.filter(s => s.validated).map((set, sIdx) => {
-              const levelCfg = set.pr_level
-                ? { gold: { badge: '#FAC775', bg: '#FAC77515' }, silver: { badge: '#C0C0C0', bg: '#C0C0C015' }, bronze: { badge: '#CD7F32', bg: '#CD7F3215' } }[set.pr_level]
-                : null
+              const chargeCfg = set.pr_charge ? PR_LEVEL_META[set.pr_charge] : null
+              const serieCfg  = set.pr_serie  ? PR_LEVEL_META[set.pr_serie]  : null
               return (
                 <View key={sIdx} style={[styles.setRow, { borderTopColor: colors.separator }]}>
                   <Text style={[styles.setNumber, { color: colors.textSecondary }]}>Série {set.set_number}</Text>
@@ -456,16 +494,8 @@ export default function SummaryScreen() {
                       ? `${formatWeight(set.weight_kg)} kg × ${set.reps} reps`
                       : `${set.reps} reps`}
                   </Text>
-                  {levelCfg ? (
-                    <Text style={{ fontSize: 14 }}>
-                      {set.pr_level === 'gold' ? '🥇' : set.pr_level === 'silver' ? '🥈' : '🥉'}
-                    </Text>
-                  ) : (
-                    <>
-                      {set.pr_charge && <Zap color="#FFD700" size={13} fill="#FFD700" />}
-                      {set.pr_serie && <Flame color="#D85A30" size={13} fill="#D85A30" />}
-                    </>
-                  )}
+                  {chargeCfg && <Text style={{ fontSize: 13 }}>{chargeCfg.chargeEmoji}</Text>}
+                  {serieCfg  && <Text style={{ fontSize: 13 }}>{serieCfg.serieEmoji}</Text>}
                 </View>
               )
             })}
@@ -572,48 +602,46 @@ export default function SummaryScreen() {
 
 // ─── PRRow ────────────────────────────────────────────────────────────────────
 
-const PR_LEVEL_EMOJI: Record<NonNullable<PrLevel>, string> = { gold: '🥇', silver: '🥈', bronze: '🥉' }
-const PR_LEVEL_COLOR: Record<NonNullable<PrLevel>, string> = { gold: '#FAC775', silver: '#C0C0C0', bronze: '#CD7F32' }
+const PR_LEVEL_META: Record<NonNullable<PrLevel>, { color: string; emoji: string; chargeEmoji: string; serieEmoji: string }> = {
+  gold:   { color: '#FAC775', emoji: '🥇', chargeEmoji: '⚡🥇', serieEmoji: '🔥🥇' },
+  silver: { color: '#C0C0C0', emoji: '🥈', chargeEmoji: '⚡🥈', serieEmoji: '🔥🥈' },
+  bronze: { color: '#CD7F32', emoji: '🥉', chargeEmoji: '⚡🥉', serieEmoji: '🔥🥉' },
+}
 
-const PR_CONFIG = {
-  charge: { icon: Zap, color: '#FFD700', label: 'PR Charge', fill: true },
-  serie:  { icon: Flame, color: '#D85A30', label: 'PR Série', fill: true },
-  '1rm':  { icon: Trophy, color: '#FFD700', label: 'PR 1RM estimé', fill: false },
+const PR_TYPE_CONFIG: Record<PREntry['type'], { Icon: any; color: string; label: string; fill: boolean }> = {
+  charge:   { Icon: Zap,    color: '#FAC775', label: 'PR Charge',    fill: true },
+  serie:    { Icon: Flame,  color: '#D85A30', label: 'PR Série',     fill: true },
+  exercice: { Icon: Flame,  color: '#9B59B6', label: 'PR Exercice',  fill: true },
+  seance:   { Icon: Trophy, color: '#FAC775', label: 'PR Séance',    fill: false },
+}
+
+const LEVEL_LABEL: Record<NonNullable<PrLevel>, string> = {
+  gold:   'Record absolu',
+  silver: '2e meilleure perf',
+  bronze: '3e meilleure perf',
 }
 
 function PRRow({ pr, colors }: { pr: PREntry; colors: ReturnType<typeof useTheme>['colors'] }) {
-  if (pr.type === 'charge' && pr.prLevel) {
-    const emoji = PR_LEVEL_EMOJI[pr.prLevel]
-    const color = PR_LEVEL_COLOR[pr.prLevel]
-    const label = pr.prLevel === 'gold' ? 'Nouveau record' : pr.prLevel === 'silver' ? '2e meilleure perf' : '3e meilleure perf'
-    return (
-      <View style={prStyles.row}>
-        <Text style={{ fontSize: 16 }}>{emoji}</Text>
-        <Text style={[prStyles.label, { color }]}>{label}</Text>
-        <Text style={[prStyles.exName, { color: colors.textPrimary }]} numberOfLines={1}>{pr.exerciseName}</Text>
-        <Text style={[prStyles.value, { color: colors.textSecondary }]}>{pr.value.toFixed(1)} kg</Text>
-      </View>
-    )
-  }
-  const cfg = PR_CONFIG[pr.type]
-  const Icon = cfg.icon
+  const cfg  = PR_TYPE_CONFIG[pr.type]
+  const Icon = cfg.Icon
+  const levelColor = PR_LEVEL_META[pr.prLevel].color
+  const emoji = PR_LEVEL_META[pr.prLevel].emoji
   return (
     <View style={prStyles.row}>
-      <Icon color={cfg.color} size={16} fill={cfg.fill ? cfg.color : 'none'} />
+      <Text style={{ fontSize: 14 }}>{emoji}</Text>
+      <Icon color={cfg.color} size={14} fill={cfg.fill ? cfg.color : 'none'} />
       <Text style={[prStyles.label, { color: cfg.color }]}>{cfg.label}</Text>
       <Text style={[prStyles.exName, { color: colors.textPrimary }]} numberOfLines={1}>{pr.exerciseName}</Text>
-      <Text style={[prStyles.value, { color: colors.textSecondary }]}>
-        {pr.type === 'serie' ? `${Math.round(pr.value)} kg` : `${pr.value.toFixed(1)} kg`}
-      </Text>
+      <Text style={[prStyles.value, { color: levelColor }]}>{LEVEL_LABEL[pr.prLevel]}</Text>
     </View>
   )
 }
 
 const prStyles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  label: { fontSize: 12, fontWeight: '700', width: 110 },
-  exName: { flex: 1, fontSize: 13 },
-  value: { fontSize: 13, fontWeight: '600' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
+  label: { fontSize: 12, fontWeight: '700', width: 88 },
+  exName: { flex: 1, fontSize: 12 },
+  value: { fontSize: 11, fontWeight: '600' },
 })
 
 // ─── StatCard ─────────────────────────────────────────────────────────────────

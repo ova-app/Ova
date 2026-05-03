@@ -239,9 +239,12 @@ export default function SettingsScreen() {
 const HELP_ITEMS = [
   { icon: '💪', title: 'Lance une séance', body: 'Appuie sur le bouton central (+) pour démarrer. Ajoute des exercices, saisis tes séries et valide.' },
   { icon: '⏱️', title: 'Timer de repos', body: 'Après chaque série validée, un timer se lance automatiquement. Tu peux le mettre en pause ou changer la durée.' },
-  { icon: '🥇', title: 'Records personnels', body: 'Orava détecte automatiquement tes records : 🥇 Record absolu, 🥈 2e meilleure perf, 🥉 3e meilleure perf.' },
-  { icon: '📊', title: 'Statistiques', body: 'Retrouve tes stats détaillées (volume, régularité, progression) depuis l\'icône graphe sur ton profil.' },
-  { icon: '🏆', title: 'Armurerie des PRs', body: 'L\'icône trophée sur ton profil affiche le podium de tes meilleures performances pour chaque exercice.' },
+  { icon: '⚡', title: 'PR Charge', body: 'Poids le plus lourd soulevé sur cet exercice, toutes séances confondues. Chaque set est comparé à ton top-3 historique → 🥇 record absolu, 🥈 2e meilleur poids, 🥉 3e meilleur poids.' },
+  { icon: '🔥', title: 'PR Série', body: 'Volume maximum sur un seul set (poids × reps), toutes séances confondues. Même logique podium 🥇🥈🥉 — récompense les séries à la fois lourdes et longues.' },
+  { icon: '💜', title: 'PR Exercice', body: 'Volume total d\'un exercice dans une séance (somme de tous tes sets), comparé à tes meilleures séances précédentes. Récompense quand tu bats ton record de volume sur cet exercice.' },
+  { icon: '🏆', title: 'PR Séance', body: 'Volume total de la séance entière, comparé à tes meilleures séances. Le trophée apparaît dans le feed et l\'historique quand tu bats ton record de séance.' },
+  { icon: '🏅', title: 'Armurerie des PRs', body: 'L\'icône trophée sur ton profil affiche le podium complet Or / Argent / Bronze pour chaque exercice, avec le poids, les reps et la date.' },
+  { icon: '📊', title: 'Analytics', body: 'Accès via l\'icône graphe sur ton profil. Au programme : résumé (séances, volume, durée) · volume par semaine · répartition musculaire · régularité et streak · progression des charges · exercices les plus pratiqués · équilibre Push/Pull et Haut/Bas · compteurs de PRs battus sur la période.' },
   { icon: '👥', title: 'Fil social', body: 'Tes séances publiques apparaissent dans le fil de tes abonnés. Tu peux liker et commenter.' },
 ]
 

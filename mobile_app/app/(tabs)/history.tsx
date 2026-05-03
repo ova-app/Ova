@@ -5,6 +5,7 @@ import {
 } from 'react-native'
 import { router, useFocusEffect } from 'expo-router'
 import { Zap, Flame, Trophy } from 'lucide-react-native'
+type PrLevel = 'gold' | 'silver' | 'bronze' | null
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../context/ThemeContext'
 
@@ -21,7 +22,7 @@ interface WorkoutSummary {
   pr_count: number
   has_pr_charge: boolean
   has_pr_serie: boolean
-  has_pr_1rm: boolean
+  pr_seance: PrLevel
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -57,9 +58,9 @@ function computeStats(raw: any): WorkoutSummary {
     total_sets: allSets.length,
     total_volume: allSets.reduce((sum: number, s: any) => sum + (s.weight_kg ?? 0) * (s.reps ?? 0), 0),
     pr_count: allSets.filter((s: any) => s.is_pr).length,
-    has_pr_charge: allSets.some((s: any) => s.pr_charge === true),
-    has_pr_serie: allSets.some((s: any) => s.pr_serie === true),
-    has_pr_1rm: allSets.some((s: any) => s.pr_1rm === true),
+    has_pr_charge: allSets.some((s: any) => s.pr_charge !== null && s.pr_charge !== undefined),
+    has_pr_serie: allSets.some((s: any) => s.pr_serie !== null && s.pr_serie !== undefined),
+    pr_seance: (raw.pr_seance ?? null) as PrLevel,
   }
 }
 
@@ -80,10 +81,10 @@ export default function HistoryScreen() {
     const { data, error } = await supabase
       .from('workouts')
       .select(`
-        id, title, started_at, duration_sec,
+        id, title, started_at, duration_sec, pr_seance,
         workout_exercises (
           id,
-          workout_sets ( weight_kg, reps, is_pr, pr_charge, pr_serie, pr_1rm )
+          workout_sets ( weight_kg, reps, is_pr, pr_charge, pr_serie )
         )
       `)
       .eq('user_id', user.id)
@@ -149,8 +150,7 @@ function WorkoutCard({ workout, colors }: {
   workout: WorkoutSummary
   colors: ReturnType<typeof useTheme>['colors']
 }) {
-  const hasPrTypes = workout.has_pr_charge || workout.has_pr_serie || workout.has_pr_1rm
-  const showGenericPr = workout.pr_count > 0 && !hasPrTypes
+  const hasPrIcons = workout.has_pr_charge || workout.has_pr_serie || workout.pr_seance !== null
 
   return (
     <TouchableOpacity
@@ -171,16 +171,11 @@ function WorkoutCard({ workout, colors }: {
           <Text style={[styles.cardDuration, { color: colors.textSecondary }]}>
             {formatDuration(workout.duration_sec)}
           </Text>
-          {(hasPrTypes || showGenericPr) && (
+          {hasPrIcons && (
             <View style={styles.prRow}>
-              {workout.has_pr_charge && <Zap size={13} color="#FFD700" fill="#FFD700" />}
+              {workout.has_pr_charge && <Zap size={13} color="#FAC775" fill="#FAC775" />}
               {workout.has_pr_serie && <Flame size={13} color={colors.accent} fill={colors.accent} />}
-              {workout.has_pr_1rm && <Trophy size={13} color={colors.prAmber} fill={colors.prAmber} />}
-              {showGenericPr && (
-                <Text style={[styles.prCount, { color: colors.prAmber }]}>
-                  {workout.pr_count} PR
-                </Text>
-              )}
+              {workout.pr_seance !== null && <Trophy size={13} color={colors.prAmber} fill={colors.prAmber} />}
             </View>
           )}
         </View>

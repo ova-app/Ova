@@ -54,7 +54,7 @@ export default function PRVaultScreen() {
     const { data, error } = await supabase
       .from('workout_sets')
       .select(`
-        weight_kg, reps, pr_level,
+        weight_kg, reps, pr_charge,
         workout_exercises!inner (
           exercise_id,
           workouts!inner ( user_id, started_at ),
@@ -62,7 +62,7 @@ export default function PRVaultScreen() {
         )
       `)
       .eq('workout_exercises.workouts.user_id', user.id)
-      .not('pr_level', 'is', null)
+      .not('pr_charge', 'is', null)
 
     setLoading(false)
     if (error || !data) return
@@ -72,7 +72,7 @@ export default function PRVaultScreen() {
     for (const row of data as any[]) {
       const exId: string = row.workout_exercises?.exercise_id
       const name: string = row.workout_exercises?.exercises?.name_fr ?? 'Exercice'
-      const level: PrLevel = row.pr_level
+      const level: PrLevel = row.pr_charge
       const weight: number = row.weight_kg ?? 0
       const reps: number = row.reps ?? 0
       const date: string = row.workout_exercises?.workouts?.started_at ?? ''

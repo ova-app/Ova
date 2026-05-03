@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, Vibration,
-  AppState, AppStateStatus, FlatList,
+  AppState, AppStateStatus, ScrollView,
 } from 'react-native'
 import { router } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -37,20 +37,23 @@ function TimerWheelColumn({ values, selected, onSelect, colors, label, format }:
   label: string
   format: (v: number) => string
 }) {
-  const flatRef = useRef<FlatList<number>>(null)
+  const scrollRef = useRef<ScrollView>(null)
+  const hasMomentum = useRef(false)
+  const isUserScroll = useRef(false)
 
+  // Programmatic scroll only for external changes (presets, initial load).
+  // When user scrolls, isUserScroll is set so we skip the programmatic scroll.
   useEffect(() => {
+    if (isUserScroll.current) { isUserScroll.current = false; return }
     const idx = Math.max(0, values.indexOf(selected))
-    const timer = setTimeout(() => {
-      flatRef.current?.scrollToOffset({ offset: idx * PICKER_ITEM_H, animated: false })
-    }, 80)
-    return () => clearTimeout(timer)
+    scrollRef.current?.scrollTo({ y: idx * PICKER_ITEM_H, animated: false })
   }, [selected])
 
-  function snap(offsetY: number) {
-    const idx = Math.max(0, Math.min(Math.round(offsetY / PICKER_ITEM_H), values.length - 1))
+  // Read center-slot value only — do NOT write back to the ScrollView.
+  function readValue(y: number) {
+    const idx = Math.max(0, Math.min(Math.round(y / PICKER_ITEM_H), values.length - 1))
+    isUserScroll.current = true
     onSelect(values[idx])
-    flatRef.current?.scrollToOffset({ offset: idx * PICKER_ITEM_H, animated: true })
   }
 
   return (
@@ -61,24 +64,34 @@ function TimerWheelColumn({ values, selected, onSelect, colors, label, format }:
           pointerEvents="none"
           style={[twStyles.highlight, { borderColor: colors.accent, backgroundColor: colors.accent + '15' }]}
         />
-        <FlatList
-          ref={flatRef}
-          data={values}
-          keyExtractor={v => String(v)}
+        <ScrollView
+          ref={scrollRef}
           showsVerticalScrollIndicator={false}
           snapToInterval={PICKER_ITEM_H}
           decelerationRate="fast"
+          scrollEventThrottle={16}
           contentContainerStyle={{ paddingVertical: PICKER_ITEM_H * 2 }}
-          onScrollEndDrag={e => snap(e.nativeEvent.contentOffset.y)}
-          onMomentumScrollEnd={e => snap(e.nativeEvent.contentOffset.y)}
-          renderItem={({ item, index }) => {
-            const isSel = item === selected
+          onScrollBeginDrag={() => { hasMomentum.current = false }}
+          onMomentumScrollBegin={() => { hasMomentum.current = true }}
+          onScrollEndDrag={e => {
+            if (!hasMomentum.current) readValue(e.nativeEvent.contentOffset.y)
+          }}
+          onMomentumScrollEnd={e => {
+            hasMomentum.current = false
+            readValue(e.nativeEvent.contentOffset.y)
+          }}
+        >
+          {values.map((v, i) => {
+            const isSel = v === selected
             return (
               <TouchableOpacity
+                key={v}
+                activeOpacity={0.7}
                 style={{ height: PICKER_ITEM_H, alignItems: 'center', justifyContent: 'center' }}
                 onPress={() => {
-                  onSelect(item)
-                  flatRef.current?.scrollToOffset({ offset: index * PICKER_ITEM_H, animated: true })
+                  isUserScroll.current = true
+                  onSelect(v)
+                  scrollRef.current?.scrollTo({ y: i * PICKER_ITEM_H, animated: true })
                 }}
               >
                 <Text style={[
@@ -86,12 +99,12 @@ function TimerWheelColumn({ values, selected, onSelect, colors, label, format }:
                   { color: isSel ? colors.accent : colors.textSecondary },
                   isSel && twStyles.itemTextSelected,
                 ]}>
-                  {format(item)}
+                  {format(v)}
                 </Text>
               </TouchableOpacity>
             )
-          }}
-        />
+          })}
+        </ScrollView>
       </View>
     </View>
   )

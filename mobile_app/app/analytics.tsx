@@ -34,7 +34,18 @@ interface TopExercise { name: string; set_count: number; volume: number }
 
 interface BalanceData { push: number; pull: number; upper: number; lower: number }
 
-interface PRStats { charge: number; serie: number; rm: number; gold: number; silver: number; bronze: number }
+interface PRTypeStats { gold: number; silver: number; bronze: number; total: number }
+interface PRStats {
+  charge: PRTypeStats
+  serie: PRTypeStats
+  exercice: PRTypeStats
+  seance: PRTypeStats
+}
+
+function emptyPRTypeStats(): PRTypeStats { return { gold: 0, silver: 0, bronze: 0, total: 0 } }
+function emptyPRStats(): PRStats {
+  return { charge: emptyPRTypeStats(), serie: emptyPRTypeStats(), exercice: emptyPRTypeStats(), seance: emptyPRTypeStats() }
+}
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -110,7 +121,7 @@ export default function AnalyticsScreen() {
   const [progressList, setProgressList] = useState<ExerciseProgress[]>([])
   const [topExercises, setTopExercises] = useState<TopExercise[]>([])
   const [balance, setBalance] = useState<BalanceData>({ push: 0, pull: 0, upper: 0, lower: 0 })
-  const [prStats, setPRStats] = useState<PRStats>({ charge: 0, serie: 0, rm: 0, gold: 0, silver: 0, bronze: 0 })
+  const [prStats, setPRStats] = useState<PRStats>(emptyPRStats())
 
   useEffect(() => { loadAll() }, [period])
 
@@ -381,30 +392,74 @@ export default function AnalyticsScreen() {
   // ── Records battus ────────────────────────────────────────────────────────
 
   async function loadPRStats(userId: string, start: string | null) {
-    let query = supabase
+    const stats = emptyPRStats()
+
+    // PR Charge et PR Série (niveau set)
+    let setsQuery = supabase
       .from('workout_sets')
       .select(`
-        pr_charge, pr_serie, pr_1rm, pr_level,
+        pr_charge, pr_serie,
         workout_exercises!inner ( workouts!inner ( user_id, started_at ) )
       `)
       .eq('workout_exercises.workouts.user_id', userId)
       .eq('is_pr', true)
+    if (start) setsQuery = setsQuery.gte('workout_exercises.workouts.started_at', start)
 
-    if (start) query = query.gte('workout_exercises.workouts.started_at', start)
-
-    const { data } = await query
-    if (!data) return
-
-    let charge = 0, serie = 0, rm = 0, gold = 0, silver = 0, bronze = 0
-    for (const s of data as any[]) {
-      if (s.pr_charge) charge++
-      if (s.pr_serie) serie++
-      if (s.pr_1rm) rm++
-      if (s.pr_level === 'gold') gold++
-      else if (s.pr_level === 'silver') silver++
-      else if (s.pr_level === 'bronze') bronze++
+    const { data: setsData } = await setsQuery
+    if (setsData) {
+      for (const s of setsData as any[]) {
+        if (s.pr_charge) {
+          stats.charge.total++
+          if (s.pr_charge === 'gold') stats.charge.gold++
+          else if (s.pr_charge === 'silver') stats.charge.silver++
+          else if (s.pr_charge === 'bronze') stats.charge.bronze++
+        }
+        if (s.pr_serie) {
+          stats.serie.total++
+          if (s.pr_serie === 'gold') stats.serie.gold++
+          else if (s.pr_serie === 'silver') stats.serie.silver++
+          else if (s.pr_serie === 'bronze') stats.serie.bronze++
+        }
+      }
     }
-    setPRStats({ charge, serie, rm, gold, silver, bronze })
+
+    // PR Exercice (niveau workout_exercise)
+    let exQuery = supabase
+      .from('workout_exercises')
+      .select(`pr_exercice, workouts!inner ( user_id, started_at )`)
+      .eq('workouts.user_id', userId)
+      .not('pr_exercice', 'is', null)
+    if (start) exQuery = exQuery.gte('workouts.started_at', start)
+
+    const { data: exData } = await exQuery
+    if (exData) {
+      for (const e of exData as any[]) {
+        stats.exercice.total++
+        if (e.pr_exercice === 'gold') stats.exercice.gold++
+        else if (e.pr_exercice === 'silver') stats.exercice.silver++
+        else if (e.pr_exercice === 'bronze') stats.exercice.bronze++
+      }
+    }
+
+    // PR Séance (niveau workout)
+    let seanceQuery = supabase
+      .from('workouts')
+      .select('pr_seance, started_at')
+      .eq('user_id', userId)
+      .not('pr_seance', 'is', null)
+    if (start) seanceQuery = seanceQuery.gte('started_at', start)
+
+    const { data: seanceData } = await seanceQuery
+    if (seanceData) {
+      for (const w of seanceData as any[]) {
+        stats.seance.total++
+        if (w.pr_seance === 'gold') stats.seance.gold++
+        else if (w.pr_seance === 'silver') stats.seance.silver++
+        else if (w.pr_seance === 'bronze') stats.seance.bronze++
+      }
+    }
+
+    setPRStats(stats)
   }
 
   // ─── Render ──────────────────────────────────────────────────────────────
@@ -650,30 +705,41 @@ export default function AnalyticsScreen() {
           </View>
 
           {/* ── 7. Records battus ── */}
-          {(prStats.charge + prStats.serie + prStats.rm) > 0 && (
+          {(prStats.charge.total + prStats.serie.total + prStats.exercice.total + prStats.seance.total) > 0 && (
             <>
               <SectionTitle label="Records battus sur la période" colors={colors} />
-              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.separator, flexDirection: 'row' }]}>
-                <PRStatBox icon={<Zap size={20} color="#FFD700" fill="#FFD700" />} count={prStats.charge} label="PR Charge" colors={colors} />
-                <View style={[styles.prStatDivider, { backgroundColor: colors.separator }]} />
-                <PRStatBox icon={<Flame size={20} color={colors.accent} fill={colors.accent} />} count={prStats.serie} label="PR Série" colors={colors} />
-                <View style={[styles.prStatDivider, { backgroundColor: colors.separator }]} />
-                <PRStatBox icon={<Trophy size={20} color={colors.prAmber} fill={colors.prAmber} />} count={prStats.rm} label="PR 1RM" colors={colors} />
-              </View>
-            </>
-          )}
-
-          {/* ── 8. Podium des niveaux ── */}
-          {(prStats.gold + prStats.silver + prStats.bronze) > 0 && (
-            <>
-              <SectionTitle label="Podium des performances" colors={colors} />
-              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.separator, flexDirection: 'row' }]}>
-                <MedalStatBox emoji="🥇" color="#FAC775" count={prStats.gold} label="Records absolus" />
-                <View style={[styles.prStatDivider, { backgroundColor: colors.separator }]} />
-                <MedalStatBox emoji="🥈" color="#C0C0C0" count={prStats.silver} label="2e meilleures" />
-                <View style={[styles.prStatDivider, { backgroundColor: colors.separator }]} />
-                <MedalStatBox emoji="🥉" color="#CD7F32" count={prStats.bronze} label="3e meilleures" />
-              </View>
+              {prStats.charge.total > 0 && (
+                <PRTypeRow
+                  icon={<Zap size={18} color="#FAC775" fill="#FAC775" />}
+                  label="PR Charge"
+                  stats={prStats.charge}
+                  colors={colors}
+                />
+              )}
+              {prStats.serie.total > 0 && (
+                <PRTypeRow
+                  icon={<Flame size={18} color={colors.accent} fill={colors.accent} />}
+                  label="PR Série"
+                  stats={prStats.serie}
+                  colors={colors}
+                />
+              )}
+              {prStats.exercice.total > 0 && (
+                <PRTypeRow
+                  icon={<Flame size={18} color="#9B59B6" fill="#9B59B6" />}
+                  label="PR Exercice"
+                  stats={prStats.exercice}
+                  colors={colors}
+                />
+              )}
+              {prStats.seance.total > 0 && (
+                <PRTypeRow
+                  icon={<Trophy size={18} color={colors.prAmber} fill={colors.prAmber} />}
+                  label="PR Séance"
+                  stats={prStats.seance}
+                  colors={colors}
+                />
+              )}
             </>
           )}
 
@@ -708,27 +774,18 @@ const summaryStyles = StyleSheet.create({
   label: { fontSize: 12 },
 })
 
-function PRStatBox({ icon, count, label, colors }: {
-  icon: React.ReactNode; count: number; label: string
+function PRTypeRow({ icon, label, stats, colors }: {
+  icon: React.ReactNode; label: string; stats: PRTypeStats
   colors: ReturnType<typeof useTheme>['colors']
 }) {
   return (
-    <View style={styles.prStatBox}>
+    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.separator, flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
       {icon}
-      <Text style={[styles.prStatCount, { color: colors.textPrimary }]}>{count}</Text>
-      <Text style={[styles.prStatLabel, { color: colors.textSecondary }]}>{label}</Text>
-    </View>
-  )
-}
-
-function MedalStatBox({ emoji, color, count, label }: {
-  emoji: string; color: string; count: number; label: string
-}) {
-  return (
-    <View style={styles.prStatBox}>
-      <Text style={{ fontSize: 22 }}>{emoji}</Text>
-      <Text style={[styles.prStatCount, { color }]}>{count}</Text>
-      <Text style={[styles.prStatLabel, { color: '#8E8E93' }]}>{label}</Text>
+      <Text style={[styles.prStatLabel, { color: colors.textPrimary, flex: 1 }]}>{label}</Text>
+      <Text style={[styles.prStatCount, { color: colors.textPrimary }]}>{stats.total}×</Text>
+      {stats.gold > 0 && <Text style={{ fontSize: 13 }}>🥇{stats.gold}</Text>}
+      {stats.silver > 0 && <Text style={{ fontSize: 13 }}>🥈{stats.silver}</Text>}
+      {stats.bronze > 0 && <Text style={{ fontSize: 13 }}>🥉{stats.bronze}</Text>}
     </View>
   )
 }

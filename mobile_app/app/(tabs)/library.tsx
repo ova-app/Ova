@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   View, Text, SectionList, TextInput, TouchableOpacity,
-  ScrollView, StyleSheet, ActivityIndicator,
+  StyleSheet, ActivityIndicator,
 } from 'react-native'
 import { router } from 'expo-router'
 import { supabase } from '../../lib/supabase'
@@ -59,6 +59,12 @@ const TYPE_FILTERS = [
   { key: 'isolation', label: 'Isolation' },
 ]
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function normalize(str: string) {
+  return str.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
 // ─── Composant ───────────────────────────────────────────────────────────────
 
 export default function LibraryScreen() {
@@ -90,7 +96,7 @@ export default function LibraryScreen() {
 
   const sections: Section[] = useCallback(() => {
     let filtered = allExercises.filter(ex => {
-      const matchSearch = ex.name_fr.toLowerCase().includes(search.toLowerCase())
+      const matchSearch = normalize(ex.name_fr).includes(normalize(search))
       const matchEquip = equipFilter === 'all' || ex.equipment_type === equipFilter
       const matchType =
         typeFilter === 'all' ||
@@ -133,12 +139,7 @@ export default function LibraryScreen() {
       </View>
 
       {/* Filtres équipement */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.chipsScroll}
-        contentContainerStyle={styles.chipsContent}
-      >
+      <View style={styles.chipsRow}>
         {EQUIPMENT_FILTERS.map(f => (
           <TouchableOpacity
             key={f.key}
@@ -155,15 +156,10 @@ export default function LibraryScreen() {
             ]}>{f.label}</Text>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </View>
 
       {/* Filtres type */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.chipsScroll}
-        contentContainerStyle={styles.chipsContent}
-      >
+      <View style={styles.chipsRow}>
         {TYPE_FILTERS.map(f => (
           <TouchableOpacity
             key={f.key}
@@ -180,7 +176,7 @@ export default function LibraryScreen() {
             ]}>{f.label}</Text>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </View>
 
       {/* Barre de recherche */}
       <View style={[styles.searchContainer, { borderBottomColor: colors.separator }]}>
@@ -211,8 +207,8 @@ export default function LibraryScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
           renderSectionHeader={({ section }) => (
-            <View style={[styles.sectionHeader, { backgroundColor: colors.background }]}>
-              <Text style={[styles.sectionHeaderText, { color: colors.textSecondary }]}>
+            <View style={[styles.sectionHeader, { backgroundColor: colors.backgroundSecondary, borderLeftColor: colors.accent }]}>
+              <Text style={[styles.sectionHeaderText, { color: colors.textPrimary }]}>
                 {section.title}
               </Text>
             </View>
@@ -264,8 +260,13 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 28, fontWeight: '700' },
   count: { fontSize: 13 },
-  chipsScroll: { flexGrow: 0, marginTop: 8 },
-  chipsContent: { paddingHorizontal: 16, gap: 8, paddingVertical: 2 },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    gap: 8,
+  },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 6,
@@ -284,14 +285,15 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: 40 },
   sectionHeader: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    paddingTop: 14,
+    paddingVertical: 10,
+    borderLeftWidth: 3,
+    marginTop: 4,
   },
   sectionHeaderText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    letterSpacing: 1,
   },
   exerciseRow: {
     flexDirection: 'row',

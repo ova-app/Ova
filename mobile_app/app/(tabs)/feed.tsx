@@ -6,6 +6,7 @@ import {
 } from 'react-native'
 import { router, useFocusEffect } from 'expo-router'
 import { Zap, Flame, Trophy, MapPin } from 'lucide-react-native'
+type PrLevel = 'gold' | 'silver' | 'bronze' | null
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../context/ThemeContext'
 
@@ -25,7 +26,7 @@ interface FeedPost {
   pr_count: number
   has_pr_charge: boolean
   has_pr_serie: boolean
-  has_pr_1rm: boolean
+  pr_seance: PrLevel
   like_count: number
   comment_count: number
   is_liked: boolean
@@ -99,9 +100,9 @@ export default function FeedScreen() {
     const { data: workoutsData, error } = await supabase
       .from('workouts')
       .select(`
-        id, title, started_at, duration_sec, user_id, location_city, photo_url,
+        id, title, started_at, duration_sec, user_id, location_city, photo_url, pr_seance,
         workout_exercises (
-          workout_sets ( weight_kg, reps, is_pr, pr_charge, pr_serie, pr_1rm )
+          workout_sets ( weight_kg, reps, is_pr, pr_charge, pr_serie )
         ),
         likes ( user_id ),
         comments ( id )
@@ -140,9 +141,9 @@ export default function FeedScreen() {
         total_sets: allSets.length,
         total_volume: allSets.reduce((sum: number, s: any) => sum + (s.weight_kg ?? 0) * (s.reps ?? 0), 0),
         pr_count: allSets.filter((s: any) => s.is_pr).length,
-        has_pr_charge: allSets.some((s: any) => s.pr_charge === true),
-        has_pr_serie: allSets.some((s: any) => s.pr_serie === true),
-        has_pr_1rm: allSets.some((s: any) => s.pr_1rm === true),
+        has_pr_charge: allSets.some((s: any) => s.pr_charge !== null && s.pr_charge !== undefined),
+        has_pr_serie: allSets.some((s: any) => s.pr_serie !== null && s.pr_serie !== undefined),
+        pr_seance: (w.pr_seance ?? null) as PrLevel,
         like_count: (w.likes ?? []).length,
         comment_count: (w.comments ?? []).length,
         is_liked: (w.likes ?? []).some((l: any) => l.user_id === user.id),
@@ -258,8 +259,7 @@ function PostCard({ post, colors, onLike, onComment, onLikers, onPress }: {
   onLikers: () => void
   onPress: () => void
 }) {
-  const hasPrTypes = post.has_pr_charge || post.has_pr_serie || post.has_pr_1rm
-  const showGenericPr = post.pr_count > 0 && !hasPrTypes
+  const hasPrIcons = post.has_pr_charge || post.has_pr_serie || post.pr_seance !== null
 
   return (
     <TouchableOpacity
@@ -309,16 +309,11 @@ function PostCard({ post, colors, onLike, onComment, onLikers, onPress }: {
             : `${post.total_volume.toLocaleString('fr')} kg`}
           colors={colors}
         />
-        {(hasPrTypes || showGenericPr) && (
+        {hasPrIcons && (
           <View style={[styles.prChip, { backgroundColor: colors.prAmber + '18' }]}>
-            {post.has_pr_charge && <Zap size={12} color="#FFD700" fill="#FFD700" />}
+            {post.has_pr_charge && <Zap size={12} color="#FAC775" fill="#FAC775" />}
             {post.has_pr_serie && <Flame size={12} color={colors.accent} fill={colors.accent} />}
-            {post.has_pr_1rm && <Trophy size={12} color={colors.prAmber} fill={colors.prAmber} />}
-            {showGenericPr && (
-              <Text style={[styles.prChipText, { color: colors.prAmber }]}>
-                {post.pr_count} PR
-              </Text>
-            )}
+            {post.pr_seance !== null && <Trophy size={12} color={colors.prAmber} fill={colors.prAmber} />}
           </View>
         )}
       </View>

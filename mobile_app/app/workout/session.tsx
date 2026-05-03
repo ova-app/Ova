@@ -10,16 +10,22 @@ import { useWorkout, WorkoutExercise, WorkoutSet, PrLevel } from '../../context/
 import { useTheme } from '../../context/ThemeContext'
 import { Zap, Flame } from 'lucide-react-native'
 
-const PR_LEVEL_COLORS: Record<NonNullable<PrLevel>, { badge: string; text: string; bg: string }> = {
-  gold:   { badge: '#FAC775', text: '#412402', bg: '#FAC77520' },
-  silver: { badge: '#C0C0C0', text: '#2C2C2C', bg: '#C0C0C020' },
-  bronze: { badge: '#CD7F32', text: '#2C1800', bg: '#CD7F3220' },
+const PR_LEVEL_COLORS: Record<NonNullable<PrLevel>, { badge: string; bg: string }> = {
+  gold:   { badge: '#FAC775', bg: '#FAC77520' },
+  silver: { badge: '#C0C0C0', bg: '#C0C0C020' },
+  bronze: { badge: '#CD7F32', bg: '#CD7F3220' },
 }
 
-const PR_LEVEL_LABELS: Record<NonNullable<PrLevel>, string> = {
-  gold:   '🥇 Record absolu !',
-  silver: '🥈 2e meilleure perf !',
-  bronze: '🥉 3e meilleure perf !',
+const PR_CHARGE_LABELS: Record<NonNullable<PrLevel>, string> = {
+  gold:   '🥇 PR Charge — record absolu !',
+  silver: '🥈 PR Charge — 2e meilleur poids !',
+  bronze: '🥉 PR Charge — 3e meilleur poids !',
+}
+
+const PR_SERIE_LABELS: Record<NonNullable<PrLevel>, string> = {
+  gold:   '🥇 PR Série — record absolu !',
+  silver: '🥈 PR Série — 2e meilleure perf !',
+  bronze: '🥉 PR Série — 3e meilleure perf !',
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -69,93 +75,99 @@ function formatWeight(v: number): string {
 }
 
 const ITEM_HEIGHT = 48
+const REPS_VALUES = Array.from({ length: 50 }, (_, i) => i + 1)  // 1..50
 
-// ─── ScrollPicker ─────────────────────────────────────────────────────────────
+// ─── WheelPicker ──────────────────────────────────────────────────────────────
 
-interface ScrollPickerProps {
+interface WheelPickerProps {
   values: number[]
   selected: number
   onSelect: (v: number) => void
   colors: ReturnType<typeof useTheme>['colors']
   label: string
-  barreSubLabel?: string | null
+  format?: (v: number) => string
+  sublabel?: string | null
 }
 
-function ScrollPicker({ values, selected, onSelect, colors, label, barreSubLabel }: ScrollPickerProps) {
+function WheelPicker({ values, selected, onSelect, colors, label, format, sublabel }: WheelPickerProps) {
   const scrollRef = useRef<ScrollView>(null)
-  const snapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const selectedIdx = Math.max(0, values.indexOf(selected))
+  const hasMomentum = useRef(false)
 
-  // Scroll to current selection when values change (new exercise)
+  // On value list change (new exercise/equipment): scroll to position.
+  // If selected is not in the new list, auto-select first item.
   useEffect(() => {
-    const timer = setTimeout(() => {
-      scrollRef.current?.scrollTo({ y: selectedIdx * ITEM_HEIGHT, animated: false })
-    }, 80)
-    return () => clearTimeout(timer)
+    let idx = values.indexOf(selected)
+    if (idx === -1) {
+      idx = 0
+      onSelect(values[0])
+    }
+    scrollRef.current?.scrollTo({ y: idx * ITEM_HEIGHT, animated: false })
   }, [values])
 
-  function snapTo(y: number) {
+  // Read which item landed in the center slot — do NOT write back to the ScrollView.
+  // snapToInterval already positioned it; writing back causes the trembling.
+  function readValue(y: number) {
     const idx = Math.max(0, Math.min(Math.round(y / ITEM_HEIGHT), values.length - 1))
     onSelect(values[idx])
-    scrollRef.current?.scrollTo({ y: idx * ITEM_HEIGHT, animated: true })
-  }
-
-  // Slow drag: scheduleSnap fires after 80ms unless momentum cancels it
-  function scheduleSnap(y: number) {
-    if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current)
-    snapTimeoutRef.current = setTimeout(() => snapTo(y), 80)
   }
 
   return (
-    <View style={pickerStyles.container}>
-      <Text style={[pickerStyles.label, { color: colors.textSecondary }]}>{label}</Text>
-      <View style={[pickerStyles.wheel, { borderColor: colors.separator }]}>
+    <View style={wpStyles.container}>
+      <Text style={[wpStyles.label, { color: colors.textSecondary }]}>{label}</Text>
+      <View style={[wpStyles.wheel, { borderColor: colors.separator }]}>
         <View
           pointerEvents="none"
-          style={[pickerStyles.highlight, { borderColor: colors.accent, backgroundColor: colors.accent + '15' }]}
+          style={[wpStyles.highlight, { borderColor: colors.accent, backgroundColor: colors.accent + '15' }]}
         />
         <ScrollView
           ref={scrollRef}
           showsVerticalScrollIndicator={false}
+          snapToInterval={ITEM_HEIGHT}
           decelerationRate="fast"
+          scrollEventThrottle={16}
           contentContainerStyle={{ paddingVertical: ITEM_HEIGHT * 2 }}
-          onScrollEndDrag={e => scheduleSnap(e.nativeEvent.contentOffset.y)}
+          onScrollBeginDrag={() => { hasMomentum.current = false }}
+          onMomentumScrollBegin={() => { hasMomentum.current = true }}
+          onScrollEndDrag={e => {
+            if (!hasMomentum.current) readValue(e.nativeEvent.contentOffset.y)
+          }}
           onMomentumScrollEnd={e => {
-            if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current)
-            snapTo(e.nativeEvent.contentOffset.y)
+            hasMomentum.current = false
+            readValue(e.nativeEvent.contentOffset.y)
           }}
         >
-          {values.map((v, idx) => {
+          {values.map((v, i) => {
             const isSelected = v === selected
             return (
               <TouchableOpacity
                 key={v}
-                style={pickerStyles.item}
+                activeOpacity={0.7}
+                style={wpStyles.item}
                 onPress={() => {
                   onSelect(v)
-                  scrollRef.current?.scrollTo({ y: idx * ITEM_HEIGHT, animated: true })
+                  scrollRef.current?.scrollTo({ y: i * ITEM_HEIGHT, animated: true })
                 }}
               >
                 <Text style={[
-                  pickerStyles.itemText,
+                  wpStyles.itemText,
                   { color: isSelected ? colors.accent : colors.textSecondary },
-                  isSelected && pickerStyles.itemTextSelected,
+                  isSelected && wpStyles.itemTextSelected,
                 ]}>
-                  {formatWeight(v)}
+                  {format ? format(v) : String(v)}
                 </Text>
               </TouchableOpacity>
             )
           })}
         </ScrollView>
       </View>
-      {barreSubLabel && (
-        <Text style={[pickerStyles.subLabel, { color: colors.textSecondary }]}>{barreSubLabel}</Text>
+      {sublabel && (
+        <Text style={[wpStyles.sublabel, { color: colors.textSecondary }]}>{sublabel}</Text>
       )}
     </View>
   )
 }
 
-const pickerStyles = StyleSheet.create({
+const wpStyles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', gap: 6 },
   label: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   wheel: {
@@ -179,47 +191,7 @@ const pickerStyles = StyleSheet.create({
   item: { height: ITEM_HEIGHT, alignItems: 'center', justifyContent: 'center' },
   itemText: { fontSize: 20, fontVariant: ['tabular-nums'] },
   itemTextSelected: { fontSize: 24, fontWeight: '700' },
-  subLabel: { fontSize: 11, textAlign: 'center' },
-})
-
-// ─── Reps stepper ─────────────────────────────────────────────────────────────
-
-interface RepsStepperProps {
-  value: number
-  onChange: (v: number) => void
-  colors: ReturnType<typeof useTheme>['colors']
-}
-
-function RepsStepper({ value, onChange, colors }: RepsStepperProps) {
-  return (
-    <View style={repsStyles.container}>
-      <Text style={[repsStyles.label, { color: colors.textSecondary }]}>REPS</Text>
-      <View style={repsStyles.stepper}>
-        <TouchableOpacity
-          style={[repsStyles.btn, { backgroundColor: colors.backgroundSecondary }]}
-          onPress={() => onChange(Math.max(0, value - 1))}
-        >
-          <Text style={[repsStyles.btnText, { color: colors.textPrimary }]}>−</Text>
-        </TouchableOpacity>
-        <Text style={[repsStyles.value, { color: colors.textPrimary }]}>{value}</Text>
-        <TouchableOpacity
-          style={[repsStyles.btn, { backgroundColor: colors.backgroundSecondary }]}
-          onPress={() => onChange(value + 1)}
-        >
-          <Text style={[repsStyles.btnText, { color: colors.textPrimary }]}>+</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  )
-}
-
-const repsStyles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', gap: 6 },
-  label: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 0 },
-  btn: { width: 48, height: ITEM_HEIGHT * 5, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
-  btnText: { fontSize: 28, fontWeight: '300' },
-  value: { fontSize: 40, fontWeight: '700', minWidth: 64, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  sublabel: { fontSize: 11, textAlign: 'center' },
 })
 
 // ─── Composant principal ──────────────────────────────────────────────────────
@@ -228,11 +200,9 @@ export default function WorkoutSessionScreen() {
   const { colors } = useTheme()
   const workout = useWorkout()
   const [showPicker, setShowPicker] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<ExerciseResult[]>([])
-  const [searching, setSearching] = useState(false)
-  const [prFlash, setPrFlash] = useState<{ isPrCharge: boolean; isPrSerie: boolean; isPr1rm: boolean; prLevel: PrLevel } | null>(null)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [allExercises, setAllExercises] = useState<ExerciseResult[]>([])
+  const [exercisesLoading, setExercisesLoading] = useState(false)
+  const [prFlash, setPrFlash] = useState<{ prCharge: PrLevel; prSerie: PrLevel } | null>(null)
 
   // Démarrage automatique si on arrive depuis le FAB
   useEffect(() => {
@@ -244,7 +214,10 @@ export default function WorkoutSessionScreen() {
   const validatedSets = currentExercise?.sets.filter(s => s.validated) ?? []
   const draft = currentExercise?.sets.find(s => !s.validated) ?? null
 
-  const weightValues = generateWeightValues(currentExercise?.equipment_type ?? null)
+  const weightValues = useMemo(
+    () => generateWeightValues(currentExercise?.equipment_type ?? null),
+    [currentExercise?.equipment_type]
+  )
   const isBodyweight = currentExercise?.equipment_type === 'poids_corps'
 
   // Barbell subtitle
@@ -268,38 +241,21 @@ export default function WorkoutSessionScreen() {
 
   // ─── Recherche exercice ────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (!showPicker) { setSearchQuery(''); setSearchResults([]); return }
-    fetchExercises('')
-  }, [showPicker])
+  useEffect(() => { loadExercises() }, [])
 
-  useEffect(() => {
-    if (!showPicker) return
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => fetchExercises(searchQuery), 350)
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [searchQuery, showPicker])
-
-  async function fetchExercises(q: string) {
-    setSearching(true)
-    let query = supabase
+  async function loadExercises() {
+    setExercisesLoading(true)
+    const { data } = await supabase
       .from('exercises')
       .select('id, name_fr, equipment_type, muscle_group')
       .order('name_fr')
-      .limit(40)
-
-    if (q.trim().length > 0) query = query.ilike('name_fr', `%${q.trim()}%`)
-
-    const { data } = await query
-    setSearching(false)
-
-    const results: ExerciseResult[] = (data ?? []).map((ex: any) => ({
+    setExercisesLoading(false)
+    setAllExercises((data ?? []).map((ex: any) => ({
       id: ex.id,
       name_fr: ex.name_fr,
       equipment_type: ex.equipment_type,
       muscle_group: ex.muscle_group ?? null,
-    }))
-    setSearchResults(results)
+    })))
   }
 
   async function handleSelectExercise(ex: ExerciseResult) {
@@ -319,7 +275,7 @@ export default function WorkoutSessionScreen() {
       return
     }
     const result = workout.validateSet(workout.currentIndex)
-    if (result.isPrCharge || result.isPrSerie || result.isPr1rm || result.prLevel) {
+    if (result.prCharge !== null || result.prSerie !== null) {
       setPrFlash(result)
       setTimeout(() => setPrFlash(null), 2500)
     }
@@ -369,10 +325,8 @@ export default function WorkoutSessionScreen() {
         </View>
         <ExercisePicker
           visible={showPicker}
-          query={searchQuery}
-          results={searchResults}
-          searching={searching}
-          onChangeQuery={setSearchQuery}
+          allExercises={allExercises}
+          loading={exercisesLoading}
           onSelect={handleSelectExercise}
           onClose={() => setShowPicker(false)}
           colors={colors}
@@ -447,26 +401,20 @@ export default function WorkoutSessionScreen() {
       {/* PR Flash */}
       {prFlash && (
         <View style={styles.prFlashBanner}>
-          {prFlash.prLevel && (
-            <Text style={[styles.prFlashText, { color: PR_LEVEL_COLORS[prFlash.prLevel].badge, fontSize: 17 }]}>
-              {PR_LEVEL_LABELS[prFlash.prLevel]}
-            </Text>
-          )}
-          {!prFlash.prLevel && prFlash.isPrCharge && (
+          {prFlash.prCharge && (
             <View style={styles.prFlashItem}>
-              <Zap color="#FFD700" size={16} fill="#FFD700" />
-              <Text style={[styles.prFlashText, { color: '#FFD700' }]}>PR Charge !</Text>
+              <Zap color={PR_LEVEL_COLORS[prFlash.prCharge].badge} size={16} fill={PR_LEVEL_COLORS[prFlash.prCharge].badge} />
+              <Text style={[styles.prFlashText, { color: PR_LEVEL_COLORS[prFlash.prCharge].badge }]}>
+                {PR_CHARGE_LABELS[prFlash.prCharge]}
+              </Text>
             </View>
           )}
-          {prFlash.isPrSerie && (
+          {prFlash.prSerie && (
             <View style={styles.prFlashItem}>
-              <Flame color="#D85A30" size={16} fill="#D85A30" />
-              <Text style={[styles.prFlashText, { color: '#D85A30' }]}>PR Série !</Text>
-            </View>
-          )}
-          {prFlash.isPr1rm && (
-            <View style={styles.prFlashItem}>
-              <Text style={[styles.prFlashText, { color: '#FFD700' }]}>🏆 PR 1RM !</Text>
+              <Flame color={PR_LEVEL_COLORS[prFlash.prSerie].badge} size={16} fill={PR_LEVEL_COLORS[prFlash.prSerie].badge} />
+              <Text style={[styles.prFlashText, { color: PR_LEVEL_COLORS[prFlash.prSerie].badge }]}>
+                {PR_SERIE_LABELS[prFlash.prSerie]}
+              </Text>
             </View>
           )}
         </View>
@@ -479,22 +427,25 @@ export default function WorkoutSessionScreen() {
 
           <View style={styles.inputsRow}>
             {!isBodyweight ? (
-              <ScrollPicker
+              <WheelPicker
                 values={weightValues}
-                selected={draft.weight_kg || weightValues[0]}
+                selected={draft.weight_kg}
                 onSelect={v => workout.updateDraftSet(workout.currentIndex, 'weight_kg', v)}
                 colors={colors}
                 label="Poids (kg)"
-                barreSubLabel={barreSubLabel}
+                format={formatWeight}
+                sublabel={barreSubLabel}
               />
             ) : (
               <View style={{ flex: 1 }} />
             )}
             <View style={[styles.divider, { backgroundColor: colors.separator }]} />
-            <RepsStepper
-              value={draft.reps}
-              onChange={v => workout.updateDraftSet(workout.currentIndex, 'reps', v)}
+            <WheelPicker
+              values={REPS_VALUES}
+              selected={draft.reps}
+              onSelect={v => workout.updateDraftSet(workout.currentIndex, 'reps', v)}
               colors={colors}
+              label="Reps"
             />
           </View>
 
@@ -531,7 +482,8 @@ export default function WorkoutSessionScreen() {
 // ─── SetRow ──────────────────────────────────────────────────────────────────
 
 function SetRow({ set, onRemove, colors }: { set: WorkoutSet; onRemove: () => void; colors: ReturnType<typeof useTheme>['colors'] }) {
-  const levelCfg = set.pr_level ? PR_LEVEL_COLORS[set.pr_level] : null
+  const chargeCfg = set.pr_charge ? PR_LEVEL_COLORS[set.pr_charge] : null
+  const serieCfg  = set.pr_serie  ? PR_LEVEL_COLORS[set.pr_serie]  : null
   return (
     <View style={[setStyles.row, { borderBottomColor: colors.separator }]}>
       <Text style={[setStyles.number, { color: colors.textSecondary }]}>Série {set.set_number}</Text>
@@ -540,22 +492,21 @@ function SetRow({ set, onRemove, colors }: { set: WorkoutSet; onRemove: () => vo
           ? `${formatWeight(set.weight_kg)} kg × ${set.reps} reps`
           : `${set.reps} reps`}
       </Text>
-      {levelCfg ? (
-        <View style={[setStyles.prBadge, { backgroundColor: levelCfg.bg, borderColor: levelCfg.badge + '60' }]}>
-          <Text style={[setStyles.prBadgeText, { color: levelCfg.badge }]}>
-            {set.pr_level === 'gold' ? '🥇' : set.pr_level === 'silver' ? '🥈' : '🥉'}
+      {chargeCfg && (
+        <View style={[setStyles.prBadge, { backgroundColor: chargeCfg.bg, borderColor: chargeCfg.badge + '60' }]}>
+          <Zap color={chargeCfg.badge} size={11} fill={chargeCfg.badge} />
+          <Text style={[setStyles.prBadgeText, { color: chargeCfg.badge }]}>
+            {set.pr_charge === 'gold' ? '🥇' : set.pr_charge === 'silver' ? '🥈' : '🥉'}
           </Text>
         </View>
-      ) : (
-        <>
-          {set.pr_charge && <Zap color="#FFD700" size={14} fill="#FFD700" />}
-          {set.pr_serie && <Flame color="#D85A30" size={14} fill="#D85A30" />}
-          {set.is_pr && !set.pr_charge && !set.pr_serie && (
-            <View style={[setStyles.prBadge, { backgroundColor: '#FAC77520', borderColor: '#FAC77540' }]}>
-              <Text style={[setStyles.prBadgeText, { color: '#FAC775' }]}>PR</Text>
-            </View>
-          )}
-        </>
+      )}
+      {serieCfg && (
+        <View style={[setStyles.prBadge, { backgroundColor: serieCfg.bg, borderColor: serieCfg.badge + '60' }]}>
+          <Flame color={serieCfg.badge} size={11} fill={serieCfg.badge} />
+          <Text style={[setStyles.prBadgeText, { color: serieCfg.badge }]}>
+            {set.pr_serie === 'gold' ? '🥇' : set.pr_serie === 'silver' ? '🥈' : '🥉'}
+          </Text>
+        </View>
       )}
       <TouchableOpacity style={setStyles.deleteBtn} onPress={onRemove} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
         <Text style={[setStyles.deleteText, { color: colors.textSecondary }]}>×</Text>
@@ -585,10 +536,8 @@ const setStyles = StyleSheet.create({
 
 interface ExercisePickerProps {
   visible: boolean
-  query: string
-  results: ExerciseResult[]
-  searching: boolean
-  onChangeQuery: (q: string) => void
+  allExercises: ExerciseResult[]
+  loading: boolean
   onSelect: (ex: ExerciseResult) => void
   onClose: () => void
   colors: ReturnType<typeof useTheme>['colors']
@@ -599,7 +548,42 @@ const EQUIPMENT_SHORT: Record<string, string> = {
   poulie: 'Poulie', poids_corps: 'Poids du corps', kettlebell: 'KB', smith: 'Smith',
 }
 
-function ExercisePicker({ visible, query, results, searching, onChangeQuery, onSelect, onClose, colors }: ExercisePickerProps) {
+const MUSCLE_FILTERS = [
+  { key: 'all',             label: 'Tous' },
+  { key: 'pectoraux',       label: 'Pecto' },
+  { key: 'dos',             label: 'Dos' },
+  { key: 'epaules',         label: 'Épaules' },
+  { key: 'biceps',          label: 'Biceps' },
+  { key: 'triceps',         label: 'Triceps' },
+  { key: 'quadriceps',      label: 'Quadri' },
+  { key: 'ischio_jambiers', label: 'Ischio' },
+  { key: 'fessiers',        label: 'Fessiers' },
+  { key: 'mollets',         label: 'Mollets' },
+  { key: 'abdominaux',      label: 'Abdos' },
+  { key: 'avant_bras',      label: 'Av-bras' },
+]
+
+function normalize(str: string) {
+  return str.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+function ExercisePicker({ visible, allExercises, loading, onSelect, onClose, colors }: ExercisePickerProps) {
+  const [query, setQuery] = useState('')
+  const [muscleFilter, setMuscleFilter] = useState('all')
+
+  useEffect(() => {
+    if (!visible) { setQuery(''); setMuscleFilter('all') }
+  }, [visible])
+
+  const results = useMemo(() => {
+    const q = normalize(query)
+    return allExercises.filter(ex => {
+      const matchSearch = q.length === 0 || normalize(ex.name_fr).includes(q)
+      const matchMuscle = muscleFilter === 'all' || ex.muscle_group === muscleFilter
+      return matchSearch && matchMuscle
+    })
+  }, [allExercises, query, muscleFilter])
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={[pStyles.container, { backgroundColor: colors.background }]}>
@@ -614,11 +598,29 @@ function ExercisePicker({ visible, query, results, searching, onChangeQuery, onS
           placeholder="Rechercher..."
           placeholderTextColor={colors.textSecondary}
           value={query}
-          onChangeText={onChangeQuery}
+          onChangeText={setQuery}
           autoFocus
           clearButtonMode="while-editing"
         />
-        {searching ? (
+        <View style={pStyles.chipsRow}>
+          {MUSCLE_FILTERS.map(f => (
+            <TouchableOpacity
+              key={f.key}
+              style={[
+                pStyles.chip,
+                { backgroundColor: colors.backgroundSecondary, borderColor: colors.separator },
+                muscleFilter === f.key && { backgroundColor: colors.accent, borderColor: colors.accent },
+              ]}
+              onPress={() => setMuscleFilter(f.key)}
+            >
+              <Text style={[
+                pStyles.chipText, { color: colors.textSecondary },
+                muscleFilter === f.key && { color: '#fff' },
+              ]}>{f.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {loading ? (
           <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
         ) : (
           <FlatList
@@ -658,12 +660,27 @@ const pStyles = StyleSheet.create({
   closeText: { fontSize: 16 },
   search: {
     marginHorizontal: 16,
-    marginVertical: 10,
+    marginTop: 10,
+    marginBottom: 4,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
   },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 7,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  chipText: { fontSize: 12, fontWeight: '500' },
   row: { paddingVertical: 14, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   rowName: { fontSize: 15, fontWeight: '500', flex: 1 },
   rowSub: { fontSize: 12 },

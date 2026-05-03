@@ -4,22 +4,19 @@ import {
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { Zap, Flame, Trophy } from 'lucide-react-native'
+type PrLevel = 'gold' | 'silver' | 'bronze' | null
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../context/ThemeContext'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-type PrLevel = 'gold' | 'silver' | 'bronze' | null
 
 interface SetDetail {
   set_number: number
   weight_kg: number
   reps: number
   is_pr: boolean
-  pr_charge: boolean
-  pr_serie: boolean
-  pr_1rm: boolean
-  pr_level: PrLevel
+  pr_charge: PrLevel
+  pr_serie: PrLevel
 }
 
 interface ExerciseDetail {
@@ -90,8 +87,8 @@ export default function WorkoutDetailScreen() {
       .select(`
         id, title, started_at, duration_sec, photo_url,
         workout_exercises (
-          id, order_index, exercise_id,
-          workout_sets ( set_number, weight_kg, reps, is_pr, pr_charge, pr_serie, pr_1rm, pr_level )
+          id, order_index, exercise_id, pr_exercice,
+          workout_sets ( set_number, weight_kg, reps, is_pr, pr_charge, pr_serie )
         )
       `)
       .eq('id', workoutId)
@@ -128,10 +125,8 @@ export default function WorkoutDetailScreen() {
             weight_kg: s.weight_kg ?? 0,
             reps: s.reps ?? 0,
             is_pr: s.is_pr ?? false,
-            pr_charge: s.pr_charge ?? false,
-            pr_serie: s.pr_serie ?? false,
-            pr_1rm: s.pr_1rm ?? false,
-            pr_level: (s.pr_level ?? null) as PrLevel,
+            pr_charge: (s.pr_charge ?? null) as PrLevel,
+            pr_serie: (s.pr_serie ?? null) as PrLevel,
           })),
       }))
 
@@ -295,28 +290,29 @@ export default function WorkoutDetailScreen() {
 const PR_LEVEL_COLORS: Record<NonNullable<PrLevel>, string> = {
   gold: '#FAC775', silver: '#C0C0C0', bronze: '#CD7F32',
 }
+const PR_LEVEL_EMOJI: Record<NonNullable<PrLevel>, string> = {
+  gold: '🥇', silver: '🥈', bronze: '🥉',
+}
 
 function PRBadges({ set, colors }: { set: SetDetail; colors: ReturnType<typeof useTheme>['colors'] }) {
-  if (!set.is_pr && !set.pr_level) return <View style={{ width: 60 }} />
+  if (!set.pr_charge && !set.pr_serie) return <View style={{ width: 60 }} />
   return (
     <View style={styles.prIcons}>
-      {set.pr_level ? (
-        <View style={[styles.prBadge, { backgroundColor: PR_LEVEL_COLORS[set.pr_level] + '25', borderColor: PR_LEVEL_COLORS[set.pr_level] + '60' }]}>
-          <Text style={[styles.prBadgeText, { color: PR_LEVEL_COLORS[set.pr_level] }]}>
-            {set.pr_level === 'gold' ? '🥇' : set.pr_level === 'silver' ? '🥈' : '🥉'}
+      {set.pr_charge && (
+        <View style={[styles.prBadge, { backgroundColor: PR_LEVEL_COLORS[set.pr_charge] + '25', borderColor: PR_LEVEL_COLORS[set.pr_charge] + '60' }]}>
+          <Zap size={10} color={PR_LEVEL_COLORS[set.pr_charge]} fill={PR_LEVEL_COLORS[set.pr_charge]} />
+          <Text style={[styles.prBadgeText, { color: PR_LEVEL_COLORS[set.pr_charge] }]}>
+            {PR_LEVEL_EMOJI[set.pr_charge]}
           </Text>
         </View>
-      ) : (
-        <>
-          {set.pr_charge && <Zap size={14} color="#FFD700" fill="#FFD700" />}
-          {set.pr_serie && <Flame size={14} color={colors.accent} fill={colors.accent} />}
-          {set.pr_1rm && <Trophy size={14} color="#FAC775" fill="#FAC775" />}
-          {!set.pr_charge && !set.pr_serie && !set.pr_1rm && (
-            <View style={[styles.prBadge, { backgroundColor: colors.prAmber + '20' }]}>
-              <Text style={[styles.prBadgeText, { color: colors.prAmber }]}>PR</Text>
-            </View>
-          )}
-        </>
+      )}
+      {set.pr_serie && (
+        <View style={[styles.prBadge, { backgroundColor: PR_LEVEL_COLORS[set.pr_serie] + '25', borderColor: PR_LEVEL_COLORS[set.pr_serie] + '60' }]}>
+          <Flame size={10} color={PR_LEVEL_COLORS[set.pr_serie]} fill={PR_LEVEL_COLORS[set.pr_serie]} />
+          <Text style={[styles.prBadgeText, { color: PR_LEVEL_COLORS[set.pr_serie] }]}>
+            {PR_LEVEL_EMOJI[set.pr_serie]}
+          </Text>
+        </View>
       )}
     </View>
   )
