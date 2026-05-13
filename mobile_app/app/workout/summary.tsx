@@ -700,12 +700,7 @@ export default function SummaryScreen() {
             userId: user.id,
             workoutId: workoutData.id,
             startedAtIso: workout.startedAt!.toISOString(),
-            volume_total_kg: savedMetrics.volume_total_kg,
-            densite_kg_par_min: savedMetrics.densite_kg_par_min,
-            nb_series_total: savedMetrics.nb_series_total,
-            score_recuperation_estime: savedMetrics.score_recuperation_estime,
-            nb_pr_seance: savedMetrics.nb_pr_seance,
-            streak_semaines_actives: savedMetrics.streak_semaines_actives,
+            ...savedMetrics,
           })
           console.log('[MYO] saveMyoSignature done')
         } else {

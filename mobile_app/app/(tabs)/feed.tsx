@@ -385,7 +385,7 @@ function PostCard({ post, colors, onLike, onComment, onLikers, onPress }: {
 
 
       {/* Myo */}
-      {post.myoSig && <MyoCard sig={post.myoSig} colors={colors} />}
+      {post.myoSig && <MyoCard sig={post.myoSig} workoutId={post.id} colors={colors} />}
 
       {/* Actions */}
       <View style={styles.actions}>
@@ -648,79 +648,79 @@ function MiniStat({ icon, label, colors }: {
   )
 }
 
-// ─── Myo Math ─────────────────────────────────────────────────────────────────
+// ─── Myo Fractal ──────────────────────────────────────────────────────────────
 
-const BS = 200          // bloom SVG size
-const BC = BS / 2       // center
-const B_MIN = 8         // radius at Z = -3
-const B_MAX = 80        // radius at Z = +3
-const B_REF = 44        // radius at Z = 0 (user average)
+const MB = 160
+const MC = MB / 2
+const BLOOM_COLORS = ['#D85A30', '#FAC775', '#9B59B6', '#50C878', '#4A9EFF', '#FF9800']
 
-function bloomAngle(i: number): number {
-  return -Math.PI / 2 + (i / 6) * 2 * Math.PI
+interface FBranch { d: string; stroke: string; sw: number; op: number }
+interface FDot    { cx: number; cy: number; r: number; fill: string }
+
+function bPath(x1: number, y1: number, x2: number, y2: number, bend: number): string {
+  const dx = x2 - x1, dy = y2 - y1
+  const len = Math.sqrt(dx * dx + dy * dy) || 1
+  const px = (-dy / len) * len * bend * 0.22
+  const py = (dx / len) * len * bend * 0.22
+  const c1x = x1 + dx * 0.33 + px, c1y = y1 + dy * 0.33 + py
+  const c2x = x2 - dx * 0.25 + px * 0.5, c2y = y2 - dy * 0.25 + py * 0.5
+  return `M${x1.toFixed(1)},${y1.toFixed(1)} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}`
 }
 
-function bloomTip(z: number, i: number): { x: number; y: number } {
-  const r = B_MIN + ((z + 3) / 6) * (B_MAX - B_MIN)
-  const a = bloomAngle(i)
-  return { x: BC + r * Math.cos(a), y: BC + r * Math.sin(a) }
-}
+function addAxis(cx: number, cy: number, angle: number, z: number, color: string, br: FBranch[], dt: FDot[]) {
+  const r0 = 14 + ((z + 3) / 6) * 52
+  const spread = (20 + Math.abs(z) * 7) * Math.PI / 180
+  const levels = z > 0.8 ? 3 : z > -0.8 ? 2 : 1
 
-function hexRing(r: number): { x: number; y: number }[] {
-  return Array.from({ length: 6 }, (_, i) => ({
-    x: BC + r * Math.cos(bloomAngle(i)),
-    y: BC + r * Math.sin(bloomAngle(i)),
-  }))
-}
+  const tx = cx + r0 * Math.cos(angle)
+  const ty = cy + r0 * Math.sin(angle)
+  br.push({ d: bPath(cx, cy, tx, ty, z * 0.1), stroke: color, sw: 2.0, op: 0.92 })
 
-function crPath(pts: { x: number; y: number }[], t = 0.32): string {
-  const n = pts.length
-  const d: string[] = []
-  for (let i = 0; i < n; i++) {
-    const p0 = pts[(i - 1 + n) % n]
-    const p1 = pts[i]
-    const p2 = pts[(i + 1) % n]
-    const p3 = pts[(i + 2) % n]
-    const c1x = p1.x + (p2.x - p0.x) * t
-    const c1y = p1.y + (p2.y - p0.y) * t
-    const c2x = p2.x - (p3.x - p1.x) * t
-    const c2y = p2.y - (p3.y - p1.y) * t
-    if (i === 0) d.push(`M ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`)
-    d.push(`C ${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`)
+  if (levels === 1) { dt.push({ cx: tx, cy: ty, r: 2.2, fill: color }); return }
+
+  const r1 = r0 * 0.44
+  for (const s of [-1, 1]) {
+    const a2 = angle + s * spread
+    const t2x = tx + r1 * Math.cos(a2), t2y = ty + r1 * Math.sin(a2)
+    br.push({ d: bPath(tx, ty, t2x, t2y, z * 0.07), stroke: color, sw: 1.1, op: 0.72 })
+
+    if (levels === 2) { dt.push({ cx: t2x, cy: t2y, r: 1.5, fill: color }); continue }
+
+    const r2 = r1 * 0.52
+    for (const s2 of [-1, 1]) {
+      const a3 = a2 + s2 * spread * 0.65
+      const t3x = t2x + r2 * Math.cos(a3), t3y = t2y + r2 * Math.sin(a3)
+      br.push({ d: bPath(t2x, t2y, t3x, t3y, z * 0.05), stroke: color, sw: 0.6, op: 0.55 })
+      dt.push({ cx: t3x, cy: t3y, r: 1.0, fill: color })
+    }
   }
-  return d.join(' ') + ' Z'
 }
 
-function polyStr(pts: { x: number; y: number }[]): string {
-  return pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+function buildBloom(sig: MyoSig): { br: FBranch[]; dt: FDot[] } {
+  const zs = [sig.z_volume, sig.z_intensite, sig.z_structure, sig.z_recovery, sig.z_performance, sig.z_regularite]
+  const br: FBranch[] = [], dt: FDot[] = []
+  zs.forEach((z, i) => addAxis(MC, MC, -Math.PI / 2 + (i / 6) * 2 * Math.PI, z, BLOOM_COLORS[i], br, dt))
+  return { br, dt }
 }
-
-// Pré-calculé une seule fois — ne dépend pas du sig
-const REF_HEX_STR = polyStr(hexRing(B_REF))
-const AXIS_ENDS = hexRing(B_MAX)
 
 // ─── MyoBloom ─────────────────────────────────────────────────────────────────
 
-function MyoBloom({ sig, accent, sep }: { sig: MyoSig; accent: string; sep: string }) {
-  const tips = useMemo(() => [
-    bloomTip(sig.z_volume, 0),
-    bloomTip(sig.z_intensite, 1),
-    bloomTip(sig.z_structure, 2),
-    bloomTip(sig.z_recovery, 3),
-    bloomTip(sig.z_performance, 4),
-    bloomTip(sig.z_regularite, 5),
-  ], [sig.z_volume, sig.z_intensite, sig.z_structure, sig.z_recovery, sig.z_performance, sig.z_regularite])
-
-  const fillPath = useMemo(() => crPath(tips), [tips])
-
+function MyoBloom({ sig }: { sig: MyoSig }) {
+  const { br, dt } = useMemo(
+    () => buildBloom(sig),
+    [sig.z_volume, sig.z_intensite, sig.z_structure, sig.z_recovery, sig.z_performance, sig.z_regularite]
+  )
   return (
-    <Svg width={BS} height={BS}>
-      {AXIS_ENDS.map((p, i) => (
-        <Line key={i} x1={BC} y1={BC} x2={p.x} y2={p.y} stroke={sep} strokeWidth={0.5} />
+    <Svg width={MB} height={MB}>
+      <Circle cx={MC} cy={MC} r={36} fill="none" stroke="#ffffff0e" strokeWidth={0.5} />
+      {br.map((b, i) => (
+        <Path key={i} d={b.d} stroke={b.stroke} strokeWidth={b.sw} opacity={b.op} fill="none" strokeLinecap="round" />
       ))}
-      <Polygon points={REF_HEX_STR} fill="none" stroke={sep} strokeWidth={1} strokeDasharray="3 3" />
-      <Path d={fillPath} fill={`${accent}55`} stroke={accent} strokeWidth={1.5} strokeLinejoin="round" />
-      <Circle cx={BC} cy={BC} r={5} fill={accent} />
+      {dt.map((d, i) => (
+        <Circle key={i} cx={d.cx} cy={d.cy} r={d.r} fill={d.fill} opacity={0.85} />
+      ))}
+      <Circle cx={MC} cy={MC} r={4.5} fill="#ffffff" opacity={0.6} />
+      <Circle cx={MC} cy={MC} r={2} fill="#ffffff" />
     </Svg>
   )
 }
@@ -745,12 +745,19 @@ function MyoScoreBar({ score, textColor, sepColor }: { score: number; textColor:
 
 // ─── MyoCard ──────────────────────────────────────────────────────────────────
 
-function MyoCard({ sig, colors }: { sig: MyoSig; colors: ReturnType<typeof useTheme>['colors'] }) {
+function MyoCard({ sig, workoutId, colors }: {
+  sig: MyoSig; workoutId: string
+  colors: ReturnType<typeof useTheme>['colors']
+}) {
   return (
-    <View style={myoSt.card}>
-      <MyoBloom sig={sig} accent={colors.accent} sep={colors.separator} />
+    <TouchableOpacity
+      style={myoSt.card}
+      onPress={() => router.push(`/workout/myo-orb?id=${workoutId}` as any)}
+      activeOpacity={0.85}
+    >
+      <MyoBloom sig={sig} />
       <MyoScoreBar score={sig.score} textColor={colors.textPrimary} sepColor={colors.separator} />
-    </View>
+    </TouchableOpacity>
   )
 }
 
