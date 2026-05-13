@@ -1,19 +1,100 @@
-// npm install three @types/three
-// expo-gl ships with Expo SDK — no extra install needed
+// npm install @react-three/fiber --legacy-peer-deps
+// (three + expo-gl already installed)
 
-import { useEffect, useRef, useState } from 'react'
+import React, { useRef, useMemo, useState, useEffect } from 'react'
 import {
   View, Text, StyleSheet, Dimensions, ActivityIndicator,
   TouchableOpacity, PanResponder, Animated,
 } from 'react-native'
-import { GLView } from 'expo-gl'
+import { Canvas, useFrame, useThree } from '@react-three/fiber/native'
 import * as THREE from 'three'
 import { router, useLocalSearchParams } from 'expo-router'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../context/ThemeContext'
 import Svg, { Path, Circle } from 'react-native-svg'
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
+// ─── GLSL ─────────────────────────────────────────────────────────────────────
+
+// Uniform block injected before void main()
+const GLSL_UNIFORMS = `
+uniform vec3  uAttractors[8];
+uniform float uWeights[8];
+uniform float uTime;
+`
+
+// Ashima 3D simplex noise — GLSL ES 1.0, prefixed to avoid symbol collisions
+const GLSL_NOISE = `
+vec3  _mn3(vec3  x){return x-floor(x*(1./289.))*289.;}
+vec4  _mn4(vec4  x){return x-floor(x*(1./289.))*289.;}
+vec4  _mp(vec4   x){return _mn4(((x*34.)+1.)*x);}
+vec4  _ti(vec4   r){return 1.79284291400159-0.85373472095314*r;}
+float myo_snoise(vec3 v){
+  const vec2 C=vec2(1./6.,1./3.);
+  const vec4 D=vec4(0.,.5,1.,2.);
+  vec3 i =floor(v+dot(v,C.yyy));
+  vec3 x0=v-i+dot(i,C.xxx);
+  vec3 g =step(x0.yzx,x0.xyz);
+  vec3 l =1.-g;
+  vec3 i1=min(g.xyz,l.zxy);
+  vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+C.xxx;
+  vec3 x2=x0-i2+C.yyy;
+  vec3 x3=x0-D.yyy;
+  i=_mn3(i);
+  vec4 p=_mp(_mp(_mp(
+    i.z+vec4(0.,i1.z,i2.z,1.))+
+    i.y+vec4(0.,i1.y,i2.y,1.))+
+    i.x+vec4(0.,i1.x,i2.x,1.));
+  float n_=.142857142857;
+  vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.*floor(p*ns.z*ns.z);
+  vec4 x_=floor(j*ns.z);
+  vec4 y_=floor(j-7.*x_);
+  vec4 x=x_*ns.x+ns.yyyy;
+  vec4 y=y_*ns.x+ns.yyyy;
+  vec4 h=1.-abs(x)-abs(y);
+  vec4 b0=vec4(x.xy,y.xy);
+  vec4 b1=vec4(x.zw,y.zw);
+  vec4 s0=floor(b0)*2.+1.;
+  vec4 s1=floor(b1)*2.+1.;
+  vec4 sh=-step(h,vec4(0.));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;
+  vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,h.x);
+  vec3 p1=vec3(a0.zw,h.y);
+  vec3 p2=vec3(a1.xy,h.z);
+  vec3 p3=vec3(a1.zw,h.w);
+  vec4 norm=_ti(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+  p0*=norm.x; p1*=norm.y; p2*=norm.z; p3*=norm.w;
+  vec4 m=max(.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.);
+  m=m*m;
+  return 42.*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+}
+`
+
+// Injected immediately after #include <begin_vertex>
+// At that point `transformed` = vec3(position) — we overwrite it with displaced pos.
+// Radial displacement preserves normal direction → matcap UVs stay correct.
+const GLSL_DISPLACE = `
+{
+  vec3 dir = normalize(transformed);
+  float field = 0.0;
+  for(int i = 0; i < 8; i++){
+    vec3 d = dir - uAttractors[i];
+    field += uWeights[i] * 0.55 / (dot(d,d) + 0.045);
+  }
+  float blob = 1.0 + min(0.48, field * 0.068);
+  // three noise octaves: large organic bulges + medium channels + micro-texture
+  float n1 = myo_snoise(dir * 2.3  + uTime * 0.18);
+  float n2 = myo_snoise(dir * 5.1  + uTime * 0.12) * 0.42;
+  float n3 = myo_snoise(dir * 11.0 + uTime * 0.07) * 0.15;
+  // positive noise peaks carve concave pores; negative peaks raise ridges
+  float pore = max(0.0, n1 + n2 + n3) * 0.28;
+  transformed = dir * (blob - pore);
+}
+`
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface OrbSig {
   z_volume: number; z_intensite: number; z_structure: number
@@ -27,7 +108,9 @@ interface FamilyNode {
   vars: Array<{ key: string; label: string; z: number }>
 }
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
+interface ProjEntry { id: string; sx: number; sy: number; behind: boolean }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const { width: SW } = Dimensions.get('window')
 const SIZE = Math.min(SW - 32, 400)
@@ -56,7 +139,7 @@ const GROUPS: Array<{ id: string; label: string; color: string; zKeys: string[] 
 
 const NODE_PHI = GROUPS.map((_, i) => i % 2 === 0 ? Math.PI * 0.38 : Math.PI * 0.62)
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function clamp(v: number, lo = -3, hi = 3): number {
   return Math.max(lo, Math.min(hi, isFinite(v) ? v : 0))
@@ -79,64 +162,6 @@ function buildFamilyNodes(sig: OrbSig): FamilyNode[] {
       vars: g.zKeys.map((k, vi) => ({ key: k, label: VAR_LABELS[k] ?? k, z: zVals[vi] })),
     }
   })
-}
-
-// ─── Blob geometry — metaball field displaced icosphere ────────────────────────
-//     Fallback when MarchingCubes import is unavailable
-
-function buildBlobGeometry(nodes: FamilyNode[]): THREE.BufferGeometry {
-  const geo = new THREE.IcosahedronGeometry(1.0, 6)
-  const pos = geo.attributes.position.array as Float32Array
-
-  for (let i = 0; i < pos.length; i += 3) {
-    const x = pos[i], y = pos[i + 1], z = pos[i + 2]
-    const len = Math.sqrt(x * x + y * y + z * z) || 1
-    const nx = x / len, ny = y / len, nz = z / len
-
-    let field = 0
-    for (const n of nodes) {
-      const ax = Math.sin(n.phi) * Math.cos(n.theta)
-      const ay = -Math.cos(n.phi)
-      const az = Math.sin(n.phi) * Math.sin(n.theta)
-      const d2 = (nx - ax) ** 2 + (ny - ay) ** 2 + (nz - az) ** 2
-      const t  = Math.max(0, (n.famZ + 3) / 6)
-      field += t * 0.55 / (d2 + 0.045)
-    }
-
-    const scale = 1.0 + Math.min(0.48, field * 0.068)
-    pos[i] = nx * scale; pos[i + 1] = ny * scale; pos[i + 2] = nz * scale
-  }
-
-  geo.attributes.position.needsUpdate = true
-  geo.computeVertexNormals()
-  return geo
-}
-
-
-// ─── Studio lighting — Matte White Ceramic ────────────────────────────────────
-
-function addStudioLights(scene: THREE.Scene) {
-  scene.add(new THREE.AmbientLight(0xffffff, 0.28))
-
-  // Key — warm, top-front-right
-  const key = new THREE.DirectionalLight(0xfff6ee, 2.4)
-  key.position.set(3.5, 5, 4)
-  scene.add(key)
-
-  // Fill — cool, left
-  const fill = new THREE.DirectionalLight(0xdde6ff, 0.52)
-  fill.position.set(-5, 1, 2)
-  scene.add(fill)
-
-  // Rim — top-back (separates ceramic from background)
-  const rim = new THREE.DirectionalLight(0xffffff, 1.0)
-  rim.position.set(-1, 6, -6)
-  scene.add(rim)
-
-  // Ground bounce — warm subtle
-  const ground = new THREE.DirectionalLight(0xffe8d8, 0.16)
-  ground.position.set(0, -4, 1)
-  scene.add(ground)
 }
 
 // ─── Score arc ────────────────────────────────────────────────────────────────
@@ -175,6 +200,133 @@ function ScoreArc({ score }: { score: number }) {
   )
 }
 
+// ─── R3F: BlobMesh ────────────────────────────────────────────────────────────
+
+interface BlobMeshProps {
+  nodes:      FamilyNode[]
+  meshRef:    React.MutableRefObject<THREE.Mesh | null>
+  cameraRef:  React.MutableRefObject<THREE.PerspectiveCamera | null>
+  ryRef:      React.MutableRefObject<number>
+  isInteract: React.MutableRefObject<boolean>
+  projRef:    React.MutableRefObject<ProjEntry[]>
+  onFrame:    () => void
+}
+
+// Procedural matte-ceramic matcap — no DOM, no network, works immediately in expo-gl.
+// Key light upper-left (warm), soft fill, slight rim lower-right.
+function createCeramicMatcap(): THREE.DataTexture {
+  const SZ = 128
+  const data = new Uint8Array(SZ * SZ * 4)
+  for (let y = 0; y < SZ; y++) {
+    for (let x = 0; x < SZ; x++) {
+      const u = (x / (SZ - 1)) * 2 - 1
+      const v = (y / (SZ - 1)) * 2 - 1
+      const key = Math.exp(-((u + 0.45) ** 2 + (v + 0.55) ** 2) * 2.8) * 0.72
+      const rim = Math.exp(-((u - 0.5)  ** 2 + (v - 0.4)  ** 2) * 5.5) * 0.18
+      const b   = Math.min(1, 0.52 + key + rim)
+      const i   = (y * SZ + x) * 4
+      data[i] = Math.round(b * 248); data[i+1] = Math.round(b * 245)
+      data[i+2] = Math.round(b * 240); data[i+3] = 255
+    }
+  }
+  const t = new THREE.DataTexture(data, SZ, SZ, THREE.RGBAFormat)
+  t.needsUpdate = true
+  return t
+}
+
+function BlobMesh({ nodes, meshRef, cameraRef, ryRef, isInteract, projRef, onFrame }: BlobMeshProps) {
+  const { camera, size } = useThree()
+
+  // Shader uniforms shared by reference — updated each frame without recompile
+  const uniforms = useRef({
+    uAttractors: {
+      value: nodes.map(n => new THREE.Vector3(
+        Math.sin(n.phi) * Math.cos(n.theta),
+        -Math.cos(n.phi),
+        Math.sin(n.phi) * Math.sin(n.theta),
+      )),
+    },
+    uWeights: { value: nodes.map(n => Math.max(0, (n.famZ + 3) / 6)) },
+    uTime:    { value: 0.0 },
+  })
+
+  // Procedural DataTexture — zero DOM/network access, works immediately in expo-gl.
+  // To use a real photo matcap: load it via expo-asset (Asset.fromModule(require(...))),
+  // get its localUri, then assign to material.matcap inside onContextCreate.
+  // THREE.TextureLoader and any fetch-based loading call document.createElementNS → crash in RN.
+  const ceramicMatcap = useMemo(() => createCeramicMatcap(), [])
+
+  // IcosahedronGeometry detail 6 → ~40k verts, 81k triangles.
+  // "args={[1, 64]}" in JSX would mean detail=64 = 20×4^64 triangles → instant crash.
+  const geometry = useMemo(() => {
+    const g = new THREE.IcosahedronGeometry(1.0, 6)
+    g.computeVertexNormals()
+    return g
+  }, [])
+
+  // MeshMatcapMaterial + custom vertex displacement via onBeforeCompile.
+  // No lights needed — matcap bakes the full lighting illusion into the texture.
+  const material = useMemo(() => {
+    const m = new THREE.MeshMatcapMaterial({ matcap: ceramicMatcap })
+    m.customProgramCacheKey = () => 'myo-blob-r3f-v1'
+    m.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, uniforms.current)
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>\n${GLSL_UNIFORMS}\n${GLSL_NOISE}`,
+      )
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>\n${GLSL_DISPLACE}`,
+      )
+    }
+    return m
+  }, [ceramicMatcap])
+
+  useEffect(() => () => { geometry.dispose(); material.dispose(); ceramicMatcap.dispose() }, [geometry, material, ceramicMatcap])
+
+  const _tmp = useRef(new THREE.Vector3())
+
+  useFrame((_, delta) => {
+    // Sync camera ref for RN label projection
+    cameraRef.current = camera as THREE.PerspectiveCamera
+
+    // Auto-rotate when user isn't touching
+    if (!isInteract.current) ryRef.current += 0.003
+    if (meshRef.current) meshRef.current.rotation.y = ryRef.current
+
+    // Animate displacement noise
+    uniforms.current.uTime.value += delta * 0.5
+
+    // Project all 8 attractor positions to screen coords for the RN label overlay.
+    // This is the mobile equivalent of drei <Html> anchored to 3D coordinates.
+    const w = size.width, h = size.height
+    projRef.current = nodes.map(n => {
+      _tmp.current
+        .set(
+          Math.sin(n.phi) * Math.cos(n.theta),
+          -Math.cos(n.phi),
+          Math.sin(n.phi) * Math.sin(n.theta),
+        )
+        .multiplyScalar(1.45)
+        .applyEuler(new THREE.Euler(0, ryRef.current, 0))
+        .project(camera)
+      return {
+        id:     n.id,
+        sx:     (_tmp.current.x + 1) / 2 * w,
+        sy:     -(_tmp.current.y - 1) / 2 * h,
+        behind: _tmp.current.z > 1.0,
+      }
+    })
+
+    onFrame()
+  })
+
+  return (
+    <mesh ref={meshRef} geometry={geometry} material={material} scale={1.45} />
+  )
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function MyoOrbScreen() {
@@ -189,17 +341,21 @@ export default function MyoOrbScreen() {
   const fadeAnim    = useRef(new Animated.Value(0)).current
   const detailAnim  = useRef(new Animated.Value(0)).current
   const nodesRef    = useRef<FamilyNode[]>([])
-  const meshRef     = useRef<THREE.Object3D | null>(null)
+  const meshRef     = useRef<THREE.Mesh | null>(null)
   const cameraRef   = useRef<THREE.PerspectiveCamera | null>(null)
-  const disposeRef  = useRef<(() => void) | null>(null)
   const ryRef       = useRef(0)
   const isInteract  = useRef(false)
   const lastXRef    = useRef(0)
   const selectedRef = useRef<string | null>(null)
-  const projRef     = useRef<Array<{ id: string; sx: number; sy: number }>>([])
+  const projRef     = useRef<ProjEntry[]>([])
   const tapOrigin   = useRef({ x: 0, y: 0 })
+  const frameCount  = useRef(0)
 
-  useEffect(() => () => { disposeRef.current?.() }, [])
+  const onFrame = () => {
+    frameCount.current++
+    // Labels refresh at ~10 fps — no need to match the 30 fps render loop
+    if (frameCount.current % 3 === 0) setFrame(f => f + 1)
+  }
 
   function selectFamily(fid: string | null) {
     selectedRef.current = fid
@@ -221,17 +377,17 @@ export default function MyoOrbScreen() {
       const dx = gs.moveX - lastXRef.current
       lastXRef.current = gs.moveX
       ryRef.current   -= dx * 0.005
-      if (meshRef.current) meshRef.current.rotation.y = ryRef.current
-      setFrame(f => f + 1)
     },
     onPanResponderRelease: (_, gs) => {
       isInteract.current = false
+      // Tap: less than 8px movement → hit-test against projected attractor positions
       if (Math.abs(gs.dx) < 8 && Math.abs(gs.dy) < 8) {
         const { x, y } = tapOrigin.current
         let best: string | null = null, minD = Infinity
         for (const p of projRef.current) {
+          if (p.behind) continue
           const d = Math.hypot(p.sx - x, p.sy - y)
-          if (d < 38 && d < minD) { minD = d; best = p.id }
+          if (d < 44 && d < minD) { minD = d; best = p.id }
         }
         selectFamily(best && best !== selectedRef.current ? best : null)
       }
@@ -263,117 +419,25 @@ export default function MyoOrbScreen() {
     Animated.timing(fadeAnim, { toValue: 1, duration: 900, useNativeDriver: true }).start()
   }
 
-  function onContextCreate(gl: any) {
-    const nodes = nodesRef.current
-    if (!nodes.length) { console.warn('[MYO] no nodes'); return }
-
-    const W = gl.drawingBufferWidth
-    const H = gl.drawingBufferHeight
-
-    // Canvas proxy — do NOT include getContext, Three.js uses context: gl directly
-    const renderer = new THREE.WebGLRenderer({
-      canvas: {
-        width: W, height: H, style: {},
-        clientWidth: W, clientHeight: H,
-        addEventListener: () => {}, removeEventListener: () => {},
-      } as any,
-      context: gl as any,
-      antialias: false,           // antialias can crash on some expo-gl versions
-      alpha: false,
-    })
-    renderer.setSize(W, H, false)
-    renderer.setPixelRatio(1)
-    renderer.setClearColor(0x0a0a0c, 1)
-
-    const scene  = new THREE.Scene()
-    const camera = new THREE.PerspectiveCamera(36, W / H, 0.1, 100)
-    camera.position.set(0, 0, 5.5)
-    cameraRef.current = camera
-
-    addStudioLights(scene)
-
-    // MeshPhongMaterial — WebGL1 compatible (MeshPhysicalMaterial needs WebGL2)
-    const material = new THREE.MeshPhongMaterial({
-      color: new THREE.Color('#f0ece7'),
-      shininess: 12,
-      specular: new THREE.Color('#2a2a2a'),
-    })
-
-    const geo  = buildBlobGeometry(nodes)
-    const mesh = new THREE.Mesh(geo, material)
-    mesh.scale.setScalar(1.45)
-    scene.add(mesh)
-    meshRef.current = mesh
-
-    let rafId: number
-    let last = 0
-    let tick_n = 0
-
-    function tick(now: number) {
-      rafId = requestAnimationFrame(tick)
-      if (!isInteract.current && now - last >= 33) {
-        last = now
-        ryRef.current += 0.003
-        mesh.rotation.y = ryRef.current
-      }
-      renderer.render(scene, camera)
-      gl.endFrameEXP()
-      tick_n++
-      if (tick_n % 3 === 0) setFrame(f => f + 1)  // labels update at ~10fps
-    }
-
-    rafId = requestAnimationFrame(tick)
-    console.log('[MYO] scene ready W=', W, 'H=', H)
-
-    disposeRef.current = () => {
-      cancelAnimationFrame(rafId)
-      geo.dispose()
-      material.dispose()
-      renderer.dispose()
-    }
-  }
-
-  // Project family attractor positions to screen (for label overlay)
-  const labelData = (() => {
-    const cam = cameraRef.current
-    if (!cam || !nodesRef.current.length) return []
-    const tmp = new THREE.Vector3()
-    const meshScale = meshRef.current?.scale.x ?? 1.45
-    return nodesRef.current.map(n => {
-      tmp.set(
-        Math.sin(n.phi) * Math.cos(n.theta),
-        -Math.cos(n.phi),
-        Math.sin(n.phi) * Math.sin(n.theta),
-      ).multiplyScalar(meshScale)
-      tmp.applyEuler(new THREE.Euler(0, ryRef.current, 0))
-      tmp.project(cam)
-      return {
-        ...n,
-        sx: (tmp.x + 1) / 2 * SIZE,
-        sy: -(tmp.y - 1) / 2 * SIZE,
-        behind: tmp.z > 1.0,
-      }
-    })
-  })()
-
-  projRef.current = labelData.map(l => ({ id: l.id, sx: l.sx, sy: l.sy }))
-
-  const selectedNode = selected ? nodesRef.current.find(n => n.id === selected) ?? null : null
+  const selectedNode = selected
+    ? nodesRef.current.find(n => n.id === selected) ?? null
+    : null
 
   if (loading) return (
-    <View style={[st.center, { backgroundColor: '#0a0a0c' }]}>
+    <View style={[st.center, { backgroundColor: '#0a0a0a' }]}>
       <ActivityIndicator color={colors.accent} size="large" />
     </View>
   )
   if (!sig) return (
-    <View style={[st.center, { backgroundColor: '#0a0a0c' }]}>
+    <View style={[st.center, { backgroundColor: '#0a0a0a' }]}>
       <Text style={{ color: colors.textSecondary }}>Signature introuvable</Text>
     </View>
   )
 
   return (
-    <View style={[st.container, { backgroundColor: '#0a0a0c' }]}>
+    <View style={[st.container, { backgroundColor: '#0a0a0a' }]}>
 
+      {/* Header */}
       <View style={st.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={[st.back, { color: colors.accent }]}>‹</Text>
@@ -387,41 +451,67 @@ export default function MyoOrbScreen() {
 
       <Animated.View style={{ opacity: fadeAnim }}>
 
-        {/* 3D canvas */}
+        {/* 3D canvas + RN label overlay */}
         <View style={st.canvas} {...pan.panHandlers}>
-          <GLView style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
 
-          {/* Floating family labels — positioned over 3D scene */}
-          {labelData.map(l => !l.behind && (
-            <View
-              key={`lbl${l.id}`}
-              pointerEvents="none"
-              style={[st.labelChip, {
-                ...(l.sx >= CX
-                  ? { left: Math.round(l.sx + 16) }
-                  : { right: Math.round(SIZE - l.sx + 16) }),
-                top: Math.round(l.sy - 12),
-                borderColor: l.color + (l.famZ < -1 ? '28' : '44'),
-                opacity: l.famZ < -1 ? 0.44 : 1,
-              }]}
-            >
-              <Text style={[st.labelText, { color: l.color }]}>{l.label}</Text>
-              <Text style={[st.labelZ, { color: l.color }]}>
-                {l.famZ >= 0 ? `+${l.famZ.toFixed(1)}` : l.famZ.toFixed(1)}
-              </Text>
-            </View>
-          ))}
+          {/* R3F Canvas — PanResponder claims all touches; R3F renders passively */}
+          <Canvas
+            style={StyleSheet.absoluteFill}
+            dpr={1}
+            camera={{ fov: 36, near: 0.1, far: 100, position: [0, 0, 5.5] }}
+          >
+            {/* Scene background — replaces renderer.setClearColor */}
+            <color attach="background" args={['#0a0a0a']} />
+
+            {nodesRef.current.length > 0 && (
+              <BlobMesh
+                nodes={nodesRef.current}
+                meshRef={meshRef}
+                cameraRef={cameraRef}
+                ryRef={ryRef}
+                isInteract={isInteract}
+                projRef={projRef}
+                onFrame={onFrame}
+              />
+            )}
+          </Canvas>
+
+          {/* Floating family labels anchored to 3D attractor positions.
+              Mobile equivalent of drei <Html> — projects 3D→screen each frame. */}
+          {projRef.current.filter(p => !p.behind).map(p => {
+            const n = nodesRef.current.find(nd => nd.id === p.id)
+            if (!n) return null
+            return (
+              <View
+                key={`lbl${p.id}`}
+                pointerEvents="none"
+                style={[st.labelChip, {
+                  ...(p.sx >= CX
+                    ? { left:  Math.round(p.sx + 16) }
+                    : { right: Math.round(SIZE - p.sx + 16) }),
+                  top:         Math.round(p.sy - 12),
+                  borderColor: n.color + (n.famZ < -1 ? '28' : '44'),
+                  opacity:     n.famZ < -1 ? 0.44 : 1,
+                }]}
+              >
+                <Text style={[st.labelText, { color: n.color }]}>{n.label}</Text>
+                <Text style={[st.labelZ,    { color: n.color }]}>
+                  {n.famZ >= 0 ? `+${n.famZ.toFixed(1)}` : n.famZ.toFixed(1)}
+                </Text>
+              </View>
+            )
+          })}
         </View>
 
-        {/* Variable detail panel — slides in on family tap */}
+        {/* Variable detail panel */}
         {selectedNode && (
           <Animated.View style={[st.detail, {
-            opacity: detailAnim,
+            opacity:   detailAnim,
             transform: [{ translateY: detailAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
           }]}>
             <View style={[st.detailHead, { borderLeftColor: selectedNode.color }]}>
               <Text style={[st.detailTitle, { color: selectedNode.color }]}>{selectedNode.label}</Text>
-              <Text style={[st.detailFamZ, { color: selectedNode.color }]}>
+              <Text style={[st.detailFamZ,  { color: selectedNode.color }]}>
                 {selectedNode.famZ >= 0 ? `+${selectedNode.famZ.toFixed(2)}` : selectedNode.famZ.toFixed(2)} σ
               </Text>
             </View>
@@ -433,7 +523,7 @@ export default function MyoOrbScreen() {
                   <Text style={st.varLbl}>{v.label}</Text>
                   <View style={st.varTrack}>
                     <View style={[st.varFill, {
-                      width: Math.round(t * 100),
+                      width:           Math.round(t * 100),
                       backgroundColor: pos ? selectedNode.color : '#8E8E93',
                     }]} />
                   </View>
@@ -446,7 +536,7 @@ export default function MyoOrbScreen() {
           </Animated.View>
         )}
 
-        {/* Legend — tappable shortcut */}
+        {/* Legend */}
         {!selected && (
           <View style={st.legend}>
             {GROUPS.map(g => {
@@ -487,12 +577,12 @@ const st = StyleSheet.create({
   canvas:    { alignSelf: 'center', width: SIZE, height: SIZE, position: 'relative' },
   labelChip: {
     position: 'absolute',
-    backgroundColor: '#0a0a0ccc',
+    backgroundColor: '#0a0a0acc',
     borderRadius: 6, borderWidth: 0.5,
     paddingHorizontal: 6, paddingVertical: 2,
   },
-  labelText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
-  labelZ:    { fontSize: 8, fontWeight: '600', opacity: 0.72 },
+  labelText: { fontSize: 9,  fontWeight: '700', letterSpacing: 0.5 },
+  labelZ:    { fontSize: 8,  fontWeight: '600', opacity: 0.72 },
   detail: {
     marginHorizontal: 20, marginTop: 4,
     backgroundColor: '#111115',
