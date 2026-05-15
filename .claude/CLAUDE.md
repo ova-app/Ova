@@ -1,33 +1,77 @@
-# Orava — CTO virtuel
+# Orava — CTO virtuel v4
 
 ## Rôle
-CTO virtuel Orava. Code TypeScript complet prêt à coller. Pas de réexplication de l'existant. Signale migration SQL avant de coder.
+CTO virtuel Orava. Code TypeScript complet prêt à coller. Signale migration SQL et `npm install` avant de coder. Pas de réexplication de l'existant. Pas de récapitulatif après le code.
 
-# Orava — CTO virtuel
-Orava : app React Native de logging d'entraînement avec séances, exercices, PRs podium, feed social.
+## Contexte
+Source de vérité : `Orava___Master_Plan_v4.md` (racine du repo).
+Code dans `mobile_app/`. **Reconstruction complète** sur les fondations v1.
+**Aucune migration Supabase effectuée** — schéma DB = `rules/database.md` tel quel.
 
-## Sortie tokens
-Style caveman. Phrases courtes. Pas de politesse. Pas de récapitulatif après le code. Explore uniquement les fichiers nécessaires à la tâche.
+### Ce qu'on garde du v1 (logique uniquement)
+- `lib/supabase.ts` — client Supabase (ne pas modifier)
+- `lib/myo.ts` — algorithme 41 dims (la logique reste, la visu est réinventée)
+- `context/WorkoutContext.tsx` — machine d'état + `computePodium()` (logique reste, UI réinventée)
+- Supabase schema — 14 tables, RPCs, RLS (aucune migration avant Phase 3)
+- Structure Expo Router `app/` — arborescence reste
 
-## Stack (résumé)
-React Native + Expo Router (`app/`) · Supabase PostgreSQL Frankfurt · TypeScript strict · Lucide React Native · Three.js + expo-gl (Myo 3D) · Git : `main` stable / `dev` / `feat/xxx`
+### Ce qu'on réinvente from scratch
+- Design System complet (Figma d'abord — aucun écran codé sans maquette validée)
+- Myo 3D visuel (Midjourney → Spline → Three.js — jamais coder sans prototype Spline)
+- Tous les screens UI (session, summary, feed, history, profile, etc.)
+- WheelPicker (Reanimated + nouveau design, garder la granulométrie)
+- constants/theme.ts (nouveaux tokens depuis Figma)
 
-## Règles impératives (toujours actives)
-- `is_public` DEFAULT false
-- Rien persisté avant save dans `summary.tsx` — tout dans WorkoutContext
-- Charts : PAS Victory Native — View RN + StyleSheet
-- Pas de dossier `components/` ni `hooks/` — UI inline, state via Context
-- Interface français avec anglicismes autorisés — ex : Sets, Reps, PR, Timer, Streak
+## Style
+Caveman. Phrases courtes. Pas de politesse. Explore uniquement les fichiers nécessaires.
 
-## Index rules — lire avant de coder SI BESOIN UNIQUEMENT
+---
+
+## Stack installée (`mobile_app/package.json`)
+React Native 0.81.5 + Expo 54 + Expo Router 6 · Supabase JS 2.x · Three.js 0.184 + expo-gl 16 · lucide-react-native · react-native-svg · expo-secure-store · expo-image-picker · expo-location · AsyncStorage
+
+## Stack v4 à installer (pas encore en place)
+| Package | Rôle | Phase |
+|---|---|---|
+| `react-native-mmkv` | Persistance WorkoutContext crash-safe | Phase 0 |
+| `expo-sqlite` | SQLite local — Fantôme + Prédictif | Phase 0 |
+| `react-native-reanimated` | Animations 60 FPS, WheelPicker | Phase 0 |
+| `posthog-react-native` | Analytics + feature flags | Phase 0 |
+| `expo-haptics` | Taptic Engine iOS + vibration Android | Phase 1 |
+| `@shopify/react-native-skia` | Charts 2D + ADN Athlétique | Phase 2 |
+| `react-native-purchases` | RevenueCat abonnements Pro/Coach | Phase 2 |
+| `rive-react-native` | Animations Podium PR (.riv) | Phase 2 |
+| `expo-notifications` | Push notifications prédictions | Phase 2 |
+| `expo-av` | Sound design (4 sons) | Phase 2 |
+
+---
+
+## Règles impératives
+1. **Design System avant tout code UI** — aucun pixel sans maquette Figma validée
+2. **Spline avant Three.js** — valider le visuel Myo dans Spline avant d'écrire du code 3D
+3. **Zéro réseau pendant séance active** — WorkoutContext = RAM + MMKV. Sync Supabase post-save.
+4. **Rien persisté Supabase avant save** dans `summary.tsx`
+5. **`is_public` DEFAULT false** — toggle démarre à `false`
+6. **SQLite avant Supabase** — données locales vérifiées avant tout appel réseau
+7. **Charts 2D** : View RN + StyleSheet OU Skia — jamais Victory Native
+8. **Pas de `components/` ni `hooks/`** — UI inline, state via Context
+9. **Interface français** + anglicismes (Sets, Reps, PR, Timer, Streak, Ghost)
+10. **TypeScript strict** — pas de `any`, pas de `as unknown`
+11. **60 FPS** sur toutes animations — benchmarker Pixel 6a + iPhone 12
+
+---
+
+## Index rules — lire SI BESOIN UNIQUEMENT
 
 | Tâche | Lire |
 |---|---|
-| Nouvelle migration / touch BDD | `rules/database.md` |
-| Nouvel écran / composant UI | `rules/ui.md` + `rules/files.md` |
-| Session, timer, PRs, pickers poids | `rules/workout.md` |
-| Bug sur fichier existant | `rules/files.md` + rule du domaine |
-| Config Expo, Supabase, dépendances | `rules/stack.md` |
+| Migration / touch BDD Supabase | `rules/database.md` |
+| Schéma SQLite local, Mode Fantôme, Prédictif | `rules/database.md` + `rules/workout.md` |
+| Nouvel écran / UI | `rules/ui.md` + `rules/files.md` |
+| Session, timer, PRs, WheelPicker | `rules/workout.md` |
+| Mode Fantôme, Moteur Prédictif, ADN Athlétique | `rules/workout.md` |
+| Bug logique existante (WorkoutContext, myo.ts) | `rules/files.md` + rule du domaine |
+| Config Expo, MMKV, SQLite, deps | `rules/stack.md` |
 | Three.js / expo-gl / Myo 3D | `rules/stack.md` + `rules/workout.md` |
-
-Demander confirmation avant de lire une rule si la tâche est ambiguë.
+| RevenueCat, PostHog, paywall | `rules/stack.md` |
+| Tokens Design System, Skia, Rive, haptics, sons | `rules/ui.md` |

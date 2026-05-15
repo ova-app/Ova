@@ -243,7 +243,7 @@ OravaFeed intégré · Mapbox (carte salles) · Pass Orava B2B · ADN Athlétiqu
 - [ ] Animation de révélation (2–3 secondes, interpolation douce, < 3s total)
 - [ ] Benchmark performance : iPhone 12 + Pixel 6a (objectif : 60 FPS stable)
 
-**Mode Fantôme v1.0** *(nouveau)*
+**Mode Fantôme v1.0**
 - [ ] Requête SQLite `getGhostReference(exerciseId, dateLimit)` : meilleur set sur 30j (Free) / illimité (Pro)
 - [ ] Calcul delta en temps réel : poids fantôme vs poids actuel, reps fantôme vs reps actuelles
 - [ ] Barre fantôme translucide sur le WheelPicker (Reanimated, opacity 0.4, couleur neutre)
@@ -267,7 +267,7 @@ OravaFeed intégré · Mapbox (carte salles) · Pass Orava B2B · ADN Athlétiqu
 - [ ] Affinage visuel : palettes de couleur par intensité de séance, réflexion matériau
 - [ ] Export Stories 9:16 : capture frame WebGL → image PNG partageable via Share Sheet iOS/Android
 
-**Moteur Prédictif v1.0** *(nouveau)*
+**Moteur Prédictif v1.0**
 - [ ] Implémenter la régression linéaire pondérée en TypeScript pur (on-device, données SQLite)
 - [ ] Pondération temporelle : séances récentes = poids × 1.0, séances à 90j = poids × 0.3
 - [ ] Variables contextuelles : fatigue (volume 7j), fréquence récente, historique de repos
@@ -311,7 +311,7 @@ OravaFeed intégré · Mapbox (carte salles) · Pass Orava B2B · ADN Athlétiqu
 - [ ] Import 1-clic d'un programme dans sa bibliothèque personnelle
 - [ ] Intégration paiement RevenueCat In-App Purchase (commission 15 %)
 
-**ADN Athlétique v1.0** *(nouveau)*
+**ADN Athlétique v1.0**
 - [ ] Edge Function Supabase : calcul hebdomadaire des 6 dimensions (déclenchée chaque lundi 03h00)
 - [ ] Algorithme dimension 1 : profil de force (ratios + calcul percentiles base anonymisée)
 - [ ] Algorithme dimension 2 : signature volume (radar 8 groupes musculaires)
