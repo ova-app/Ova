@@ -1,5 +1,28 @@
 # rules/files.md
 
+## Structure du repo
+```
+orava/
+├── mobile_app/          — tout le code (voir ci-dessous)
+├── design/              — assets design AVANT intégration dans le code
+│   ├── myo/
+│   │   ├── prompts.md           — prompts Midjourney + direction retenue
+│   │   ├── candidates/          — 3 images candidates retenues (JPG/PNG)
+│   │   └── spline-export/       — code Three.js exporté depuis Spline
+│   ├── system/
+│   │   ├── figma.md             — lien Figma + tokens validés (copie offline)
+│   │   └── inspirations.md      — refs Whoop/Linear/TeamLab + notes
+│   ├── sounds/                  — fichiers WAV bruts ElevenLabs (→ assets/sounds/)
+│   └── animations/              — fichiers .riv Rive (→ assets/animations/)
+├── rapport.md           — état du projet + stratégie
+└── Orava___Master_Plan_v4.md    — source de vérité produit
+```
+
+## Règle design/ → mobile_app/assets/
+- Sons WAV/MP3 : `design/sounds/` → convertir → `mobile_app/assets/sounds/`
+- Animations : `design/animations/*.riv` → `mobile_app/assets/animations/`
+- Images Myo candidates : `design/myo/candidates/` — référence uniquement, pas dans assets/
+
 ## Racine du code
 Tout le code est dans `mobile_app/`. Les chemins ci-dessous sont relatifs à `mobile_app/`.
 

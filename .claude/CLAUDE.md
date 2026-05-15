@@ -27,6 +27,16 @@ Caveman. Phrases courtes. Pas de politesse. Explore uniquement les fichiers néc
 
 ---
 
+## Structure repo
+```
+orava/
+├── mobile_app/     — code source
+├── design/         — Midjourney candidates, Spline exports, Figma tokens, sons, animations Rive
+├── rapport.md      — état + stratégie
+└── Orava___Master_Plan_v4.md
+```
+Voir `rules/files.md` pour le détail de `design/` et les règles de transfert vers `mobile_app/assets/`.
+
 ## Stack installée (`mobile_app/package.json`)
 React Native 0.81.5 + Expo 54 + Expo Router 6 · Supabase JS 2.x · Three.js 0.184 + expo-gl 16 · lucide-react-native · react-native-svg · expo-secure-store · expo-image-picker · expo-location · AsyncStorage
 
