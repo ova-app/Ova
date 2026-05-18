@@ -1,115 +1,127 @@
-import React, { useCallback, useEffect, useRef } from 'react'
-import { Dimensions, StyleSheet, View } from 'react-native'
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import {
+  Dimensions,
+  PanResponder,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 import { GLView, ExpoWebGLRenderingContext } from 'expo-gl'
 import * as THREE from 'three'
 
 // ─── Props ─────────────────────────────────────────────────────────────────
 interface Props {
-  sessionValues?: number[]
-  averageValues?: number[]
+  /** 8 familles × ~5 sous-variables = 41 dims, valeurs normalisées [0,1].
+   *  Ordre familles : volume · intensité · structure · récup · perf · régularité · muscles · temps */
+  sessionValues?: number[][]
+  averageValues?: number[][]
   size?: number
 }
 
 // ─── Config géométrique ────────────────────────────────────────────────────
-const TWO_PI    = Math.PI * 2
-const N_SECTORS = 8
+const TWO_PI     = Math.PI * 2
+const N_SECTORS  = 8
 const SECTOR_ANG = TWO_PI / N_SECTORS
-const N_RINGS   = 42   // plus de lignes de niveau → terrain plus dense
-const N_SEGS    = 140  // segments par cercle
-const N_SPOKES  = 26   // rayons radiaux
-const MAX_R     = 1.8
-const H_TOP     = 0.9
-const H_BOT     = 0.45
+const N_RINGS    = 42
+const N_SEGS     = 140
+const N_SPOKES   = 26
+const MAX_R      = 1.8
+const H_TOP      = 0.9
+const H_BOT      = 0.45
 
-// Echelle du bruit : contrôle la densité des pics (plus élevé = pics plus denses)
-const NOISE_SCALE = 4.4
+// ─── Familles ──────────────────────────────────────────────────────────────
+const FAMILY_NAMES = [
+  'VOLUME', 'INTENSITÉ', 'STRUCTURE', 'RÉCUP',
+  'PERF', 'RÉGULARITÉ', 'MUSCLES', 'TEMPS',
+]
+
+const DIM_NAMES = [
+  ['Vol. total', 'Vol. sets', 'Vol./rep', 'Vol./set', 'Tendance', 'Densité'],
+  ['RPE moy.', 'Facteur int.', 'RPE pic', 'Constance', 'Int. relative'],
+  ['Nb exercices', 'Sets/exercice', 'Variété', 'Score struct.', 'Rég. repos'],
+  ['Repos moy.', 'Var. repos', 'Complétion', 'Qualité repos', 'Récup. est.'],
+  ['Nb PRs', 'Amp. PRs', 'Force rel.', 'Prog. 1RM', 'Constance perf.'],
+  ['Fréquence', 'Streak', 'Var. séances', 'Planning', 'Régularité'],
+  ['Push', 'Pull', 'Jambes', 'Gainage', 'Équilibre'],
+  ['Durée', 'Tempo', 'Densité', 'Efficacité', 'Timing'],
+]
+
+const SECTOR_COLORS_HEX = [
+  '#f97316', '#ef4444', '#8b5cf6', '#06b6d4',
+  '#fac775', '#22c55e', '#ec4899', '#3b82f6',
+]
 
 const SECTOR_COLORS: readonly number[] = [
-  0xf97316, // Volume     — orange
-  0xef4444, // Intensité  — rouge
-  0x8b5cf6, // Structure  — violet
-  0x06b6d4, // Récup      — cyan
-  0xfac775, // Perf       — or
-  0x22c55e, // Régularité — vert
-  0xec4899, // Muscles    — rose
-  0x3b82f6, // Temps      — bleu
+  0xf97316, 0xef4444, 0x8b5cf6, 0x06b6d4,
+  0xfac775, 0x22c55e, 0xec4899, 0x3b82f6,
 ]
 
-const MOCK_SESSION: number[] = [0.85, 0.70, 0.60, 0.45, 0.90, 0.55, 0.75, 0.40]
-const MOCK_AVERAGE: number[] = [0.65, 0.55, 0.50, 0.60, 0.70, 0.45, 0.65, 0.50]
+// ─── Mapping 41 dimensions ─────────────────────────────────────────────────
+const N_DIMS_PER_FAM = [6, 5, 5, 5, 5, 5, 5, 5] as const
 
-// ─── Perlin Noise 2D (implémentation pure TS — zéro dépendance externe) ───
-const PERM = new Uint8Array(512)
+// ─── Mock data ─────────────────────────────────────────────────────────────
+const MOCK_SESSION: number[][] = [
+  [0.92, 0.78, 0.85, 0.71, 0.88, 0.65],
+  [0.70, 0.82, 0.61, 0.75, 0.68],
+  [0.55, 0.63, 0.48, 0.72, 0.58],
+  [0.45, 0.52, 0.38, 0.61, 0.49],
+  [0.88, 0.94, 0.77, 0.82, 0.91],
+  [0.60, 0.55, 0.68, 0.52, 0.63],
+  [0.75, 0.82, 0.68, 0.71, 0.79],
+  [0.42, 0.38, 0.51, 0.46, 0.35],
+]
 
-// Table de permutation initialisée une fois avec seed fixe → terrain déterministe
-;(function initPerlin() {
-  const p: number[] = Array.from({ length: 256 }, (_, i) => i)
-  let s = 73856093  // seed arbitraire — bonne couverture angulaire
-  for (let i = 255; i > 0; i--) {
-    s = (Math.imul(s, 1664525) + 1013904223) | 0
-    const j = ((s >>> 0) % (i + 1))
-    const tmp = p[i]; p[i] = p[j]; p[j] = tmp
+const MOCK_AVERAGE: number[][] = [
+  [0.72, 0.65, 0.70, 0.58, 0.75, 0.62],
+  [0.58, 0.65, 0.52, 0.61, 0.55],
+  [0.50, 0.55, 0.45, 0.60, 0.48],
+  [0.58, 0.62, 0.48, 0.55, 0.52],
+  [0.72, 0.78, 0.65, 0.70, 0.75],
+  [0.48, 0.52, 0.55, 0.45, 0.50],
+  [0.62, 0.68, 0.58, 0.61, 0.65],
+  [0.45, 0.42, 0.48, 0.50, 0.38],
+]
+
+// ─── DimConfig + précalcul ─────────────────────────────────────────────────
+interface DimConfig {
+  fi: number
+  vi: number
+  angCenter: number
+  angSigma: number
+  rPeak: number
+  rWidth: number
+  harmN: number
+}
+
+const DIM_CONFIGS: readonly DimConfig[] = (() => {
+  const configs: DimConfig[] = []
+  const PHI = 0.618033988749895
+  let gIdx = 0
+  for (let fi = 0; fi < N_SECTORS; fi++) {
+    const nv   = N_DIMS_PER_FAM[fi]
+    const subW = SECTOR_ANG / nv
+    for (let vi = 0; vi < nv; vi++) {
+      configs.push({
+        fi, vi,
+        angCenter : (fi + (vi + 0.5) / nv) * SECTOR_ANG,
+        angSigma  : subW * 0.62,
+        rPeak     : 0.13 + ((gIdx * PHI) % 1) * 0.70,
+        rWidth    : 0.085 + vi * 0.010,
+        harmN     : 64 + vi * 6,
+      })
+      gIdx++
+    }
   }
-  for (let i = 0; i < 256; i++) { PERM[i] = p[i]; PERM[i + 256] = p[i] }
+  return configs
 })()
 
-const G2: readonly [number, number][] = [
-  [1, 1], [-1, 1], [1, -1], [-1, -1],
-  [1, 0], [-1, 0], [0,  1], [ 0, -1],
-]
-
-function fade(t: number): number { return t * t * t * (t * (t * 6 - 15) + 10) }
-function lerp(a: number, b: number, t: number): number { return a + t * (b - a) }
-
-function dot2(hash: number, x: number, y: number): number {
-  const g = G2[hash & 7]
-  return g[0] * x + g[1] * y
-}
-
-function perlin2(x: number, y: number): number {
-  const X = Math.floor(x) & 255
-  const Y = Math.floor(y) & 255
-  const xf = x - Math.floor(x)
-  const yf = y - Math.floor(y)
-  const u  = fade(xf)
-  const v  = fade(yf)
-  const aa = PERM[PERM[X]     + Y]
-  const ab = PERM[PERM[X]     + Y + 1]
-  const ba = PERM[PERM[X + 1] + Y]
-  const bb = PERM[PERM[X + 1] + Y + 1]
-  return lerp(
-    lerp(dot2(aa, xf,     yf    ), dot2(ba, xf - 1, yf    ), u),
-    lerp(dot2(ab, xf,     yf - 1), dot2(bb, xf - 1, yf - 1), u),
-    v,
-  )
-}
-
-/**
- * Ridged fBm — terrain chaotique avec pics pointus.
- * Chaque octave utilise (1 - |perlin|)^2 → créneaux nets asymétriques.
- * Le "weight cascade" propage les hautes crêtes vers les couches fines.
- * Renvoie [0, 1] approximativement.
- */
-function ridgedFbm(x: number, y: number, octaves: number): number {
-  let val    = 0
-  let amp    = 0.75
-  let freq   = 1.0
-  let weight = 1.0
-  let maxAmp = 0
-
-  for (let i = 0; i < octaves; i++) {
-    const n  = 1 - Math.abs(perlin2(x * freq, y * freq))
-    const nn = n * n * weight          // ridge sharpenning
-    val    += nn * amp
-    maxAmp += amp
-    weight  = Math.min(n * 1.25, 1.0) // couches fines amplifiées sous les pics principaux
-    amp    *= 0.48
-    freq   *= 2.12                     // lacunarity légèrement > 2 → irrégularité
-  }
-  return val / maxAmp
-}
-
-// ─── Helpers angulaires ────────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────────
 const ss = (t: number): number => t * t * (3 - 2 * t)
 
 function sectorBlend(theta: number): { s0: number; s1: number; t: number } {
@@ -119,28 +131,34 @@ function sectorBlend(theta: number): { s0: number; s1: number; t: number } {
   return { s0, s1: (s0 + 1) % N_SECTORS, t: ss(sf - Math.floor(sf)) }
 }
 
-/**
- * Hauteur Y en (r, theta) — amplitude pilotée par les données de secteur,
- * forme déterminée par le bruit ridged fBm.
- *
- * L'amplitude max du bruit dans chaque secteur est proportionnelle à vals[s] :
- * si le secteur volume vaut 0.9, ses pics montent jusqu'à 90% de H_TOP.
- */
-function getH(r: number, theta: number, vals: number[], maxH: number): number {
-  const { s0, s1, t } = sectorBlend(theta)
-  const v  = vals[s0] * (1 - t) + vals[s1] * t  // amplitude sectorielle [0,1]
-
+function getH(r: number, theta: number, data: number[][], maxH: number): number {
   const rn   = r / MAX_R
-  // Enveloppe radiale : zéro au centre et au bord extérieur
   const edge = Math.min(rn / 0.10, 1.0) * Math.min((1 - rn) / 0.08, 1.0)
+  if (edge === 0) return 0
 
-  // Coordonnées cartésiennes → évite la symétrie concentrique du repère polaire
-  const nx = r * Math.cos(theta) * NOISE_SCALE
-  const nz = r * Math.sin(theta) * NOISE_SCALE
+  let h = 0
+  for (const cfg of DIM_CONFIGS) {
+    const val = data[cfg.fi][cfg.vi]
+    if (val < 0.02) continue
 
-  const noise = ridgedFbm(nx, nz, 4)  // [0, ~1]
+    let da = theta - cfg.angCenter
+    da = ((da % TWO_PI) + TWO_PI) % TWO_PI
+    if (da > Math.PI) da -= TWO_PI
 
-  return v * maxH * edge * noise
+    const angGauss = Math.exp(-(da * da) / (2 * cfg.angSigma * cfg.angSigma))
+    if (angGauss < 0.003) continue
+
+    const ripple = 1 + 0.38 * Math.cos(cfg.harmN * theta)
+    const ang    = angGauss * ripple
+
+    const rDist = Math.abs(rn - cfg.rPeak) / cfg.rWidth
+    if (rDist >= 1) continue
+
+    const rad = Math.pow(1 - rDist, 2.5)
+    h += val * ang * rad
+  }
+
+  return h * maxH * edge
 }
 
 function getC(theta: number): [number, number, number] {
@@ -154,9 +172,9 @@ function getC(theta: number): [number, number, number] {
   ]
 }
 
-// ─── Construction BufferGeometry topographique ─────────────────────────────
+// ─── Géométries ────────────────────────────────────────────────────────────
 function makeTopoGeo(
-  vals: number[],
+  data: number[][],
   maxH: number,
   sign: 1 | -1,
   colored: boolean,
@@ -181,19 +199,17 @@ function makeTopoGeo(
     if (col && c) { col[b] = c[0]; col[b + 1] = c[1]; col[b + 2] = c[2] }
   }
 
-  // Cercles concentriques (lignes de niveau déformées par le bruit)
   for (let ri = 0; ri < N_RINGS; ri++) {
     const r = ((ri + 1) / N_RINGS) * MAX_R
     for (let si = 0; si < N_SEGS; si++) {
       const a1  = (si / N_SEGS) * TWO_PI
       const a2  = ((si + 1) / N_SEGS) * TWO_PI
       const idx = ri * N_SEGS + si
-      setV(idx, 0, r * Math.cos(a1), sign * getH(r, a1, vals, maxH), r * Math.sin(a1), colored ? getC(a1) : undefined)
-      setV(idx, 1, r * Math.cos(a2), sign * getH(r, a2, vals, maxH), r * Math.sin(a2), colored ? getC(a2) : undefined)
+      setV(idx, 0, r * Math.cos(a1), sign * getH(r, a1, data, maxH), r * Math.sin(a1), colored ? getC(a1) : undefined)
+      setV(idx, 1, r * Math.cos(a2), sign * getH(r, a2, data, maxH), r * Math.sin(a2), colored ? getC(a2) : undefined)
     }
   }
 
-  // Rayons radiaux
   for (let sp = 0; sp < N_SPOKES; sp++) {
     const a = (sp / N_SPOKES) * TWO_PI
     const c = colored ? getC(a) : undefined
@@ -201,8 +217,8 @@ function makeTopoGeo(
       const r1  = (ri / N_RINGS) * MAX_R
       const r2  = ((ri + 1) / N_RINGS) * MAX_R
       const idx = ringS + sp * N_RINGS + ri
-      setV(idx, 0, r1 * Math.cos(a), sign * getH(r1, a, vals, maxH), r1 * Math.sin(a), c)
-      setV(idx, 1, r2 * Math.cos(a), sign * getH(r2, a, vals, maxH), r2 * Math.sin(a), c)
+      setV(idx, 0, r1 * Math.cos(a), sign * getH(r1, a, data, maxH), r1 * Math.sin(a), c)
+      setV(idx, 1, r2 * Math.cos(a), sign * getH(r2, a, data, maxH), r2 * Math.sin(a), c)
     }
   }
 
@@ -212,15 +228,10 @@ function makeTopoGeo(
   return geo
 }
 
-/**
- * Socle circulaire — 3 anneaux concentriques (inner / main / outer) + ticks radiaux.
- * Rendu Y=0 : séparation visuelle nette entre terrain séance (dessus) et historique (dessous).
- */
 function makeSocleGeo(): THREE.BufferGeometry {
-  const R_MAIN  = MAX_R
   const R_INNER = MAX_R * 0.92
   const R_OUTER = MAX_R * 1.07
-  const N_TICKS = N_SPOKES * 2  // ticks plus denses que les rayons du terrain
+  const N_TICKS = N_SPOKES * 2
 
   const totalSeg = 3 * N_SEGS + N_TICKS
   const pts = new Float32Array(totalSeg * 6)
@@ -238,10 +249,9 @@ function makeSocleGeo(): THREE.BufferGeometry {
   }
 
   addRing(R_INNER)
-  addRing(R_MAIN)
+  addRing(MAX_R)
   addRing(R_OUTER)
 
-  // Ticks radiaux entre anneau intérieur et extérieur → grille de graduation
   for (let t = 0; t < N_TICKS; t++) {
     const a = (t / N_TICKS) * TWO_PI
     const b = idx * 6
@@ -255,6 +265,13 @@ function makeSocleGeo(): THREE.BufferGeometry {
   return geo
 }
 
+// ─── Type overlay ──────────────────────────────────────────────────────────
+interface LabelPos {
+  x: number
+  y: number
+  visible: boolean
+}
+
 // ─── Composant ─────────────────────────────────────────────────────────────
 export default function MyoOrb({
   sessionValues = MOCK_SESSION,
@@ -264,14 +281,135 @@ export default function MyoOrb({
   const { width } = Dimensions.get('window')
   const S = size ?? width - 32
 
-  const rafRef = useRef<number | null>(null)
-  const svRef  = useRef(sessionValues)
-  const avRef  = useRef(averageValues)
+  // ─── State ───────────────────────────────────────────────────────────────
+  const [selectedFamily, setSelectedFamily] = useState<number | null>(null)
+  const [labelScreenPos, setLabelScreenPos] = useState<LabelPos[]>(
+    Array.from({ length: N_SECTORS }, () => ({ x: 0, y: 0, visible: false })),
+  )
 
+  // ─── Refs partagés GL ↔ React ────────────────────────────────────────────
+  const rafRef        = useRef<number | null>(null)
+  const cameraRef     = useRef<THREE.PerspectiveCamera | null>(null)
+  const sceneRotYRef  = useRef(0)
+  const targetRotYRef = useRef(0)
+  const autoRotateRef = useRef(true)
+  const selectedRef   = useRef<number | null>(null)
+  const svRef         = useRef(sessionValues)
+  const avRef         = useRef(averageValues)
+
+  // ─── Positions 3D des étiquettes — dessus du pic de chaque secteur ───────
+  const labelPositions3D = useMemo((): THREE.Vector3[] => {
+    return Array.from({ length: N_SECTORS }, (_, fi) => {
+      const sA = fi * SECTOR_ANG + SECTOR_ANG / 2
+      let maxH = 0
+      for (let s = 0; s < 20; s++) {
+        const a = fi * SECTOR_ANG + ((s + 0.5) / 20) * SECTOR_ANG
+        for (let rI = 1; rI <= 8; rI++) {
+          const h = getH((rI / 8) * MAX_R, a, sessionValues, H_TOP)
+          if (h > maxH) maxH = h
+        }
+      }
+      return new THREE.Vector3(
+        MAX_R * 0.65 * Math.cos(sA),
+        maxH + 0.22,
+        MAX_R * 0.65 * Math.sin(sA),
+      )
+    })
+  }, [sessionValues])
+
+  // ─── Mise à jour positions 2D des labels (15 fps) ────────────────────────
+  useEffect(() => {
+    // Alloués une fois, réutilisés à chaque tick
+    const euler  = new THREE.Euler()
+    const tmpW   = new THREE.Vector3()
+    const tmpV   = new THREE.Vector3()
+
+    const id = setInterval(() => {
+      const cam = cameraRef.current
+      if (!cam) return
+      euler.set(0, sceneRotYRef.current, 0)
+
+      const positions: LabelPos[] = labelPositions3D.map(p => {
+        tmpW.copy(p).applyEuler(euler)
+        // Vérifier que le point est devant la caméra (camera-space z < 0)
+        tmpV.copy(tmpW).applyMatrix4(cam.matrixWorldInverse)
+        if (tmpV.z > -0.1) return { x: 0, y: 0, visible: false }
+        // Projection NDC
+        tmpW.project(cam)
+        if (Math.abs(tmpW.x) > 1.35 || Math.abs(tmpW.y) > 1.35) {
+          return { x: 0, y: 0, visible: false }
+        }
+        return {
+          x: ((tmpW.x + 1) / 2) * S - 34,
+          y: ((-tmpW.y + 1) / 2) * S - 10,
+          visible: true,
+        }
+      })
+
+      setLabelScreenPos(positions)
+    }, 67)
+
+    return () => clearInterval(id)
+  }, [labelPositions3D, S])
+
+  // ─── Détection secteur via raycasting JS ────────────────────────────────
+  const panResponder = useMemo(
+    () => PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderRelease: evt => {
+        const cam = cameraRef.current
+        if (!cam) return
+
+        const { locationX, locationY } = evt.nativeEvent
+        const ndcX = (locationX - S / 2) / (S / 2)
+        const ndcY = -((locationY - S / 2) / (S / 2))
+
+        // Intersect ray with Y=0 plane (world space)
+        const raycaster  = new THREE.Raycaster()
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam)
+        const ground     = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+        const hit        = new THREE.Vector3()
+        if (!raycaster.ray.intersectPlane(ground, hit)) return
+
+        const dist = Math.sqrt(hit.x * hit.x + hit.z * hit.z)
+        if (dist > MAX_R * 1.15) {
+          // Tap hors de la topographie → désélectionner
+          setSelectedFamily(null)
+          selectedRef.current = null
+          autoRotateRef.current = true
+          return
+        }
+
+        // Angle monde → angle local (inverse de la rotation scène)
+        // world angle = sA - sceneRotY  →  sA = worldAngle + sceneRotY
+        const worldAngle = Math.atan2(hit.z, hit.x)
+        const localAngle = ((worldAngle + sceneRotYRef.current) % TWO_PI + TWO_PI) % TWO_PI
+        const fi         = Math.floor(localAngle / SECTOR_ANG) % N_SECTORS
+
+        if (selectedRef.current === fi) {
+          setSelectedFamily(null)
+          selectedRef.current = null
+          autoRotateRef.current = true
+        } else {
+          setSelectedFamily(fi)
+          selectedRef.current = fi
+          autoRotateRef.current = false
+          // Rotation cible : amener le secteur face à la caméra (+Z monde ≡ angle PI/2)
+          // world angle = sA - R = PI/2  →  R = sA - PI/2
+          const sA = fi * SECTOR_ANG + SECTOR_ANG / 2
+          targetRotYRef.current = sA - Math.PI / 2
+        }
+      },
+    }),
+    [S],
+  )
+
+  // ─── Cleanup RAF ─────────────────────────────────────────────────────────
   useEffect(() => () => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
   }, [])
 
+  // ─── GL context ──────────────────────────────────────────────────────────
   const onContextCreate = useCallback((gl: ExpoWebGLRenderingContext) => {
     const W = gl.drawingBufferWidth
     const H = gl.drawingBufferHeight
@@ -295,20 +433,18 @@ export default function MyoOrb({
     const camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 100)
     camera.position.set(0, 3.2, 4.8)
     camera.lookAt(0, 0, 0)
+    camera.updateMatrixWorld()
 
-    // Relief séance (dessus) — couleurs par secteur, terrain chaotique ridged fBm
+    cameraRef.current = camera
+
     scene.add(new THREE.LineSegments(
       makeTopoGeo(svRef.current, H_TOP, 1, true),
       new THREE.LineBasicMaterial({ vertexColors: true }),
     ))
-
-    // Relief moyen (dessous) — amplitude réduite, couleur unique, même bruit → cohérence visuelle
     scene.add(new THREE.LineSegments(
       makeTopoGeo(avRef.current, H_BOT, -1, false),
       new THREE.LineBasicMaterial({ color: 0x4e7d9e }),
     ))
-
-    // Socle circulaire — 3 anneaux + ticks radiaux, clairement visible
     scene.add(new THREE.LineSegments(
       makeSocleGeo(),
       new THREE.LineBasicMaterial({ color: 0x606060 }),
@@ -319,24 +455,155 @@ export default function MyoOrb({
       rafRef.current = requestAnimationFrame(tick)
       if (now - last < 33) return
       last = now
-      scene.rotation.y += 0.003
+
+      if (autoRotateRef.current) {
+        scene.rotation.y += 0.003
+      } else {
+        // Interpolation angulaire sur le chemin le plus court
+        let diff = targetRotYRef.current - scene.rotation.y
+        diff = ((diff + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI
+        scene.rotation.y += diff * 0.05
+      }
+      sceneRotYRef.current = scene.rotation.y
+      camera.updateMatrixWorld()
+
       renderer.render(scene, camera)
       gl.endFrameEXP()
     }
     rafRef.current = requestAnimationFrame(tick)
   }, [])
 
+  // ─── Render ──────────────────────────────────────────────────────────────
+  const accentHex = selectedFamily !== null ? SECTOR_COLORS_HEX[selectedFamily] : '#ffffff'
+
   return (
     <View style={[styles.wrap, { width: S, height: S }]}>
+      {/* Canvas 3D */}
       <GLView style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
+
+      {/* Étiquettes flottantes — non interactives */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        {labelScreenPos.map((pos, i) => (
+          <Text
+            key={i}
+            style={[
+              styles.label,
+              {
+                left     : pos.x,
+                top      : pos.y,
+                opacity  : pos.visible ? 1 : 0,
+                color    : selectedFamily === i
+                  ? SECTOR_COLORS_HEX[i]
+                  : 'rgba(255,255,255,0.52)',
+                transform: [{ scale: selectedFamily === i ? 1.18 : 1 }],
+              },
+            ]}
+          >
+            {FAMILY_NAMES[i]}
+          </Text>
+        ))}
+      </View>
+
+      {/* Couche tactile — par-dessus tout, capture les taps */}
+      <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers} />
+
+      {/* Panneau détail — overlay bas, visible si secteur sélectionné */}
+      {selectedFamily !== null && (
+        <View style={styles.detailPanel} pointerEvents="none">
+          {/* Barre accent couleur famille */}
+          <View style={[styles.detailAccentBar, { backgroundColor: accentHex }]} />
+          <Text style={[styles.detailTitle, { color: accentHex }]}>
+            {FAMILY_NAMES[selectedFamily]}
+          </Text>
+          {DIM_NAMES[selectedFamily].map((name, i) => {
+            const val = sessionValues[selectedFamily]?.[i] ?? 0
+            return (
+              <View key={i} style={styles.dimRow}>
+                <Text style={styles.dimName}>{name}</Text>
+                <View style={styles.dimBarBg}>
+                  <View
+                    style={[
+                      styles.dimBarFill,
+                      { width: `${Math.round(val * 100)}%`, backgroundColor: accentHex },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.dimVal}>{Math.round(val * 100)}</Text>
+              </View>
+            )
+          })}
+        </View>
+      )}
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   wrap: {
-    borderRadius: 16,
-    overflow: 'hidden',
+    borderRadius   : 16,
+    overflow       : 'hidden',
     backgroundColor: '#080808',
+  },
+  label: {
+    position     : 'absolute',
+    fontSize     : 9,
+    fontWeight   : '700',
+    letterSpacing: 1.2,
+  },
+  detailPanel: {
+    position       : 'absolute',
+    bottom         : 12,
+    left           : 12,
+    right          : 12,
+    backgroundColor: 'rgba(8,8,8,0.90)',
+    borderRadius   : 12,
+    borderWidth    : 1,
+    borderColor    : 'rgba(255,255,255,0.09)',
+    padding        : 14,
+    paddingTop     : 16,
+  },
+  detailAccentBar: {
+    position    : 'absolute',
+    top         : 0,
+    left        : 0,
+    right       : 0,
+    height      : 2,
+    borderRadius: 12,
+    opacity     : 0.85,
+  },
+  detailTitle: {
+    fontSize     : 12,
+    fontWeight   : '700',
+    letterSpacing: 1.6,
+    marginBottom : 10,
+  },
+  dimRow: {
+    flexDirection : 'row',
+    alignItems    : 'center',
+    marginBottom  : 5,
+  },
+  dimName: {
+    color   : 'rgba(255,255,255,0.55)',
+    fontSize: 10,
+    width   : 96,
+  },
+  dimBarBg: {
+    flex             : 1,
+    height           : 3,
+    backgroundColor  : 'rgba(255,255,255,0.09)',
+    borderRadius     : 2,
+    overflow         : 'hidden',
+    marginHorizontal : 8,
+  },
+  dimBarFill: {
+    height      : 3,
+    borderRadius: 2,
+    opacity     : 0.80,
+  },
+  dimVal: {
+    color    : 'rgba(255,255,255,0.45)',
+    fontSize : 10,
+    width    : 22,
+    textAlign: 'right',
   },
 })
