@@ -104,37 +104,87 @@ function computePrediction(exerciseId: string): Prediction | null
 
 ---
 
-## Myo 3D (myo-orb.tsx) — v1 opérationnel, v2 Phase 2
+## Myo 3D (myo-orb.tsx) — v1 opérationnel avec interaction, v2 Phase 2
 
-Signature multi-dimensionnelle en z-score (41 dims, 8 familles). Visualisation Three.js + expo-gl.
+Topographie polaire data-driven. 41 dims → 8 familles × sous-variables → relief 3D interactif. Three.js + expo-gl.
 
 ### Architecture
 - **GLView** (expo-gl) → Three.js WebGLRenderer avec canvas proxy (voir rules/stack.md)
-- **Géométrie** : `IcosahedronGeometry(1.0, 6)` déformée par champ metaball des 8 familles
-- **Matériau** : `MeshPhongMaterial` matte white ceramic `#f0ece7`, shininess 12
-- **Lumières** : AmbientLight(0xffffff, 0.28) + key (0xfff6ee, 2.4) + fill (0xdde6ff, 0.52) + rim (0xffffff, 1.0) + ground (0xffe8d8, 0.16)
-- **Overlay React Native** : labels familles via `THREE.Vector3.project(camera)` + panel détail
+- **Géométrie** : `LineSegments` — grille polaire N_RINGS(42) × N_SEGS(140) + N_SPOKES(26) rayons
+- **Matériau** : `LineBasicMaterial` — `vertexColors: true` (séance) / couleur unie bleu (historique)
+- **2 terrains** : séance (dessus, coloré par secteur) + historique (dessous, bleu uni atténué H_BOT)
+- **Socle** : 3 anneaux concentriques + ticks radiaux
 
-### buildBlobGeometry — formule vertex
+### getH — formule hauteur en (r, theta)
 ```
-for each vertex (nx,ny,nz normalized):
-  field = Σ families: t×0.55 / (d2 + 0.045)   où t=(famZ+3)/6, d2=dist² vers attractor
-  scale = 1.0 + min(0.48, field×0.068)
-  vertex = (nx,ny,nz) × scale
+pour chaque DimConfig (41 configs précalculées, séquence nombre d'or) :
+  angGauss = exp(-da²/2σ²) × (1 + 0.38×cos(harmN×theta))  // Gaussienne × harmonique
+  rad      = (1 - |rn - rPeak| / rWidth)^2.5               // tente pointue
+  h       += val × angGauss × rad
+h *= maxH × edgeAttenuation   // atténuation bords (pas de normalisation forcée)
 ```
-Attractor position famille : `(sin(phi)cos(theta), -cos(phi), sin(phi)sin(theta))`
+DimConfig précalculé une fois (IIFE module) — zéro coût runtime.
 
-### 8 familles — GROUPS
-volume · intensite · structure · recuperation · performance · regularite · muscles · temps
+### 8 familles et couleurs
+| # | Famille | Couleur |
+|---|---|---|
+| 0 | VOLUME | #f97316 |
+| 1 | INTENSITÉ | #ef4444 |
+| 2 | STRUCTURE | #8b5cf6 |
+| 3 | RÉCUP | #06b6d4 |
+| 4 | PERF | #fac775 |
+| 5 | RÉGULARITÉ | #22c55e |
+| 6 | MUSCLES | #ec4899 |
+| 7 | TEMPS | #3b82f6 |
+
+### Interaction — règles critiques
+
+**INTERDIT** : `<Html>` de `@react-three/drei` — crash expo-gl. Tout overlay = `View` RN absolue.
+
+**Ordre des couches (z-index)**
+1. `GLView` — canvas WebGL
+2. `View pointerEvents="none"` — étiquettes flottantes + panneau détail
+3. `View` vide avec `{...panResponder.panHandlers}` — capture tous les taps
+
+**Touch → secteur (raycasting JS pur, pas de raycasting sur LineSegments)**
+```
+raycaster.setFromCamera(new Vector2(ndcX, ndcY), camera)
+ray.intersectPlane(Y=0, hit)                         // intersection plan de base
+worldAngle = atan2(hit.z, hit.x)
+localAngle = (worldAngle + sceneRotY + N×2π) % 2π   // inverse rotation scène
+fi         = floor(localAngle / SECTOR_ANG) % 8
+dist > MAX_R × 1.15 → désélection + reprise auto-rotation
+```
+
+**Étiquettes 3D→2D**
+- `useMemo([sessionValues])` : positions 3D = pic de chaque secteur (scan 20×8 = 160 points)
+- `setInterval` 67ms (15fps) hors du GL thread :
+  1. `tmpW.copy(p).applyEuler(euler)` — rotation scène
+  2. `tmpV.copy(tmpW).applyMatrix4(cam.matrixWorldInverse)` — espace caméra
+  3. `if (viewPos.z > -0.1) → visible: false` — derrière caméra
+  4. `tmpW.project(cam)` → NDC → coordonnées écran
+- Vecteurs `tmpW`/`tmpV` alloués **une fois** hors du callback (zéro GC)
+
+**Rotation caméra sur tap**
+```
+sA           = fi × SECTOR_ANG + SECTOR_ANG/2
+targetRotY   = sA - PI/2     // world angle = sA - R = PI/2 quand R = sA - PI/2
+// tick : diff = (target - current) normalisé [-PI,PI], scene.rotation.y += diff × 0.05
+```
 
 ### Auto-rotation
-RAF 30fps (`now - last >= 33ms`), `ryRef += 0.003`. Stop si `isInteract.current = true`.
+RAF 30fps (`now - last >= 33ms`). `autoRotateRef = true` → `scene.rotation.y += 0.003`.
+Sur tap secteur : `autoRotateRef = false`, interpolation vers `targetRotY`.
+Sur désélection : `autoRotateRef = true`, rotation libre reprend depuis la position courante.
+`sceneRotYRef` mis à jour chaque tick (partagé avec le setInterval des labels).
 
 ### Score (header)
 Arc SVG 240°. Couleur : ≥66→`#FAC775` / ≥33→`#D85A30` / <33→`#8E8E93`.
 
 ### Pipeline données
-`myo_signatures` → fetch par `workout_id` → `FamilyNode[]` avec `famZ` → `nodesRef.current` → `buildBlobGeometry`
+Props : `sessionValues: number[][]` (8 familles × ~5-6 sous-variables, normalisées [0,1]).
+Source réelle : `myo_signatures.raw_*` → normaliser → passer en prop depuis summary.tsx.
+Mock fourni jusqu'au câblage des données réelles.
 
 ### Myo v2 (Phase 2) — export Stories 9:16
 Capture frame WebGL → PNG partageable via Share Sheet iOS/Android.

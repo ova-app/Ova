@@ -10,6 +10,7 @@ import {
   PanResponder,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native'
 import { GLView, ExpoWebGLRenderingContext } from 'expo-gl'
@@ -265,6 +266,82 @@ function makeSocleGeo(): THREE.BufferGeometry {
   return geo
 }
 
+// ─── Géo session — un secteur à la fois (pour highlighting) ───────────────
+function makeTopoGeoSector(
+  fi: number,
+  data: number[][],
+  maxH: number,
+  sign: 1 | -1,
+  colored: boolean,
+): THREE.BufferGeometry {
+  const pts: number[] = []
+  const cols: number[] = []
+
+  for (let ri = 0; ri < N_RINGS; ri++) {
+    const r = ((ri + 1) / N_RINGS) * MAX_R
+    for (let si = 0; si < N_SEGS; si++) {
+      const a1  = (si / N_SEGS) * TWO_PI
+      const a2  = ((si + 1) / N_SEGS) * TWO_PI
+      const mid = (a1 + a2) / 2
+      if (Math.floor(((mid % TWO_PI + TWO_PI) % TWO_PI) / SECTOR_ANG) % N_SECTORS !== fi) continue
+      pts.push(
+        r * Math.cos(a1), sign * getH(r, a1, data, maxH), r * Math.sin(a1),
+        r * Math.cos(a2), sign * getH(r, a2, data, maxH), r * Math.sin(a2),
+      )
+      if (colored) {
+        const c1 = getC(a1); cols.push(c1[0], c1[1], c1[2])
+        const c2 = getC(a2); cols.push(c2[0], c2[1], c2[2])
+      }
+    }
+  }
+
+  for (let sp = 0; sp < N_SPOKES; sp++) {
+    const a = (sp / N_SPOKES) * TWO_PI
+    if (Math.floor(((a % TWO_PI + TWO_PI) % TWO_PI) / SECTOR_ANG) % N_SECTORS !== fi) continue
+    const c = colored ? getC(a) : undefined
+    for (let ri = 0; ri < N_RINGS; ri++) {
+      const r1 = (ri / N_RINGS) * MAX_R
+      const r2 = ((ri + 1) / N_RINGS) * MAX_R
+      pts.push(
+        r1 * Math.cos(a), sign * getH(r1, a, data, maxH), r1 * Math.sin(a),
+        r2 * Math.cos(a), sign * getH(r2, a, data, maxH), r2 * Math.sin(a),
+      )
+      if (colored && c) cols.push(c[0], c[1], c[2], c[0], c[1], c[2])
+    }
+  }
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3))
+  if (colored && cols.length > 0) {
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cols), 3))
+  }
+  return geo
+}
+
+// ─── Hitbox secteur (pie-slice invisible, raycasting uniquement) ───────────
+function makeSectorHitbox(fi: number): THREE.Mesh {
+  const N_ARC  = 12
+  const startA = fi * SECTOR_ANG
+  const verts: number[] = [0, 0, 0]
+  for (let i = 0; i <= N_ARC; i++) {
+    const a = startA + (i / N_ARC) * SECTOR_ANG
+    verts.push(MAX_R * 1.12 * Math.cos(a), 0, MAX_R * 1.12 * Math.sin(a))
+  }
+  const idxs: number[] = []
+  for (let i = 0; i < N_ARC; i++) idxs.push(0, i + 1, i + 2)
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3))
+  geo.setIndex(idxs)
+
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
+  )
+  mesh.userData.sectorIndex = fi
+  return mesh
+}
+
 // ─── Type overlay ──────────────────────────────────────────────────────────
 interface LabelPos {
   x: number
@@ -288,14 +365,18 @@ export default function MyoOrb({
   )
 
   // ─── Refs partagés GL ↔ React ────────────────────────────────────────────
-  const rafRef        = useRef<number | null>(null)
-  const cameraRef     = useRef<THREE.PerspectiveCamera | null>(null)
-  const sceneRotYRef  = useRef(0)
-  const targetRotYRef = useRef(0)
-  const autoRotateRef = useRef(true)
-  const selectedRef   = useRef<number | null>(null)
-  const svRef         = useRef(sessionValues)
-  const avRef         = useRef(averageValues)
+  const rafRef          = useRef<number | null>(null)
+  const cameraRef       = useRef<THREE.PerspectiveCamera | null>(null)
+  const sceneRef        = useRef<THREE.Scene | null>(null)
+  const sceneRotYRef    = useRef(0)
+  const targetRotYRef   = useRef(0)
+  const autoRotateRef   = useRef(true)
+  const selectedRef     = useRef<number | null>(null)
+  const svRef           = useRef(sessionValues)
+  const avRef           = useRef(averageValues)
+  const sessionMatsRef  = useRef<THREE.LineBasicMaterial[]>([])
+  const avgMatRef       = useRef<THREE.LineBasicMaterial | null>(null)
+  const hitboxMeshesRef = useRef<THREE.Mesh[]>([])
 
   // ─── Positions 3D des étiquettes — dessus du pic de chaque secteur ───────
   const labelPositions3D = useMemo((): THREE.Vector3[] => {
@@ -352,39 +433,42 @@ export default function MyoOrb({
     return () => clearInterval(id)
   }, [labelPositions3D, S])
 
-  // ─── Détection secteur via raycasting JS ────────────────────────────────
+  // ─── Fermeture panneau ───────────────────────────────────────────────────
+  const handleClose = useCallback(() => {
+    setSelectedFamily(null)
+    selectedRef.current = null
+    autoRotateRef.current = true
+  }, [])
+
+  // ─── Raycasting sur hitboxes invisibles ──────────────────────────────────
   const panResponder = useMemo(
     () => PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderRelease: evt => {
-        const cam = cameraRef.current
-        if (!cam) return
+        const cam     = cameraRef.current
+        const scene   = sceneRef.current
+        const hitboxes = hitboxMeshesRef.current
+        if (!cam || !scene || hitboxes.length === 0) return
 
         const { locationX, locationY } = evt.nativeEvent
         const ndcX = (locationX - S / 2) / (S / 2)
         const ndcY = -((locationY - S / 2) / (S / 2))
 
-        // Intersect ray with Y=0 plane (world space)
-        const raycaster  = new THREE.Raycaster()
-        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam)
-        const ground     = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
-        const hit        = new THREE.Vector3()
-        if (!raycaster.ray.intersectPlane(ground, hit)) return
+        // Force la mise à jour des matrices monde (hitboxes tournent avec la scène)
+        scene.updateMatrixWorld(true)
 
-        const dist = Math.sqrt(hit.x * hit.x + hit.z * hit.z)
-        if (dist > MAX_R * 1.15) {
-          // Tap hors de la topographie → désélectionner
+        const raycaster = new THREE.Raycaster()
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam)
+        const intersects = raycaster.intersectObjects(hitboxes, false)
+
+        if (intersects.length === 0) {
           setSelectedFamily(null)
           selectedRef.current = null
           autoRotateRef.current = true
           return
         }
 
-        // Angle monde → angle local (inverse de la rotation scène)
-        // world angle = sA - sceneRotY  →  sA = worldAngle + sceneRotY
-        const worldAngle = Math.atan2(hit.z, hit.x)
-        const localAngle = ((worldAngle + sceneRotYRef.current) % TWO_PI + TWO_PI) % TWO_PI
-        const fi         = Math.floor(localAngle / SECTOR_ANG) % N_SECTORS
+        const fi = intersects[0].object.userData.sectorIndex as number
 
         if (selectedRef.current === fi) {
           setSelectedFamily(null)
@@ -394,8 +478,6 @@ export default function MyoOrb({
           setSelectedFamily(fi)
           selectedRef.current = fi
           autoRotateRef.current = false
-          // Rotation cible : amener le secteur face à la caméra (+Z monde ≡ angle PI/2)
-          // world angle = sA - R = PI/2  →  R = sA - PI/2
           const sA = fi * SECTOR_ANG + SECTOR_ANG / 2
           targetRotYRef.current = sA - Math.PI / 2
         }
@@ -436,21 +518,42 @@ export default function MyoOrb({
     camera.updateMatrixWorld()
 
     cameraRef.current = camera
+    sceneRef.current  = scene
 
-    scene.add(new THREE.LineSegments(
-      makeTopoGeo(svRef.current, H_TOP, 1, true),
-      new THREE.LineBasicMaterial({ vertexColors: true }),
-    ))
-    scene.add(new THREE.LineSegments(
-      makeTopoGeo(avRef.current, H_BOT, -1, false),
-      new THREE.LineBasicMaterial({ color: 0x4e7d9e }),
-    ))
+    // 8 LineSegments session — un par secteur, matériau indépendant
+    const mats: THREE.LineBasicMaterial[] = []
+    for (let fi = 0; fi < N_SECTORS; fi++) {
+      const mat = new THREE.LineBasicMaterial({ vertexColors: true })
+      mats.push(mat)
+      scene.add(new THREE.LineSegments(
+        makeTopoGeoSector(fi, svRef.current, H_TOP, 1, true),
+        mat,
+      ))
+    }
+    sessionMatsRef.current = mats
+
+    // Terrain historique — un seul bloc, teinté bleu
+    const avgMat = new THREE.LineBasicMaterial({ color: 0x4e7d9e })
+    avgMatRef.current = avgMat
+    scene.add(new THREE.LineSegments(makeTopoGeo(avRef.current, H_BOT, -1, false), avgMat))
+
     scene.add(new THREE.LineSegments(
       makeSocleGeo(),
       new THREE.LineBasicMaterial({ color: 0x606060 }),
     ))
 
-    let last = 0
+    // 8 hitboxes invisibles — pie-slices Y=0, tournent avec la scène
+    const hitboxes: THREE.Mesh[] = []
+    for (let fi = 0; fi < N_SECTORS; fi++) {
+      const hb = makeSectorHitbox(fi)
+      hitboxes.push(hb)
+      scene.add(hb)
+    }
+    hitboxMeshesRef.current = hitboxes
+
+    let last    = 0
+    let prevSel: number | null = null
+
     const tick = (now: number): void => {
       rafRef.current = requestAnimationFrame(tick)
       if (now - last < 33) return
@@ -459,13 +562,28 @@ export default function MyoOrb({
       if (autoRotateRef.current) {
         scene.rotation.y += 0.003
       } else {
-        // Interpolation angulaire sur le chemin le plus court
         let diff = targetRotYRef.current - scene.rotation.y
         diff = ((diff + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI
         scene.rotation.y += diff * 0.05
       }
       sceneRotYRef.current = scene.rotation.y
       camera.updateMatrixWorld()
+
+      // Highlighting — recompile les matériaux uniquement si la sélection change
+      const sel = selectedRef.current
+      if (sel !== prevSel) {
+        prevSel = sel
+        for (let fi = 0; fi < N_SECTORS; fi++) {
+          const mat    = mats[fi]
+          const dimmed = sel !== null && fi !== sel
+          mat.opacity     = dimmed ? 0.13 : 1.0
+          mat.transparent = dimmed
+          mat.needsUpdate = true
+        }
+        avgMat.opacity     = sel !== null ? 0.20 : 1.0
+        avgMat.transparent = sel !== null
+        avgMat.needsUpdate = true
+      }
 
       renderer.render(scene, camera)
       gl.endFrameEXP()
@@ -491,7 +609,9 @@ export default function MyoOrb({
               {
                 left     : pos.x,
                 top      : pos.y,
-                opacity  : pos.visible ? 1 : 0,
+                opacity  : pos.visible
+                  ? (selectedFamily !== null && selectedFamily !== i ? 0.28 : 1)
+                  : 0,
                 color    : selectedFamily === i
                   ? SECTOR_COLORS_HEX[i]
                   : 'rgba(255,255,255,0.52)',
@@ -507,14 +627,25 @@ export default function MyoOrb({
       {/* Couche tactile — par-dessus tout, capture les taps */}
       <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers} />
 
-      {/* Panneau détail — overlay bas, visible si secteur sélectionné */}
+      {/* Panneau détail — par-dessus la couche tactile, absorbe ses propres taps */}
       {selectedFamily !== null && (
-        <View style={styles.detailPanel} pointerEvents="none">
-          {/* Barre accent couleur famille */}
+        <View
+          style={styles.detailPanel}
+          onStartShouldSetResponder={() => true}
+        >
           <View style={[styles.detailAccentBar, { backgroundColor: accentHex }]} />
-          <Text style={[styles.detailTitle, { color: accentHex }]}>
-            {FAMILY_NAMES[selectedFamily]}
-          </Text>
+          <View style={styles.detailHeader}>
+            <Text style={[styles.detailTitle, { color: accentHex }]}>
+              {FAMILY_NAMES[selectedFamily]}
+            </Text>
+            <TouchableOpacity
+              onPress={handleClose}
+              style={styles.closeBtn}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={styles.closeBtnText}>×</Text>
+            </TouchableOpacity>
+          </View>
           {DIM_NAMES[selectedFamily].map((name, i) => {
             const val = sessionValues[selectedFamily]?.[i] ?? 0
             return (
@@ -571,11 +702,30 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     opacity     : 0.85,
   },
+  detailHeader: {
+    flexDirection : 'row',
+    alignItems    : 'center',
+    justifyContent: 'space-between',
+    marginBottom  : 10,
+  },
   detailTitle: {
     fontSize     : 12,
     fontWeight   : '700',
     letterSpacing: 1.6,
-    marginBottom : 10,
+  },
+  closeBtn: {
+    width          : 24,
+    height         : 24,
+    alignItems     : 'center',
+    justifyContent : 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius   : 12,
+  },
+  closeBtnText: {
+    color     : 'rgba(255,255,255,0.55)',
+    fontSize  : 16,
+    lineHeight: 18,
+    fontWeight: '300',
   },
   dimRow: {
     flexDirection : 'row',
