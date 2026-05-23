@@ -3,6 +3,8 @@ import { PostHogProvider } from 'posthog-react-native'
 import * as SplashScreen from 'expo-splash-screen'
 import { useEffect } from 'react'
 import { hydrateStorage } from '@/lib/storage'
+import { ThemeProvider } from '@/context/ThemeContext'
+import { WorkoutProvider } from '@/context/WorkoutContext'
 import { useFonts } from 'expo-font'
 import {
   Barlow_400Regular,
@@ -47,7 +49,11 @@ export default function RootLayout() {
         navigationRef,
       }}
     >
-      <Stack screenOptions={{ headerShown: false }} />
+      <ThemeProvider>
+        <WorkoutProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </WorkoutProvider>
+      </ThemeProvider>
     </PostHogProvider>
   )
 }
