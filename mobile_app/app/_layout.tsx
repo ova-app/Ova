@@ -2,6 +2,7 @@ import { Stack, useNavigationContainerRef } from 'expo-router'
 import { PostHogProvider } from 'posthog-react-native'
 import * as SplashScreen from 'expo-splash-screen'
 import { useEffect } from 'react'
+import { hydrateStorage } from '@/lib/storage'
 import { useFonts } from 'expo-font'
 import {
   Barlow_400Regular,
@@ -29,6 +30,7 @@ export default function RootLayout() {
   })
 
   useEffect(() => {
+    hydrateStorage()
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync()
     }
