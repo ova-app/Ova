@@ -87,3 +87,4 @@ React Native 0.81.5 + Expo 54 + Expo Router 6 · Supabase JS 2.x · Three.js 0.1
 | Myo 41 dims, familles, sources données | `rules/myo.md` |
 | RevenueCat, PostHog, paywall | `rules/stack.md` |
 | Tokens Design System, Skia, Rive, haptics, sons | `rules/ui.md` |
+| Intégrer exports Figma, lire PNG maquette, mettre à jour theme.ts | `rules/figma.md` |
