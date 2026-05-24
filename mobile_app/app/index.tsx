@@ -7,35 +7,41 @@ import {
   Easing,
 } from 'react-native'
 import { useRouter } from 'expo-router'
-import Svg, { Circle, Path } from 'react-native-svg'
+import Svg, { Path } from 'react-native-svg'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
-import { spacing, typography } from '@/constants/theme'
+import { spacing, font } from '@/constants/theme'
 
-// ─── Logo SVG ────────────────────────────────────────────────────────────────
+// ─── Logo Orava — cercle jaune + losange noir intérieur ──────────────────────
 
-function LogoOrava(): React.JSX.Element {
+function LogoOrava({ accentColor, bgColor }: { accentColor: string; bgColor: string }): React.JSX.Element {
   return (
-    <Svg width={80} height={80} viewBox="0 0 80 80">
-      <Circle
-        cx={40}
-        cy={40}
-        r={34}
-        stroke="#FFDD00"
-        strokeWidth={12}
-        fill="none"
+    <View
+      style={{
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: accentColor,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {/* Losange intérieur noir */}
+      <View
+        style={{
+          width: 16,
+          height: 16,
+          backgroundColor: bgColor,
+          transform: [{ rotate: '45deg' }],
+        }}
       />
-      <Path
-        d="M 40,17.6 L 58,61.4 A 28 28 0 0 1 22,61.4 Z"
-        fill="#FFDD00"
-      />
-    </Svg>
+    </View>
   )
 }
 
-// ─── Arc de chargement ────────────────────────────────────────────────────────
+// ─── Spinner — arc jaune animé ────────────────────────────────────────────────
 
-function LoadingArc({ color, trackColor }: { color: string; trackColor: string }): React.JSX.Element {
+function LoadingSpinner({ color }: { color: string }): React.JSX.Element {
   const rotation = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
@@ -57,55 +63,26 @@ function LoadingArc({ color, trackColor }: { color: string; trackColor: string }
   })
 
   return (
-    <View style={arcStyles.container}>
-      {/* Track */}
-      <View
-        style={[
-          arcStyles.track,
-          { borderColor: trackColor },
-        ]}
-      />
-      {/* Arc animé */}
-      <Animated.View
-        style={[
-          arcStyles.arcWrap,
-          { transform: [{ rotate: spin }] },
-        ]}
-      >
-        <Svg width={120} height={120} viewBox="0 0 120 120">
-          <Path
-            d="M 60,4 A 56,56 0 0 1 116,60"
-            stroke={color}
-            strokeWidth={2}
-            fill="none"
-            strokeLinecap="round"
-          />
-        </Svg>
-      </Animated.View>
-    </View>
+    <Animated.View
+      style={{
+        width: 40,
+        height: 40,
+        transform: [{ rotate: spin }],
+      }}
+    >
+      <Svg width={40} height={40} viewBox="0 0 40 40">
+        {/* Arc partiel ~270° — de 12h à 9h dans le sens horaire */}
+        <Path
+          d="M 20,2 A 18,18 0 1 1 2,20"
+          stroke={color}
+          strokeWidth={2.5}
+          fill="none"
+          strokeLinecap="round"
+        />
+      </Svg>
+    </Animated.View>
   )
 }
-
-const arcStyles = StyleSheet.create({
-  container: {
-    width: 120,
-    height: 120,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  track: {
-    position: 'absolute',
-    width: 116,
-    height: 116,
-    borderRadius: 58,
-    borderWidth: 2,
-  },
-  arcWrap: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-  },
-})
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
@@ -133,20 +110,16 @@ export default function SplashScreen(): React.JSX.Element {
 
   return (
     <View style={s.root}>
-      {/* Arc de chargement centré — contient le logo */}
-      <View style={s.logoContainer}>
-        <LoadingArc
-          color={colors.accent}
-          trackColor={colors.backgroundSecondary}
-        />
-        {/* Logo centré sur l'arc */}
-        <View style={s.logoOverlay}>
-          <LogoOrava />
-        </View>
+      {/* Groupe logo + wordmark */}
+      <View style={s.logoGroup}>
+        <LogoOrava accentColor={colors.accent} bgColor={colors.background} />
+        <Text style={s.wordmark}>ORAVA</Text>
       </View>
 
-      {/* Wordmark */}
-      <Text style={s.wordmark}>ORAVA</Text>
+      {/* Spinner séparé en dessous */}
+      <View style={s.spinnerWrap}>
+        <LoadingSpinner color={colors.accent} />
+      </View>
     </View>
   )
 }
@@ -161,22 +134,18 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    logoContainer: {
-      width: 120,
-      height: 120,
+    logoGroup: {
       alignItems: 'center',
-      justifyContent: 'center',
-    },
-    logoOverlay: {
-      position: 'absolute',
-      alignItems: 'center',
-      justifyContent: 'center',
+      gap: spacing.s2,
     },
     wordmark: {
-      ...typography.title,
+      fontSize: 18,
+      fontFamily: font.condensedBold,
       color: colors.textPrimary,
-      letterSpacing: 6,
-      marginTop: spacing.s4,
+      letterSpacing: 4,
+    },
+    spinnerWrap: {
+      marginTop: spacing.s6,
     },
   })
 }

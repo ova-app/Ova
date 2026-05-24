@@ -11,7 +11,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ChevronLeft } from 'lucide-react-native'
+import { SkipForward } from 'lucide-react-native'
 import Svg, { Circle } from 'react-native-svg'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useTheme } from '@/context/ThemeContext'
@@ -25,22 +25,23 @@ const PRESETS = [
   { label: '3min', value: 180 },
 ]
 
-const ARC_DIAMETER = 280
-const RADIUS_CIRCLE = 120
+const ARC_DIAMETER = 260
+const STROKE_WIDTH = 8
+const RADIUS_CIRCLE = (ARC_DIAMETER / 2) - STROKE_WIDTH
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS_CIRCLE
 
 function formatTime(seconds: number): string {
   const s = Math.max(0, Math.ceil(seconds))
   const m = Math.floor(s / 60)
   const rem = s % 60
-  return `${String(m).padStart(2, '0')}:${String(rem).padStart(2, '0')}`
+  if (m === 0) return `${rem}`
+  return `${m}:${String(rem).padStart(2, '0')}`
 }
 
 export default function TimerScreen() {
   const router = useRouter()
   const { colors } = useTheme()
 
-  const [preset, setPreset] = useState<number>(90)
   const [remaining, setRemaining] = useState<number>(90)
   const [paused, setPaused] = useState<boolean>(false)
   const [finished, setFinished] = useState<boolean>(false)
@@ -98,7 +99,6 @@ export default function TimerScreen() {
     AsyncStorage.getItem('timer_default_preset').then(saved => {
       const value = saved ? parseInt(saved, 10) : 90
       const valid = PRESETS.find(p => p.value === value)?.value ?? 90
-      setPreset(valid)
       setRemaining(valid)
       totalRef.current = valid
       startTick(valid)
@@ -139,110 +139,119 @@ export default function TimerScreen() {
     }
   }, [finished, paused, remaining, startTick, clearTick])
 
-  const handlePreset = useCallback((value: number) => {
-    clearTick()
-    setFinished(false)
-    setPreset(value)
-    setRemaining(value)
-    setPaused(false)
-    totalRef.current = value
-    pausedElapsedRef.current = 0
-    AsyncStorage.setItem('timer_default_preset', String(value))
-    startTick(value)
-  }, [clearTick, startTick])
-
   const progress = totalRef.current > 0 ? remaining / totalRef.current : 0
   const strokeDashoffset = CIRCUMFERENCE * (1 - progress)
 
+  const handleSubtract = useCallback(() => {
+    if (finished) return
+    const next = Math.max(5, remaining - 15)
+    clearTick()
+    setFinished(false)
+    setRemaining(next)
+    totalRef.current = next
+    pausedElapsedRef.current = 0
+    if (!paused) startTick(next)
+  }, [finished, remaining, paused, clearTick, startTick])
+
+  const handleAdd = useCallback(() => {
+    if (finished) return
+    const next = remaining + 15
+    clearTick()
+    setFinished(false)
+    setRemaining(next)
+    totalRef.current = next
+    pausedElapsedRef.current = 0
+    if (!paused) startTick(next)
+  }, [finished, remaining, paused, clearTick, startTick])
+
+  const handleSkip = useCallback(() => {
+    clearTick()
+    setFinished(false)
+    setRemaining(0)
+    router.back()
+  }, [clearTick, router])
+
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
-      <View style={styles.header}>
+      {/* Anneau centré verticalement */}
+      <View style={styles.centerArea}>
         <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backBtn}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          onPress={handleTogglePause}
+          activeOpacity={0.85}
+          style={styles.arcWrapper}
         >
-          <ChevronLeft size={24} color={colors.textSecondary} />
+          <Svg
+            width={ARC_DIAMETER}
+            height={ARC_DIAMETER}
+            style={styles.svg}
+          >
+            {/* Track gris */}
+            <Circle
+              cx={ARC_DIAMETER / 2}
+              cy={ARC_DIAMETER / 2}
+              r={RADIUS_CIRCLE}
+              stroke={colors.backgroundTertiary}
+              strokeWidth={STROKE_WIDTH}
+              fill="none"
+            />
+            {/* Arc de progression jaune */}
+            <Circle
+              cx={ARC_DIAMETER / 2}
+              cy={ARC_DIAMETER / 2}
+              r={RADIUS_CIRCLE}
+              stroke={colors.accent}
+              strokeWidth={STROKE_WIDTH}
+              fill="none"
+              strokeDasharray={CIRCUMFERENCE}
+              strokeDashoffset={strokeDashoffset}
+              strokeLinecap="round"
+              rotation={-90}
+              origin={`${ARC_DIAMETER / 2}, ${ARC_DIAMETER / 2}`}
+            />
+          </Svg>
+
+          {/* Temps centré dans l'anneau */}
+          <View style={styles.arcCenter} pointerEvents="none">
+            <Text
+              style={[styles.timerText, { color: colors.textPrimary }]}
+              suppressHighlighting
+            >
+              {formatTime(remaining)}
+            </Text>
+            {paused && !finished && (
+              <Text style={[styles.pauseLabel, { color: colors.textTertiary }]}>
+                EN PAUSE
+              </Text>
+            )}
+          </View>
         </TouchableOpacity>
-        <Text style={[styles.headerLabel, { color: colors.textSecondary }]}>REPOS</Text>
-        <View style={styles.backBtn} />
       </View>
 
-      <View style={styles.flex} />
-
-      <TouchableOpacity
-        onPress={handleTogglePause}
-        activeOpacity={0.9}
-        style={styles.arcWrapper}
-      >
-        <Svg
-          width={ARC_DIAMETER}
-          height={ARC_DIAMETER}
-          style={styles.svg}
+      {/* 3 boutons de contrôle */}
+      <View style={styles.controlsRow}>
+        <TouchableOpacity
+          onPress={handleSubtract}
+          style={[styles.controlBtn, { backgroundColor: colors.backgroundSecondary }]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Circle
-            cx={ARC_DIAMETER / 2}
-            cy={ARC_DIAMETER / 2}
-            r={RADIUS_CIRCLE}
-            stroke={colors.accent}
-            strokeOpacity={0.1}
-            strokeWidth={6}
-            fill="none"
-          />
-          <Circle
-            cx={ARC_DIAMETER / 2}
-            cy={ARC_DIAMETER / 2}
-            r={RADIUS_CIRCLE}
-            stroke={colors.accent}
-            strokeWidth={6}
-            fill="none"
-            strokeDasharray={CIRCUMFERENCE}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            rotation={-90}
-            origin={`${ARC_DIAMETER / 2}, ${ARC_DIAMETER / 2}`}
-          />
-        </Svg>
+          <Text style={[styles.controlLabel, { color: colors.textPrimary }]}>−15</Text>
+        </TouchableOpacity>
 
-        <View style={styles.arcCenter} pointerEvents="none">
-          <Text
-            style={[styles.timerText, { color: colors.accent }]}
-            suppressHighlighting
-          >
-            {formatTime(remaining)}
-          </Text>
-        </View>
-      </TouchableOpacity>
+        <TouchableOpacity
+          onPress={handleSkip}
+          style={[styles.controlBtn, { backgroundColor: colors.backgroundSecondary }]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <SkipForward size={18} color={colors.textPrimary} />
+        </TouchableOpacity>
 
-      <Text style={[styles.stateLabel, { color: colors.textTertiary }]}>
-        {paused && !finished ? 'En pause' : ''}
-      </Text>
-
-      <View style={styles.flex} />
-
-      <View style={styles.presetsRow}>
-        {PRESETS.map(p => (
-          <TouchableOpacity
-            key={p.value}
-            onPress={() => handlePreset(p.value)}
-            style={[
-              styles.chip,
-              {
-                backgroundColor: colors.backgroundSecondary,
-                borderColor: preset === p.value ? colors.accent : 'transparent',
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.chipLabel,
-                { color: preset === p.value ? colors.accent : colors.textSecondary },
-              ]}
-            >
-              {p.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        <TouchableOpacity
+          onPress={handleAdd}
+          style={[styles.controlBtn, { backgroundColor: colors.backgroundSecondary }]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={[styles.controlLabel, { color: colors.textPrimary }]}>+15</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.bottomSpacer} />
@@ -266,31 +275,15 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
   },
-  flex: {
+  // Zone centrale qui occupe tout l'espace disponible et centre l'anneau
+  centerArea: {
     flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.s4,
-    paddingTop: spacing.s2,
-    paddingBottom: spacing.s2,
-  },
-  backBtn: {
-    width: 44,
-    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  headerLabel: {
-    ...typography.caption,
-    letterSpacing: 1.5,
   },
   arcWrapper: {
     width: ARC_DIAMETER,
     height: ARC_DIAMETER,
-    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -302,39 +295,42 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   timerText: {
-    fontSize: 80,
+    fontSize: 64,
     fontFamily: font.mono,
     fontVariant: ['tabular-nums'],
+    fontWeight: '700',
     letterSpacing: -2,
-    lineHeight: 88,
+    lineHeight: 72,
   },
-  stateLabel: {
+  pauseLabel: {
     ...typography.caption,
-    textAlign: 'center',
-    marginTop: spacing.s3,
-    letterSpacing: 0.4,
-    height: 16,
+    letterSpacing: 1.5,
+    marginTop: spacing.s1,
   },
-  presetsRow: {
+  // Rangée de 3 boutons sous l'anneau
+  controlsRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: spacing.s2,
-    paddingHorizontal: spacing.s4,
-  },
-  chip: {
-    paddingHorizontal: spacing.s3,
-    paddingVertical: spacing.s2,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    minWidth: 52,
     alignItems: 'center',
+    gap: spacing.s3,
+    paddingHorizontal: spacing.s6,
+    marginBottom: spacing.s10,
   },
-  chipLabel: {
-    ...typography.caption,
-    letterSpacing: 0.4,
+  controlBtn: {
+    minWidth: 52,
+    height: 44,
+    paddingHorizontal: spacing.s5,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  controlLabel: {
+    fontSize: 15,
+    fontFamily: font.medium,
+    letterSpacing: 0,
   },
   bottomSpacer: {
-    height: spacing.s8,
+    height: spacing.s4,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,

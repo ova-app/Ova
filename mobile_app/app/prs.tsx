@@ -103,16 +103,24 @@ export default function PrsScreen(): React.JSX.Element {
     // Agréger par exercice : garder meilleur set par niveau
     const exerciseMap = new Map<string, ExercisePRCard>()
 
-    for (const set of setsData) {
-      const we = set.workout_exercises as {
-        exercise_id: string
-        exercises: { name_fr: string }
-        workouts: { started_at: string }
-      }
+    type WeType = {
+      exercise_id: string
+      exercises: { name_fr: string }[] | { name_fr: string }
+      workouts: { started_at: string; user_id: string }[] | { started_at: string; user_id: string }
+    }
+    type SetRow = typeof setsData[number] & { workout_exercises: WeType[] | WeType }
+
+    for (const set of setsData as SetRow[]) {
+      const weRaw = set.workout_exercises
+      const we = Array.isArray(weRaw) ? weRaw[0] : weRaw
 
       const exerciseId = we.exercise_id
-      const exerciseName = we.exercises.name_fr
-      const date = we.workouts.started_at
+      const exRaw = we.exercises
+      const exObj = Array.isArray(exRaw) ? exRaw[0] : exRaw
+      const exerciseName = exObj.name_fr
+      const workoutsRaw = we.workouts
+      const workoutsObj = Array.isArray(workoutsRaw) ? workoutsRaw[0] : workoutsRaw
+      const date = workoutsObj.started_at
       const level = set.pr_charge as PrLevel
 
       if (!exerciseMap.has(exerciseId)) {

@@ -92,8 +92,16 @@ function ExerciseRow({ item, onPress }: ExerciseRowProps) {
   const { colors } = useTheme()
 
   const equipmentLabel = item.equipment_type
-    ? item.equipment_type.replace(/_/g, ' ')
-    : '—'
+    ? item.equipment_type
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase())
+    : null
+
+  const muscleLabel = MUSCLE_GROUP_LABELS[item.muscle_group] ?? item.muscle_group
+
+  const subtitle = equipmentLabel
+    ? `${equipmentLabel} · ${muscleLabel}`
+    : muscleLabel
 
   return (
     <TouchableOpacity
@@ -109,7 +117,7 @@ function ExerciseRow({ item, onPress }: ExerciseRowProps) {
           {item.name_fr}
         </Text>
         <Text style={[typography.caption, { color: colors.textSecondary }]} numberOfLines={1}>
-          {equipmentLabel}
+          {subtitle}
         </Text>
       </View>
       <ChevronRight size={16} color={colors.textTertiary} />
@@ -242,7 +250,6 @@ export default function LibraryScreen() {
               typography.caption,
               {
                 color: activeGroup == null ? colors.background : colors.textSecondary,
-                textTransform: 'uppercase',
               },
             ]}
           >
@@ -269,7 +276,6 @@ export default function LibraryScreen() {
                   typography.caption,
                   {
                     color: isActive ? colors.background : colors.textSecondary,
-                    textTransform: 'uppercase',
                   },
                 ]}
               >

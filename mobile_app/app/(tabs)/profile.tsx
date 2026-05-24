@@ -8,9 +8,10 @@ import {
   ActivityIndicator,
 } from 'react-native'
 import { useRouter } from 'expo-router'
+import { Zap, Flame } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
-import { spacing, radius, typography } from '@/constants/theme'
+import { spacing, radius, typography, font } from '@/constants/theme'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -43,15 +44,10 @@ function getInitiale(profile: UserProfile): string {
   return src.charAt(0).toUpperCase()
 }
 
-function formatVolume(kg: number): string {
-  if (kg >= 1000) return `${(kg / 1000).toFixed(1)}K`
-  return `${Math.round(kg)}`
-}
-
-const PR_LABEL: Record<'gold' | 'silver' | 'bronze', string> = {
-  gold: 'Or',
-  silver: 'Argent',
-  bronze: 'Bronze',
+function getUsername(profile: UserProfile): string {
+  if (profile.username) return `@${profile.username}`
+  if (profile.full_name) return profile.full_name
+  return 'Athlète'
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -133,11 +129,25 @@ export default function ProfileScreen(): React.JSX.Element {
       .limit(10)
 
     if (setsData) {
-      const prs: TopPR[] = setsData
+      type SetsRow = {
+        weight_kg: number | null
+        reps: number | null
+        pr_charge: string | null
+        workout_exercises: {
+          exercise_id: string
+          exercises: { name_fr: string }[] | { name_fr: string }
+        }[] | {
+          exercise_id: string
+          exercises: { name_fr: string }[] | { name_fr: string }
+        }
+      }
+      const prs: TopPR[] = (setsData as SetsRow[])
         .filter(s => s.pr_charge !== null)
         .slice(0, 3)
         .map(s => {
-          const ex = (s.workout_exercises as { exercises: { name_fr: string } }).exercises
+          const we = Array.isArray(s.workout_exercises) ? s.workout_exercises[0] : s.workout_exercises
+          const exRaw = we.exercises
+          const ex = Array.isArray(exRaw) ? exRaw[0] : exRaw
           return {
             exerciseName: ex.name_fr,
             prType: 'charge' as const,
@@ -176,7 +186,7 @@ export default function ProfileScreen(): React.JSX.Element {
   }
 
   const initiale = profile ? getInitiale(profile) : 'O'
-  const displayName = profile?.full_name ?? profile?.username ?? 'Athlète'
+  const displayName = profile ? getUsername(profile) : '@athlète'
   const isPro = profile?.plan === 'premium'
 
   return (
@@ -192,18 +202,18 @@ export default function ProfileScreen(): React.JSX.Element {
             <Text style={s.avatarLetter}>{initiale}</Text>
           </View>
 
-          <View style={s.nameRow}>
-            <Text style={s.username}>{displayName}</Text>
-            {isPro && (
-              <View style={s.proBadge}>
-                <Text style={s.proBadgeText}>PRO</Text>
-              </View>
-            )}
-          </View>
+          <Text style={s.username}>{displayName}</Text>
+
+          {isPro && (
+            <View style={s.proBadge}>
+              <Text style={s.proBadgeText}>PRO</Text>
+            </View>
+          )}
         </View>
 
         {/* ── Hero Stats ── */}
         <View style={s.statsCard}>
+          {/* Séances */}
           <View style={s.statCol}>
             <Text
               style={s.statValue}
@@ -216,18 +226,37 @@ export default function ProfileScreen(): React.JSX.Element {
 
           <View style={s.statSep} />
 
+          {/* Volume — affiché en hero sur 2 lignes si >= 1000 */}
           <View style={s.statCol}>
-            <Text
-              style={[s.statValue, s.statValueAccent]}
-              accessibilityLabel={`${formatVolume(stats.volumeKg)} kilogrammes ce mois`}
-            >
-              {formatVolume(stats.volumeKg)}
-            </Text>
-            <Text style={s.statLabel}>KG CE MOIS</Text>
+            {stats.volumeKg >= 1000 ? (
+              <>
+                <Text
+                  style={[s.statValueHero, { color: colors.accent }]}
+                  accessibilityLabel={`${Math.floor(stats.volumeKg / 1000)} milliers kilogrammes`}
+                >
+                  {Math.floor(stats.volumeKg / 1000)}
+                </Text>
+                <Text
+                  style={[s.statValueHero, { color: colors.accent }]}
+                  accessibilityLabel={`${Math.round(stats.volumeKg % 1000)} kilogrammes`}
+                >
+                  {Math.round(stats.volumeKg % 1000).toString().padStart(3, '0')}
+                </Text>
+              </>
+            ) : (
+              <Text
+                style={[s.statValue, { color: colors.accent }]}
+                accessibilityLabel={`${Math.round(stats.volumeKg)} kilogrammes ce mois`}
+              >
+                {Math.round(stats.volumeKg)}
+              </Text>
+            )}
+            <Text style={[s.statLabel, { color: colors.accent }]}>KG CE MOIS</Text>
           </View>
 
           <View style={s.statSep} />
 
+          {/* Streak */}
           <View style={s.statCol}>
             <Text
               style={s.statValue}
@@ -248,43 +277,42 @@ export default function ProfileScreen(): React.JSX.Element {
           ) : (
             <View style={s.prsRow}>
               {topPRs.map((pr, idx) => {
-                const levelColor =
-                  pr.level === 'gold'
-                    ? colors.prGold
-                    : pr.level === 'silver'
-                    ? colors.prSilver
-                    : colors.prBronze
+                const isPrGold = pr.level === 'gold'
 
                 return (
                   <View key={idx} style={s.prCard}>
-                    <Text style={s.prExercise} numberOfLines={2}>
-                      {pr.exerciseName}
-                    </Text>
-                    <Text style={[s.prValue, { color: levelColor }]} accessibilityLabel={`${pr.value} ${pr.unit}`}>
-                      {pr.value}
-                      <Text style={s.prUnit}> {pr.unit}</Text>
-                    </Text>
-                    <Text style={[s.prLevel, { color: levelColor }]}>
-                      {PR_LABEL[pr.level].toUpperCase()}
+                    {/* Icône PR en haut à droite */}
+                    <View style={s.prIconRow}>
+                      <Text style={s.prExercise} numberOfLines={2}>
+                        {pr.exerciseName.toUpperCase()}
+                      </Text>
+                      {isPrGold ? (
+                        <Zap size={14} color={colors.prGold} fill={colors.prGold} strokeWidth={0} />
+                      ) : (
+                        <Flame size={14} color={colors.accent} fill={colors.accent} strokeWidth={0} />
+                      )}
+                    </View>
+                    <Text style={s.prValue} accessibilityLabel={`${pr.value} ${pr.unit}`}>
+                      {pr.value}{' '}
+                      <Text style={s.prUnit}>{pr.unit}</Text>
                     </Text>
                   </View>
                 )
               })}
             </View>
           )}
+
+          {/* Voir l'Armurerie */}
+          <Pressable
+            style={({ pressed }) => [s.armurerieBtn, pressed && { opacity: 0.7 }]}
+            onPress={() => router.push('/prs')}
+            accessibilityRole="button"
+            accessibilityLabel="Voir l'Armurerie"
+          >
+            <Text style={s.armurerieBtnText}>Voir l'Armurerie →</Text>
+          </Pressable>
         </View>
 
-        {/* ── Lien Armurerie ── */}
-        <Pressable
-          style={({ pressed }) => [s.armurerieBtn, pressed && { opacity: 0.7 }]}
-          onPress={() => router.push('/prs')}
-          accessibilityRole="button"
-          accessibilityLabel="Voir tous mes records"
-        >
-          <Text style={s.armurerieBtnText}>Voir tous mes records →</Text>
-        </Pressable>
-
-        {/* ── Spacer ── */}
         <View style={s.bottomSpacer} />
       </ScrollView>
 
@@ -329,55 +357,53 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       paddingBottom: spacing.s12,
     },
 
-    // Avatar
+    // ── Header avatar ──
     headerSection: {
       alignItems: 'center',
-      marginBottom: spacing.s8,
+      marginBottom: spacing.s6,
     },
     avatarCircle: {
       width: 72,
       height: 72,
       borderRadius: 36,
-      backgroundColor: colors.backgroundTertiary,
+      backgroundColor: colors.accent,
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: spacing.s3,
     },
     avatarLetter: {
       fontSize: 32,
-      fontFamily: 'Barlow_700Bold',
-      color: colors.accent,
-    },
-    nameRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.s2,
+      fontFamily: font.black,
+      color: colors.background,
+      lineHeight: 36,
     },
     username: {
-      ...typography.subtitle,
-      fontFamily: 'Barlow_700Bold',
+      ...typography.title,
       color: colors.textPrimary,
+      marginBottom: spacing.s2,
     },
     proBadge: {
       backgroundColor: colors.accent,
       borderRadius: radius.full,
-      paddingVertical: 2,
-      paddingHorizontal: spacing.s2,
+      paddingVertical: 4,
+      paddingHorizontal: 12,
     },
     proBadgeText: {
       ...typography.caption,
-      fontFamily: 'Barlow_700Bold',
+      fontFamily: font.bold,
       color: colors.background,
-      letterSpacing: 0.8,
+      letterSpacing: 1,
     },
 
-    // Stats card
+    // ── Stats card ──
     statsCard: {
       flexDirection: 'row',
       backgroundColor: colors.backgroundSecondary,
       borderRadius: radius.lg,
-      padding: spacing.s5,
-      marginBottom: spacing.s8,
+      paddingVertical: spacing.s5,
+      paddingHorizontal: spacing.s4,
+      marginBottom: spacing.s6,
+      alignItems: 'center',
     },
     statCol: {
       flex: 1,
@@ -385,33 +411,38 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     statSep: {
       width: 1,
+      height: 48,
       backgroundColor: colors.separator,
     },
     statValue: {
       fontSize: 40,
-      fontFamily: 'Barlow_800ExtraBold',
+      fontFamily: font.extraBold,
       color: colors.textPrimary,
       letterSpacing: -1,
       fontVariant: ['tabular-nums'],
+      lineHeight: 44,
     },
-    statValueAccent: {
-      color: colors.accent,
+    statValueHero: {
+      fontSize: 40,
+      fontFamily: font.black,
+      letterSpacing: -1.5,
+      fontVariant: ['tabular-nums'],
+      lineHeight: 42,
     },
     statLabel: {
       ...typography.caption,
-      color: colors.textSecondary,
+      color: colors.textTertiary,
       textTransform: 'uppercase',
       marginTop: spacing.s1,
       textAlign: 'center',
     },
 
-    // Section
+    // ── Section PRs ──
     section: {
       marginBottom: spacing.s8,
     },
     sectionTitle: {
-      ...typography.subtitle,
-      fontFamily: 'Barlow_700Bold',
+      ...typography.title,
       color: colors.textPrimary,
       marginBottom: spacing.s4,
     },
@@ -422,57 +453,60 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     prsRow: {
       flexDirection: 'row',
       gap: spacing.s3,
+      marginBottom: spacing.s3,
     },
     prCard: {
       flex: 1,
       backgroundColor: colors.backgroundSecondary,
       borderRadius: radius.md,
-      padding: spacing.s3,
-      alignItems: 'center',
+      padding: spacing.s4,
+    },
+    prIconRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: spacing.s2,
     },
     prExercise: {
       ...typography.caption,
       color: colors.textSecondary,
-      textAlign: 'center',
-      marginBottom: spacing.s2,
+      textTransform: 'uppercase',
+      flex: 1,
+      marginRight: spacing.s1,
     },
     prValue: {
-      fontSize: 24,
-      fontFamily: 'Barlow_800ExtraBold',
+      fontSize: 20,
+      fontFamily: font.bold,
+      color: colors.textPrimary,
       letterSpacing: -0.5,
       fontVariant: ['tabular-nums'],
     },
     prUnit: {
-      fontSize: 12,
-      fontFamily: 'Barlow_400Regular',
-    },
-    prLevel: {
-      ...typography.caption,
-      letterSpacing: 1,
-      marginTop: spacing.s1,
-      textTransform: 'uppercase',
+      fontSize: 14,
+      fontFamily: font.regular,
+      color: colors.textPrimary,
     },
 
-    // Lien armurerie
+    // ── Armurerie ──
     armurerieBtn: {
-      alignItems: 'center',
-      paddingVertical: spacing.s3,
+      alignSelf: 'flex-end',
+      paddingVertical: spacing.s2,
       minHeight: 44,
       justifyContent: 'center',
     },
     armurerieBtnText: {
-      ...typography.body,
-      color: colors.textSecondary,
+      ...typography.caption,
+      color: colors.accent,
     },
 
     bottomSpacer: {
       height: spacing.s12,
     },
 
-    // Déconnexion
+    // ── Déconnexion ──
     deconnexionBtn: {
       alignItems: 'center',
-      paddingVertical: spacing.s4,
+      paddingVertical: spacing.s5,
       paddingBottom: spacing.s8,
       minHeight: 52,
       justifyContent: 'center',

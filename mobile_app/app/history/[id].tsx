@@ -9,10 +9,10 @@ import {
   ActivityIndicator,
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft } from 'lucide-react-native'
+import { ChevronLeft, Dumbbell, MapPin, Trophy, Zap } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
-import { spacing, radius, typography } from '@/constants/theme'
+import { spacing, radius, typography, font } from '@/constants/theme'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,7 @@ interface WorkoutDetail {
   photo_url: string | null
   pr_seance: PrLevel
   avg_rest_seconds: number | null
+  location_city: string | null
 }
 
 interface SetRow {
@@ -52,41 +53,45 @@ interface ExerciseWithSets {
 
 interface MuscleBar {
   muscleLabel: string
-  primaryPct: number
-  secondaryPct: number
+  pct: number // normalized 0-100
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
   const d = new Date(iso)
-  return d.toLocaleDateString('fr-FR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  })
+  const weekday = d.toLocaleDateString('fr-FR', { weekday: 'long' })
+  const day = d.toLocaleDateString('fr-FR', { day: 'numeric' })
+  const month = d.toLocaleDateString('fr-FR', { month: 'long' })
+  return `${weekday.charAt(0).toUpperCase() + weekday.slice(1)} ${day} ${month.charAt(0).toUpperCase() + month.slice(1)}`
 }
 
 function formatDuration(sec: number | null): string {
   if (!sec) return '—'
   const h = Math.floor(sec / 3600)
   const m = Math.floor((sec % 3600) / 60)
-  if (h > 0) return `${h}h${String(m).padStart(2, '0')}`
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}min`
   return `${m}min`
+}
+
+function formatVolume(kg: number | null): string {
+  if (kg == null) return '—'
+  const rounded = Math.round(kg)
+  if (rounded >= 1000) {
+    const thousands = Math.floor(rounded / 1000)
+    const remainder = rounded % 1000
+    return `${thousands} ${String(remainder).padStart(3, '0')} kg`
+  }
+  return `${rounded} kg`
 }
 
 function totalSets(exercises: ExerciseWithSets[]): number {
   return exercises.reduce((sum, ex) => sum + ex.sets.length, 0)
 }
 
-function prColors(colors: ReturnType<typeof useTheme>['colors']): Record<NonNullable<PrLevel>, string> {
-  return { gold: colors.prGold, silver: colors.prSilver, bronze: colors.prBronze }
-}
-
 const MUSCLE_LABEL_MAP: Record<string, string> = {
   grand_pectoral: 'Pectoraux',
-  deltoide: 'Épaules',
+  deltoide: 'Deltoïdes',
   grand_dorsal: 'Grand dorsal',
   trapeze: 'Trapèze',
   biceps: 'Biceps',
@@ -101,6 +106,7 @@ const MUSCLE_LABEL_MAP: Record<string, string> = {
   grand_rond: 'Grand rond',
   rhomboide: 'Rhomboïdes',
   erecteurs_rachis: 'Érecteurs rachis',
+  avant_bras: 'Avant-bras',
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -113,6 +119,7 @@ export default function HistoryDetailScreen(): React.JSX.Element {
   const [workout, setWorkout] = useState<WorkoutDetail | null>(null)
   const [exercises, setExercises] = useState<ExerciseWithSets[]>([])
   const [muscleBars, setMuscleBars] = useState<MuscleBar[]>([])
+  const [gymName, setGymName] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
 
   const fetchWorkout = useCallback(async (): Promise<void> => {
@@ -121,7 +128,7 @@ export default function HistoryDetailScreen(): React.JSX.Element {
     // Workout
     const { data: wData } = await supabase
       .from('workouts')
-      .select('id, title, started_at, ended_at, duration_sec, total_volume_kg, note, photo_url, pr_seance, avg_rest_seconds')
+      .select('id, title, started_at, ended_at, duration_sec, total_volume_kg, note, photo_url, pr_seance, avg_rest_seconds, location_city, gym_id')
       .eq('id', id)
       .single()
 
@@ -130,6 +137,20 @@ export default function HistoryDetailScreen(): React.JSX.Element {
       return
     }
     setWorkout(wData as WorkoutDetail)
+
+    // Gym name if available
+    if ((wData as { gym_id?: string | null }).gym_id) {
+      const { data: gymData } = await supabase
+        .from('gyms')
+        .select('name')
+        .eq('id', (wData as { gym_id: string }).gym_id)
+        .single()
+      if (gymData) {
+        setGymName((gymData as { name: string }).name)
+      }
+    } else if ((wData as { location_city?: string | null }).location_city) {
+      setGymName((wData as { location_city: string }).location_city)
+    }
 
     // Exercises + sets
     const { data: weData } = await supabase
@@ -143,17 +164,29 @@ export default function HistoryDetailScreen(): React.JSX.Element {
       .order('order_index')
 
     if (weData) {
-      const exs: ExerciseWithSets[] = weData.map(we => ({
-        workoutExerciseId: we.id as string,
-        exerciseId: we.exercise_id as string,
-        nameFr: (we.exercises as { name_fr: string }).name_fr,
-        orderIndex: we.order_index as number,
-        pr_exercice: (we.pr_exercice as PrLevel) ?? null,
-        sets: ((we.workout_sets ?? []) as SetRow[]).sort((a, b) => a.set_number - b.set_number),
-      }))
+      type WeRow = {
+        id: string
+        exercise_id: string
+        order_index: number
+        pr_exercice: string | null
+        exercises: { name_fr: string }[] | { name_fr: string }
+        workout_sets: SetRow[] | null
+      }
+      const exs: ExerciseWithSets[] = (weData as WeRow[]).map(we => {
+        const exRaw = we.exercises
+        const exObj = Array.isArray(exRaw) ? exRaw[0] : exRaw
+        return {
+          workoutExerciseId: we.id,
+          exerciseId: we.exercise_id,
+          nameFr: exObj.name_fr,
+          orderIndex: we.order_index,
+          pr_exercice: (we.pr_exercice as PrLevel) ?? null,
+          sets: ((we.workout_sets ?? []) as SetRow[]).sort((a, b) => a.set_number - b.set_number),
+        }
+      })
       setExercises(exs)
 
-      // Muscle bars : agréger via exercise_muscles
+      // Muscle bars
       const exerciseIds = exs.map(e => e.exerciseId)
       const { data: emData } = await supabase
         .from('exercise_muscles')
@@ -162,9 +195,7 @@ export default function HistoryDetailScreen(): React.JSX.Element {
         .in('role', ['primary', 'secondary'])
 
       if (emData) {
-        // Volume par muscle (weight_kg × reps × activation_pct)
-        const primaryVol: Record<string, number> = {}
-        const secondaryVol: Record<string, number> = {}
+        const muscleVol: Record<string, number> = {}
 
         for (const em of emData) {
           const ex = exs.find(e => e.exerciseId === em.exercise_id)
@@ -172,30 +203,18 @@ export default function HistoryDetailScreen(): React.JSX.Element {
           const vol = ex.sets.reduce((sum, s) => {
             return sum + (s.weight_kg ?? 0) * (s.reps ?? 0) * ((em.activation_pct ?? 0) / 100)
           }, 0)
-
           const label = MUSCLE_LABEL_MAP[em.muscle as string] ?? (em.muscle as string)
-          if (em.role === 'primary') {
-            primaryVol[label] = (primaryVol[label] ?? 0) + vol
-          } else {
-            secondaryVol[label] = (secondaryVol[label] ?? 0) + vol
-          }
+          muscleVol[label] = (muscleVol[label] ?? 0) + vol
         }
 
-        // Normaliser vs max
-        const allMuscles = new Set([...Object.keys(primaryVol), ...Object.keys(secondaryVol)])
-        const maxVol = Math.max(
-          ...Array.from(allMuscles).map(m => (primaryVol[m] ?? 0) + (secondaryVol[m] ?? 0)),
-          1
-        )
-
-        const bars: MuscleBar[] = Array.from(allMuscles)
-          .map(m => ({
-            muscleLabel: m,
-            primaryPct: Math.round(((primaryVol[m] ?? 0) / maxVol) * 100),
-            secondaryPct: Math.round(((secondaryVol[m] ?? 0) / maxVol) * 100),
+        const maxVol = Math.max(...Object.values(muscleVol), 1)
+        const bars: MuscleBar[] = Object.entries(muscleVol)
+          .map(([muscleLabel, vol]) => ({
+            muscleLabel,
+            pct: Math.round((vol / maxVol) * 100),
           }))
-          .sort((a, b) => b.primaryPct + b.secondaryPct - (a.primaryPct + a.secondaryPct))
-          .slice(0, 8)
+          .sort((a, b) => b.pct - a.pct)
+          .slice(0, 6)
 
         setMuscleBars(bars)
       }
@@ -209,7 +228,6 @@ export default function HistoryDetailScreen(): React.JSX.Element {
   }, [fetchWorkout])
 
   const s = buildStyles(colors)
-  const PC = prColors(colors)
 
   if (loading) {
     return (
@@ -228,6 +246,12 @@ export default function HistoryDetailScreen(): React.JSX.Element {
   }
 
   const nSets = totalSets(exercises)
+
+  // Collect PR badges from exercises
+  const hasPrSeance = workout.pr_seance != null
+  const prExercises = exercises.filter(ex => ex.pr_exercice != null)
+  const prChargeEx = exercises.find(ex => ex.sets.some(s => s.pr_charge != null))
+  const prSerieEx = exercises.find(ex => ex.sets.some(s => s.pr_serie != null))
 
   return (
     <View style={s.container}>
@@ -252,7 +276,7 @@ export default function HistoryDetailScreen(): React.JSX.Element {
             {formatDate(workout.started_at)}
           </Text>
 
-          <View style={s.backBtn} />
+          <View style={s.backBtnPlaceholder} />
         </View>
 
         {/* ── Photo / Banner ── */}
@@ -265,47 +289,72 @@ export default function HistoryDetailScreen(): React.JSX.Element {
             />
           ) : (
             <View style={s.bannerPlaceholder}>
-              <Text style={s.bannerPlaceholderText}>
-                {workout.title ?? 'Séance sans titre'}
-              </Text>
+              <Dumbbell size={32} color={colors.textTertiary} />
+            </View>
+          )}
+
+          {gymName != null && (
+            <View style={s.bannerGymRow}>
+              <MapPin size={12} color={colors.textSecondary} />
+              <Text style={s.bannerGymText} numberOfLines={1}>{gymName}</Text>
             </View>
           )}
         </View>
 
-        {/* ── Hero Stats ── */}
-        <View style={s.statsRow}>
-          <View style={s.statChip}>
-            <Text style={[s.statChipValue, { color: colors.accent }]} accessibilityLabel={`${Math.round(workout.total_volume_kg ?? 0)} kilogrammes`}>
-              {Math.round(workout.total_volume_kg ?? 0)}
+        {/* ── Stats Row ── */}
+        <View style={s.statsCard}>
+          <View style={s.statItem}>
+            <Text style={[s.statValue, { color: colors.accent }]} accessibilityLabel={`${formatVolume(workout.total_volume_kg)} volume`}>
+              {formatVolume(workout.total_volume_kg)}
             </Text>
-            <Text style={s.statChipLabel}>KG</Text>
           </View>
 
-          <View style={s.statChip}>
-            <Text style={s.statChipValue}>{formatDuration(workout.duration_sec)}</Text>
-            <Text style={s.statChipLabel}>DURÉE</Text>
+          <View style={s.statSeparator} />
+
+          <View style={s.statItem}>
+            <Text style={s.statValue}>{formatDuration(workout.duration_sec)}</Text>
           </View>
 
-          <View style={s.statChip}>
-            <Text style={s.statChipValue} accessibilityLabel={`${nSets} séries`}>{nSets}</Text>
-            <Text style={s.statChipLabel}>SÉRIES</Text>
+          <View style={s.statSeparator} />
+
+          <View style={s.statItem}>
+            <Text style={s.statValue} accessibilityLabel={`${nSets} séries`}>
+              {nSets} séries
+            </Text>
           </View>
         </View>
 
         {/* ── PR Badges ── */}
-        {(workout.pr_seance != null) && (
+        {(hasPrSeance || prChargeEx != null || prSerieEx != null || prExercises.length > 0) && (
           <View style={s.prBadgesRow}>
-            {workout.pr_seance && (
-              <View style={[s.prBadge, { backgroundColor: `${PC[workout.pr_seance]}1A` }]}>
-                <Text style={[s.prBadgeText, { color: PC[workout.pr_seance] }]}>
-                  🏆 PR SÉANCE {workout.pr_seance.toUpperCase()}
+            {hasPrSeance && (
+              <View style={[s.prBadge, { backgroundColor: `${colors.prGold}26` }]}>
+                <Trophy size={12} color={colors.prGold} />
+                <Text style={[s.prBadgeText, { color: colors.prGold }]}>PR SÉANCE</Text>
+              </View>
+            )}
+
+            {prChargeEx != null && (
+              <View style={[s.prBadge, { backgroundColor: `${colors.accent}1A` }]}>
+                <Zap size={12} color={colors.accent} />
+                <Text style={[s.prBadgeText, { color: colors.accent }]}>
+                  PR CHARGE · {prChargeEx.nameFr}
+                </Text>
+              </View>
+            )}
+
+            {prSerieEx != null && prSerieEx !== prChargeEx && (
+              <View style={[s.prBadge, { backgroundColor: `${colors.accent}1A` }]}>
+                <Zap size={12} color={colors.accent} />
+                <Text style={[s.prBadgeText, { color: colors.accent }]}>
+                  PR SÉRIE · {prSerieEx.nameFr}
                 </Text>
               </View>
             )}
           </View>
         )}
 
-        {/* ── Muscles ── */}
+        {/* ── Muscles travaillés ── */}
         {muscleBars.length > 0 && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>MUSCLES TRAVAILLÉS</Text>
@@ -315,16 +364,13 @@ export default function HistoryDetailScreen(): React.JSX.Element {
                 <Text style={s.muscleLabel} numberOfLines={1}>{bar.muscleLabel}</Text>
 
                 <View style={s.muscleBarTrack}>
-                  {bar.primaryPct > 0 && (
-                    <View style={[s.muscleBarFill, s.muscleBarPrimary, { width: `${bar.primaryPct}%` }]} />
-                  )}
-                  {bar.secondaryPct > 0 && (
-                    <View style={[s.muscleBarFill, s.muscleBarSecondary, { width: `${bar.secondaryPct}%` }]} />
-                  )}
+                  <View
+                    style={[s.muscleBarFill, { width: `${bar.pct}%` }]}
+                  />
                 </View>
 
-                <Text style={s.musclePct} accessibilityLabel={`${bar.primaryPct + bar.secondaryPct} pourcent`}>
-                  {bar.primaryPct + bar.secondaryPct}
+                <Text style={s.musclePct} accessibilityLabel={`${bar.pct} pourcent`}>
+                  {bar.pct}
                   <Text style={s.musclePctSymbol}>%</Text>
                 </Text>
               </View>
@@ -337,54 +383,60 @@ export default function HistoryDetailScreen(): React.JSX.Element {
           <View style={s.section}>
             <Text style={s.sectionTitle}>EXERCICES</Text>
 
-            {exercises.map(ex => (
-              <View key={ex.workoutExerciseId} style={s.exCard}>
-                {/* Nom + PR badge */}
-                <View style={s.exHeader}>
-                  <Text style={s.exName}>{ex.nameFr}</Text>
-                  {ex.pr_exercice && (
-                    <View style={[s.exPrBadge, { backgroundColor: `${PC[ex.pr_exercice]}1A` }]}>
-                      <Text style={[s.exPrBadgeText, { color: PC[ex.pr_exercice] }]}>
-                        {ex.pr_exercice.toUpperCase()}
-                      </Text>
+            {exercises.map(ex => {
+              const hasPr = ex.pr_exercice != null || ex.sets.some(s => s.pr_charge != null || s.pr_serie != null)
+              return (
+                <View key={ex.workoutExerciseId} style={s.exCard}>
+                  {/* Nom + PR badge */}
+                  <View style={s.exHeader}>
+                    <Text style={s.exName} numberOfLines={1}>{ex.nameFr}</Text>
+                    {hasPr && (
+                      <View style={[s.exPrBadge, { backgroundColor: `${colors.accent}1A` }]}>
+                        <Zap size={10} color={colors.accent} />
+                        <Text style={[s.exPrBadgeText, { color: colors.accent }]}>PR</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Table sets */}
+                  {ex.sets.length > 0 && (
+                    <View style={s.setsTable}>
+                      {/* Header */}
+                      <View style={s.setRowHeader}>
+                        <Text style={[s.setCellHeader, s.colSet]}>SET</Text>
+                        <Text style={[s.setCellHeader, s.colWeight]}>POIDS</Text>
+                        <Text style={[s.setCellHeader, s.colReps]}>REPS</Text>
+                        <Text style={[s.setCellHeader, s.colVol]}>VOL.</Text>
+                      </View>
+
+                      {ex.sets.map((set, rowIdx) => {
+                        const vol = (set.weight_kg ?? 0) * (set.reps ?? 0)
+                        const hasPrSet = set.pr_charge != null || set.pr_serie != null
+                        const rowBg = rowIdx % 2 === 1 ? colors.backgroundTertiary : 'transparent'
+                        const prColor = hasPrSet ? colors.accent : null
+
+                        return (
+                          <View key={set.id} style={[s.setRow, { backgroundColor: rowBg }]}>
+                            <Text style={[s.setCellMono, s.colSet, hasPrSet && prColor ? { color: prColor } : null]}>
+                              {set.set_number}
+                            </Text>
+                            <Text style={[s.setCellMono, s.colWeight]}>
+                              {set.weight_kg != null ? `${set.weight_kg} kg` : '—'}
+                            </Text>
+                            <Text style={[s.setCellMono, s.colReps]}>
+                              {set.reps ?? '—'}
+                            </Text>
+                            <Text style={[s.setCellMono, s.colVol]}>
+                              {vol > 0 ? `${vol} kg` : '—'}
+                            </Text>
+                          </View>
+                        )
+                      })}
                     </View>
                   )}
                 </View>
-
-                {/* Table sets */}
-                {ex.sets.length > 0 && (
-                  <View style={s.setsTable}>
-                    {/* Entête */}
-                    <View style={s.setRow}>
-                      <Text style={[s.setCell, s.setCellHeader, s.setCellSet]}>SET</Text>
-                      <Text style={[s.setCell, s.setCellHeader, s.setCellWeight]}>POIDS</Text>
-                      <Text style={[s.setCell, s.setCellHeader, s.setCellReps]}>REPS</Text>
-                    </View>
-
-                    {ex.sets.map(set => {
-                      const hasPr = set.pr_charge != null || set.pr_serie != null
-                      const prColor = hasPr
-                        ? PC[(set.pr_charge ?? set.pr_serie) as NonNullable<PrLevel>]
-                        : null
-
-                      return (
-                        <View key={set.id} style={s.setRow}>
-                          <Text style={[s.setCell, s.setCellSet, s.monoText, hasPr && prColor ? { color: prColor } : null]}>
-                            {set.set_number}
-                          </Text>
-                          <Text style={[s.setCell, s.setCellWeight, s.monoText]}>
-                            {set.weight_kg != null ? `${set.weight_kg} kg` : '—'}
-                          </Text>
-                          <Text style={[s.setCell, s.setCellReps, s.monoText]}>
-                            {set.reps ?? '—'}
-                          </Text>
-                        </View>
-                      )
-                    })}
-                  </View>
-                )}
-              </View>
-            ))}
+              )
+            })}
           </View>
         )}
       </ScrollView>
@@ -428,8 +480,13 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    backBtnPlaceholder: {
+      width: 44,
+      height: 44,
+    },
     headerDate: {
       ...typography.subtitle,
+      fontFamily: font.bold,
       color: colors.textPrimary,
       flex: 1,
       textAlign: 'center',
@@ -438,10 +495,10 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     // Banner
     banner: {
       marginHorizontal: spacing.s4,
-      marginBottom: spacing.s4,
+      marginBottom: spacing.s3,
       borderRadius: radius.lg,
       overflow: 'hidden',
-      height: 200,
+      height: 120,
       backgroundColor: colors.backgroundSecondary,
     },
     bannerImage: {
@@ -453,41 +510,47 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
+      paddingBottom: spacing.s6,
     },
-    bannerPlaceholderText: {
-      ...typography.subtitle,
-      color: colors.textSecondary,
-      textAlign: 'center',
-      paddingHorizontal: spacing.s4,
-    },
-
-    // Stats row
-    statsRow: {
+    bannerGymRow: {
+      position: 'absolute',
+      bottom: spacing.s3,
+      left: spacing.s3,
       flexDirection: 'row',
-      gap: spacing.s3,
-      paddingHorizontal: spacing.s4,
-      marginBottom: spacing.s4,
-    },
-    statChip: {
-      flex: 1,
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: radius.md,
-      paddingVertical: spacing.s3,
-      paddingHorizontal: spacing.s3,
       alignItems: 'center',
+      gap: spacing.s1,
     },
-    statChipValue: {
-      fontSize: 24,
-      fontFamily: 'Barlow_800ExtraBold',
-      color: colors.textPrimary,
-      letterSpacing: -0.5,
-      fontVariant: ['tabular-nums'],
-    },
-    statChipLabel: {
+    bannerGymText: {
       ...typography.caption,
       color: colors.textSecondary,
-      textTransform: 'uppercase',
-      marginTop: spacing.s1,
+    },
+
+    // Stats card — single card with separators
+    statsCard: {
+      marginHorizontal: spacing.s4,
+      marginBottom: spacing.s3,
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: radius.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: spacing.s3,
+    },
+    statItem: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: spacing.s1,
+    },
+    statValue: {
+      fontSize: 17,
+      fontFamily: font.bold,
+      color: colors.textPrimary,
+      fontVariant: ['tabular-nums'],
+      letterSpacing: -0.3,
+    },
+    statSeparator: {
+      width: 1,
+      height: 24,
+      backgroundColor: colors.separator,
     },
 
     // PR Badges
@@ -496,30 +559,33 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flexWrap: 'wrap',
       gap: spacing.s2,
       paddingHorizontal: spacing.s4,
-      marginBottom: spacing.s4,
+      marginBottom: spacing.s5,
     },
     prBadge: {
-      borderRadius: radius.full,
-      paddingVertical: spacing.s1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.s1,
+      borderRadius: radius.sm,
+      paddingVertical: spacing.s1 + 2,
       paddingHorizontal: spacing.s3,
     },
     prBadgeText: {
       ...typography.caption,
-      fontFamily: 'Barlow_700Bold',
+      fontFamily: font.bold,
       textTransform: 'uppercase',
-      letterSpacing: 0.8,
+      letterSpacing: 0.5,
     },
 
     // Section
     section: {
       paddingHorizontal: spacing.s4,
-      marginBottom: spacing.s8,
+      marginBottom: spacing.s6,
     },
     sectionTitle: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 1.2,
+      fontSize: 18,
+      fontFamily: font.bold,
+      color: colors.textPrimary,
+      letterSpacing: -0.2,
       marginBottom: spacing.s4,
     },
 
@@ -533,38 +599,33 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     muscleLabel: {
       ...typography.caption,
       color: colors.textSecondary,
-      width: 100,
+      width: 96,
     },
     muscleBarTrack: {
       flex: 1,
-      height: 6,
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: radius.full,
+      height: 4,
+      backgroundColor: colors.backgroundTertiary,
+      borderRadius: radius.sm,
       overflow: 'hidden',
-      flexDirection: 'row',
     },
     muscleBarFill: {
       height: '100%',
-      borderRadius: radius.full,
-    },
-    muscleBarPrimary: {
       backgroundColor: colors.accent,
-    },
-    muscleBarSecondary: {
-      backgroundColor: colors.prGold,
+      borderRadius: radius.sm,
     },
     musclePct: {
-      ...typography.mono,
+      fontFamily: font.mono,
       fontVariant: ['tabular-nums'],
+      fontSize: 12,
       color: colors.textSecondary,
-      width: 40,
+      width: 36,
       textAlign: 'right',
     },
     musclePctSymbol: {
       fontSize: 10,
     },
 
-    // Exercices
+    // Exercice card
     exCard: {
       backgroundColor: colors.backgroundSecondary,
       borderRadius: radius.md,
@@ -579,52 +640,64 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     exName: {
       ...typography.body,
-      fontFamily: 'Barlow_700Bold',
+      fontFamily: font.bold,
       color: colors.textPrimary,
       flex: 1,
     },
     exPrBadge: {
-      borderRadius: radius.full,
-      paddingVertical: 2,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      borderRadius: radius.sm,
+      paddingVertical: 3,
       paddingHorizontal: spacing.s2,
       marginLeft: spacing.s2,
     },
     exPrBadgeText: {
       ...typography.caption,
-      fontFamily: 'Barlow_700Bold',
-      letterSpacing: 0.8,
+      fontFamily: font.bold,
+      letterSpacing: 0.5,
     },
+
+    // Sets table
     setsTable: {
-      gap: spacing.s1,
+      gap: 1,
+    },
+    setRowHeader: {
+      flexDirection: 'row',
+      paddingBottom: spacing.s2,
     },
     setRow: {
       flexDirection: 'row',
-    },
-    setCell: {
-      ...typography.mono,
-      fontVariant: ['tabular-nums'],
-      color: colors.textPrimary,
-      paddingVertical: spacing.s1,
+      paddingVertical: spacing.s2,
+      paddingHorizontal: spacing.s1,
+      borderRadius: radius.sm,
     },
     setCellHeader: {
       ...typography.caption,
       color: colors.textTertiary,
-      letterSpacing: 1,
       textTransform: 'uppercase',
+      letterSpacing: 0.8,
     },
-    setCellSet: {
-      width: 40,
+    setCellMono: {
+      fontFamily: font.mono,
+      fontSize: 13,
+      fontVariant: ['tabular-nums'],
+      color: colors.textPrimary,
     },
-    setCellWeight: {
+    colSet: {
+      width: 32,
+    },
+    colWeight: {
       flex: 1,
     },
-    setCellReps: {
-      width: 60,
-      textAlign: 'right',
+    colReps: {
+      width: 52,
+      textAlign: 'center',
     },
-    monoText: {
-      fontFamily: 'JetBrainsMono_500Medium',
-      fontVariant: ['tabular-nums'],
+    colVol: {
+      width: 72,
+      textAlign: 'right',
     },
   })
 }

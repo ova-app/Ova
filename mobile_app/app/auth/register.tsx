@@ -11,44 +11,48 @@ import {
   ActivityIndicator,
 } from 'react-native'
 import { useRouter } from 'expo-router'
-import Svg, { Circle, Path } from 'react-native-svg'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
-import { spacing, radius, typography } from '@/constants/theme'
+import { spacing, radius, typography, font } from '@/constants/theme'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface FormState {
-  email: string
   nomUtilisateur: string
+  email: string
   motDePasse: string
 }
 
 interface ErreurFormulaire {
-  email?: string
   nomUtilisateur?: string
+  email?: string
   motDePasse?: string
   global?: string
 }
 
-// ─── Logo SVG inline ─────────────────────────────────────────────────────────
+// ─── Logo Orava — bull's-eye cercle jaune ────────────────────────────────────
 
-function LogoOrava(): React.JSX.Element {
+function LogoOrava({ accent, bg }: { accent: string; bg: string }): React.JSX.Element {
   return (
-    <Svg width={64} height={64} viewBox="0 0 200 200">
-      <Circle
-        cx={100}
-        cy={100}
-        r={85}
-        stroke="#FFDD00"
-        strokeWidth={30}
-        fill="none"
+    <View
+      style={{
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: accent,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <View
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: 8,
+          backgroundColor: bg,
+        }}
       />
-      <Path
-        d="M 100,44 L 145,153.6 A 70 70 0 0 1 55,153.6 Z"
-        fill="#FFDD00"
-      />
-    </Svg>
+    </View>
   )
 }
 
@@ -59,8 +63,8 @@ export default function RegisterScreen(): React.JSX.Element {
   const router = useRouter()
 
   const [form, setForm] = useState<FormState>({
-    email: '',
     nomUtilisateur: '',
+    email: '',
     motDePasse: '',
   })
   const [erreurs, setErreurs] = useState<ErreurFormulaire>({})
@@ -69,17 +73,17 @@ export default function RegisterScreen(): React.JSX.Element {
 
   function validerFormulaire(): boolean {
     const nouvellesErreurs: ErreurFormulaire = {}
-    if (!form.email.trim()) {
-      nouvellesErreurs.email = 'Email requis'
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      nouvellesErreurs.email = 'Email invalide'
-    }
     if (!form.nomUtilisateur.trim()) {
-      nouvellesErreurs.nomUtilisateur = 'Nom d\'utilisateur requis'
+      nouvellesErreurs.nomUtilisateur = "Nom d'utilisateur requis"
     } else if (form.nomUtilisateur.trim().length < 3) {
       nouvellesErreurs.nomUtilisateur = '3 caractères minimum'
     } else if (!/^[a-zA-Z0-9_]+$/.test(form.nomUtilisateur.trim())) {
       nouvellesErreurs.nomUtilisateur = 'Lettres, chiffres et _ uniquement'
+    }
+    if (!form.email.trim()) {
+      nouvellesErreurs.email = 'Email requis'
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      nouvellesErreurs.email = 'Email invalide'
     }
     if (!form.motDePasse) {
       nouvellesErreurs.motDePasse = 'Mot de passe requis'
@@ -133,7 +137,7 @@ export default function RegisterScreen(): React.JSX.Element {
       >
         {/* Hero */}
         <View style={styles.hero}>
-          <LogoOrava />
+          <LogoOrava accent={colors.accent} bg={colors.background} />
           <Text style={styles.wordmark}>ORAVA</Text>
           <Text style={styles.tagline}>Chaque séance devient une œuvre.</Text>
         </View>
@@ -141,14 +145,31 @@ export default function RegisterScreen(): React.JSX.Element {
         {/* Formulaire */}
         <View style={styles.form}>
 
+          {/* Nom d'utilisateur */}
+          <View style={styles.champGroupe}>
+            <TextInput
+              style={[styles.input, erreurs.nomUtilisateur ? styles.inputErreur : null]}
+              value={form.nomUtilisateur}
+              onChangeText={(v) => setForm(f => ({ ...f, nomUtilisateur: v }))}
+              placeholder="Nom d'utilisateur"
+              placeholderTextColor={colors.textTertiary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="username"
+              accessibilityLabel="Champ nom d'utilisateur"
+            />
+            {erreurs.nomUtilisateur ? (
+              <Text style={styles.texteErreur}>{erreurs.nomUtilisateur}</Text>
+            ) : null}
+          </View>
+
           {/* Email */}
           <View style={styles.champGroupe}>
-            <Text style={styles.label}>EMAIL</Text>
             <TextInput
               style={[styles.input, erreurs.email ? styles.inputErreur : null]}
               value={form.email}
               onChangeText={(v) => setForm(f => ({ ...f, email: v }))}
-              placeholder="ton@email.com"
+              placeholder="Adresse e-mail"
               placeholderTextColor={colors.textTertiary}
               keyboardType="email-address"
               autoCapitalize="none"
@@ -161,28 +182,8 @@ export default function RegisterScreen(): React.JSX.Element {
             ) : null}
           </View>
 
-          {/* Nom utilisateur */}
-          <View style={styles.champGroupe}>
-            <Text style={styles.label}>NOM D'UTILISATEUR</Text>
-            <TextInput
-              style={[styles.input, erreurs.nomUtilisateur ? styles.inputErreur : null]}
-              value={form.nomUtilisateur}
-              onChangeText={(v) => setForm(f => ({ ...f, nomUtilisateur: v }))}
-              placeholder="tonpseudo"
-              placeholderTextColor={colors.textTertiary}
-              autoCapitalize="none"
-              autoCorrect={false}
-              textContentType="username"
-              accessibilityLabel="Champ nom d'utilisateur"
-            />
-            {erreurs.nomUtilisateur ? (
-              <Text style={styles.texteErreur}>{erreurs.nomUtilisateur}</Text>
-            ) : null}
-          </View>
-
           {/* Mot de passe */}
           <View style={styles.champGroupe}>
-            <Text style={styles.label}>MOT DE PASSE</Text>
             <View style={styles.inputWrapper}>
               <TextInput
                 style={[
@@ -192,7 +193,7 @@ export default function RegisterScreen(): React.JSX.Element {
                 ]}
                 value={form.motDePasse}
                 onChangeText={(v) => setForm(f => ({ ...f, motDePasse: v }))}
-                placeholder="8 caractères minimum"
+                placeholder="Mot de passe"
                 placeholderTextColor={colors.textTertiary}
                 secureTextEntry={!motDePasseVisible}
                 textContentType="newPassword"
@@ -248,8 +249,8 @@ export default function RegisterScreen(): React.JSX.Element {
             accessibilityLabel="Se connecter"
           >
             <Text style={styles.lienTexte}>
-              Déjà un compte ?{' '}
-              <Text style={styles.lienAccent}>Se connecter</Text>
+              Déjà inscrit ?{' '}
+              <Text style={styles.lienAccent}>Connexion</Text>
             </Text>
           </Pressable>
 
@@ -278,33 +279,28 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       marginBottom: spacing.s8,
     },
     wordmark: {
-      ...typography.title,
+      fontSize: 20,
+      fontFamily: font.condensedBold,
       color: colors.textPrimary,
-      letterSpacing: 6,
+      letterSpacing: 4,
       marginTop: spacing.s2,
     },
     tagline: {
-      ...typography.body,
+      ...typography.caption,
       color: colors.textSecondary,
       textAlign: 'center',
-      marginTop: spacing.s2,
+      marginTop: spacing.s1,
     },
     form: {
-      gap: spacing.s5,
+      gap: spacing.s4,
     },
     champGroupe: {
       gap: spacing.s1,
     },
-    label: {
-      ...typography.caption,
-      color: colors.textTertiary,
-      letterSpacing: 1.2,
-      textTransform: 'uppercase',
-    },
     input: {
       height: 52,
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: radius.md,
+      backgroundColor: colors.backgroundTertiary,
+      borderRadius: radius.sm,
       paddingHorizontal: spacing.s4,
       ...typography.body,
       color: colors.textPrimary,
@@ -337,7 +333,7 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     banniereErreur: {
       backgroundColor: `${colors.error}18`,
-      borderRadius: radius.md,
+      borderRadius: radius.sm,
       padding: spacing.s3,
     },
     banniereErreurTexte: {
@@ -346,9 +342,9 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       textAlign: 'center',
     },
     cta: {
-      height: 64,
+      height: 52,
       backgroundColor: colors.accent,
-      borderRadius: radius.lg,
+      borderRadius: radius.md,
       alignItems: 'center',
       justifyContent: 'center',
       marginTop: spacing.s2,
@@ -360,10 +356,10 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       opacity: 0.6,
     },
     ctaTexte: {
-      ...typography.body,
-      fontFamily: 'Barlow_700Bold',
+      fontSize: 14,
+      fontFamily: font.bold,
       color: colors.background,
-      letterSpacing: 1,
+      letterSpacing: 1.5,
     },
     lienConnexion: {
       alignItems: 'center',
@@ -376,7 +372,7 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     lienAccent: {
       color: colors.textPrimary,
-      fontFamily: 'Barlow_500Medium',
+      fontFamily: font.bold,
     },
   })
 }

@@ -48,8 +48,19 @@ function formatDuration(sec: number | null): string {
   if (!sec) return '—'
   const h = Math.floor(sec / 3600)
   const m = Math.floor((sec % 3600) / 60)
-  if (h > 0) return `${h}h ${m}min`
+  if (h > 0) return `${h}h ${m.toString().padStart(2, '0')}min`
   return `${m}min`
+}
+
+function formatVolume(kg: number | null): string {
+  if (kg == null) return '—'
+  const rounded = Math.round(kg)
+  if (rounded >= 1000) {
+    const thousands = Math.floor(rounded / 1000)
+    const rest = rounded % 1000
+    return `${thousands} ${rest.toString().padStart(3, '0')}`
+  }
+  return `${rounded}`
 }
 
 function groupByMonth(rows: WorkoutRow[]): HistorySection[] {
@@ -80,18 +91,20 @@ function SkeletonRow() {
   return (
     <Animated.View
       style={[
-        styles.row,
+        styles.card,
         {
           backgroundColor: colors.backgroundSecondary,
           opacity: anim,
-          marginBottom: 4,
+          marginBottom: spacing.s2,
         },
       ]}
     >
-      <View style={[styles.dateBlock, { backgroundColor: colors.backgroundTertiary, borderRadius: 6 }]} />
-      <View style={{ flex: 1, marginHorizontal: spacing.s4, gap: 6 }}>
-        <View style={{ width: '55%', height: 12, borderRadius: 4, backgroundColor: colors.backgroundTertiary }} />
-        <View style={{ width: '40%', height: 10, borderRadius: 4, backgroundColor: colors.backgroundTertiary }} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.s4 }}>
+        <View style={[styles.dateBlock, { backgroundColor: colors.backgroundTertiary, borderRadius: 6 }]} />
+        <View style={{ flex: 1, gap: 8 }}>
+          <View style={{ width: '55%', height: 12, borderRadius: 4, backgroundColor: colors.backgroundTertiary }} />
+          <View style={{ width: '40%', height: 10, borderRadius: 4, backgroundColor: colors.backgroundTertiary }} />
+        </View>
       </View>
     </Animated.View>
   )
@@ -107,13 +120,11 @@ interface HistoryRowProps {
 function HistoryRow({ item, onPress }: HistoryRowProps) {
   const { colors } = useTheme()
   const d = new Date(item.started_at)
-  const day = d.getDate().toString().padStart(2, '0')
+  const day = d.getDate().toString() // pas de zéro devant
   const weekday = DAYS_FR[d.getDay()]
 
-  const volumeFormatted =
-    item.total_volume_kg != null
-      ? `${Math.round(item.total_volume_kg)} kg`
-      : '—'
+  const volumeStr = formatVolume(item.total_volume_kg)
+  const isGoldPR = item.pr_seance === 'gold'
 
   const subtitleParts = [
     `${item.total_sets} série${item.total_sets > 1 ? 's' : ''}`,
@@ -124,45 +135,85 @@ function HistoryRow({ item, onPress }: HistoryRowProps) {
     <TouchableOpacity
       activeOpacity={0.75}
       onPress={onPress}
-      style={[styles.row, { backgroundColor: colors.backgroundSecondary }]}
+      style={[styles.card, { backgroundColor: colors.backgroundSecondary, marginBottom: spacing.s2 }]}
     >
-      {/* Bloc date */}
-      <View style={styles.dateBlock}>
-        <Text style={[typography.body, { color: colors.textPrimary, fontFamily: 'Barlow_700Bold', fontSize: 18, lineHeight: 22 }]}>
-          {day}
-        </Text>
-        <Text style={[typography.caption, { color: colors.textTertiary, textTransform: 'uppercase' }]}>
-          {weekday}
-        </Text>
-      </View>
-
-      {/* Séparateur vertical */}
-      <View style={[styles.verticalSep, { backgroundColor: colors.separator }]} />
-
-      {/* Centre */}
-      <View style={{ flex: 1, paddingHorizontal: spacing.s4 }}>
-        <Text
-          style={[typography.body, { color: colors.textPrimary, fontFamily: 'Barlow_700Bold' }]}
-          numberOfLines={1}
-        >
-          {item.title ?? '—'}
-        </Text>
-        <Text style={[typography.caption, { color: colors.textSecondary }]}>
-          {subtitleParts.join(' · ')}
-        </Text>
-      </View>
-
-      {/* Right : trophy + volume + chevron */}
-      <View style={{ alignItems: 'flex-end', gap: 2, paddingRight: spacing.s3 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          {item.pr_seance != null && (
-            <Trophy size={16} color={colors.prGold} />
-          )}
-          <Text style={[typography.caption, { color: colors.accent, fontVariant: ['tabular-nums'] }]}>
-            {volumeFormatted}
+      <View style={styles.cardInner}>
+        {/* Bloc date */}
+        <View style={styles.dateBlock}>
+          <Text
+            style={[
+              typography.title,
+              {
+                color: colors.textPrimary,
+                fontSize: 22,
+                lineHeight: 26,
+                letterSpacing: -0.3,
+                fontFamily: 'Barlow_700Bold',
+              },
+            ]}
+          >
+            {day}
+          </Text>
+          <Text
+            style={[
+              typography.caption,
+              { color: colors.textTertiary, textTransform: 'uppercase', marginTop: 2 },
+            ]}
+          >
+            {weekday}
           </Text>
         </View>
-        <ChevronRight size={16} color={colors.textTertiary} />
+
+        {/* Centre */}
+        <View style={styles.centerCol}>
+          <Text
+            style={[
+              typography.body,
+              { color: colors.textPrimary, fontFamily: 'Barlow_700Bold' },
+            ]}
+            numberOfLines={1}
+          >
+            {item.title ?? '—'}
+          </Text>
+          <Text
+            style={[typography.caption, { color: colors.textSecondary, marginTop: 2 }]}
+            numberOfLines={1}
+          >
+            {subtitleParts.join(' · ')}
+          </Text>
+        </View>
+
+        {/* Right : trophy + volume + chevron */}
+        <View style={styles.rightCol}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            {item.pr_seance != null && (
+              <Trophy size={14} color={colors.prGold} />
+            )}
+            <Text
+              style={[
+                typography.body,
+                {
+                  color: isGoldPR ? colors.accent : colors.textPrimary,
+                  fontFamily: 'Barlow_700Bold',
+                  fontVariant: ['tabular-nums'],
+                  fontSize: 14,
+                },
+              ]}
+            >
+              {volumeStr}{' '}
+              <Text
+                style={{
+                  fontFamily: 'Barlow_400Regular',
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                }}
+              >
+                kg
+              </Text>
+            </Text>
+          </View>
+          <ChevronRight size={14} color={colors.textTertiary} style={{ marginTop: 2 }} />
+        </View>
       </View>
     </TouchableOpacity>
   )
@@ -236,7 +287,17 @@ export default function HistoryScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <Text style={[typography.title, { color: colors.textPrimary, paddingHorizontal: spacing.s5, paddingTop: spacing.s12, paddingBottom: spacing.s4 }]}>
+      <Text
+        style={[
+          typography.title,
+          {
+            color: colors.textPrimary,
+            paddingHorizontal: spacing.s5,
+            paddingTop: spacing.s6,
+            paddingBottom: spacing.s3,
+          },
+        ]}
+      >
         Historique
       </Text>
 
@@ -261,8 +322,9 @@ export default function HistoryScreen() {
                 {
                   color: colors.textTertiary,
                   textTransform: 'uppercase',
+                  letterSpacing: 1,
                   paddingTop: spacing.s6,
-                  paddingBottom: spacing.s2,
+                  paddingBottom: spacing.s3,
                 },
               ]}
             >
@@ -279,8 +341,21 @@ export default function HistoryScreen() {
           SectionSeparatorComponent={() => null}
           ListEmptyComponent={() => (
             <View style={styles.empty}>
-              <Text style={[typography.subtitle, { color: colors.textSecondary, textAlign: 'center' }]}>
+              <Text
+                style={[
+                  typography.subtitle,
+                  { color: colors.textSecondary, textAlign: 'center' },
+                ]}
+              >
                 Aucune séance enregistrée.
+              </Text>
+              <Text
+                style={[
+                  typography.caption,
+                  { color: colors.textTertiary, textAlign: 'center', marginTop: spacing.s2 },
+                ]}
+              >
+                Lance ta première séance avec le bouton +
               </Text>
             </View>
           )}
@@ -298,23 +373,31 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  row: {
-    height: 64,
+  card: {
+    borderRadius: radius.md,
+    overflow: 'hidden',
+  },
+  cardInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: radius.md,
-    marginBottom: 4,
     paddingHorizontal: spacing.s4,
+    paddingVertical: spacing.s4,
+    gap: spacing.s3,
   },
   dateBlock: {
-    width: 40,
+    width: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
-  verticalSep: {
-    width: 1,
-    height: 32,
-    marginHorizontal: spacing.s3,
+  centerCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rightCol: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    gap: 2,
   },
   empty: {
     paddingTop: spacing.s12,

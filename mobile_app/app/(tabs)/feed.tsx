@@ -6,11 +6,10 @@ import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,
   Animated,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Heart, MessageCircle } from 'lucide-react-native'
+import { Heart, MessageCircle, RefreshCw } from 'lucide-react-native'
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography } from '@/constants/theme'
 import { supabase } from '@/lib/supabase'
@@ -33,9 +32,133 @@ interface FeedWorkout {
   user_has_liked: boolean
 }
 
-// ─── Skeleton row ─────────────────────────────────────────────────────────────
+// ─── Avatar colors (stable par user id) ──────────────────────────────────────
 
-function SkeletonRow() {
+const AVATAR_COLORS = [
+  '#6C63FF', // violet
+  '#E9567A', // rose
+  '#38B2AC', // teal
+  '#F6A623', // orange
+  '#48BB78', // vert
+  '#667EEA', // indigo
+  '#ED8936', // orange chaud
+  '#9F7AEA', // purple
+]
+
+function avatarColor(userId: string): string {
+  let hash = 0
+  for (let i = 0; i < userId.length; i++) {
+    hash = userId.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
+}
+
+// ─── Myo icon — roue à secteurs colorés ──────────────────────────────────────
+
+const MYO_SECTOR_COLORS = [
+  '#f97316', // VOLUME orange
+  '#ef4444', // INTENSITÉ rouge
+  '#8b5cf6', // STRUCTURE violet
+  '#06b6d4', // RÉCUP cyan
+  '#fac775', // PERF gold
+  '#22c55e', // RÉGULARITÉ vert
+  '#ec4899', // MUSCLES rose
+  '#3b82f6', // TEMPS bleu
+]
+
+function MyoIcon({ size = 32, bg = '#0A0A0F' }: { size?: number; bg?: string }) {
+  const segments = MYO_SECTOR_COLORS.length
+  const segAngle = (2 * Math.PI) / segments
+  const cx = size / 2
+  const cy = size / 2
+  const r = size / 2
+
+  const paths: string[] = MYO_SECTOR_COLORS.map((_, i) => {
+    const startAngle = i * segAngle - Math.PI / 2
+    const endAngle = startAngle + segAngle - 0.04 // petit gap entre secteurs
+    const x1 = cx + r * Math.cos(startAngle)
+    const y1 = cy + r * Math.sin(startAngle)
+    const x2 = cx + r * Math.cos(endAngle)
+    const y2 = cy + r * Math.sin(endAngle)
+    return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2} Z`
+  })
+
+  // Rendu sans SVG (React Native SVG non utilisé ici) — View avec border coloré par côtés
+  // On simule avec des View rotées en absolue
+  return (
+    <View style={{ width: size, height: size, position: 'relative' }}>
+      {MYO_SECTOR_COLORS.map((color, i) => {
+        const rotation = (i / segments) * 360
+        return (
+          <View
+            key={i}
+            style={{
+              position: 'absolute',
+              width: size,
+              height: size,
+              borderRadius: size / 2,
+              overflow: 'hidden',
+              transform: [{ rotate: `${rotation}deg` }],
+            }}
+          >
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: size / 2,
+                width: size / 2,
+                height: size / 2,
+                backgroundColor: color,
+                transformOrigin: '0% 100%',
+              }}
+            />
+          </View>
+        )
+      })}
+      {/* Cercle central blanc cassé pour effet donut */}
+      <View
+        style={{
+          position: 'absolute',
+          width: size * 0.38,
+          height: size * 0.38,
+          borderRadius: size * 0.19,
+          backgroundColor: bg,
+          top: size * 0.31,
+          left: size * 0.31,
+        }}
+      />
+    </View>
+  )
+}
+
+// ─── Temps relatif ────────────────────────────────────────────────────────────
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  const hours = Math.floor(mins / 60)
+  const days = Math.floor(hours / 24)
+  if (days > 0) return `${days}j`
+  if (hours > 0) return `${hours}h`
+  return `${mins}min`
+}
+
+// ─── Format volume avec espace milliers ──────────────────────────────────────
+
+function formatVolume(kg: number | null): string {
+  if (kg == null) return '—'
+  const rounded = Math.round(kg)
+  if (rounded >= 1000) {
+    const thousands = Math.floor(rounded / 1000)
+    const rest = rounded % 1000
+    return `${thousands} ${rest.toString().padStart(3, '0')}`
+  }
+  return `${rounded}`
+}
+
+// ─── Skeleton card ────────────────────────────────────────────────────────────
+
+function SkeletonCard() {
   const { colors } = useTheme()
   const anim = useRef(new Animated.Value(0.4)).current
 
@@ -49,20 +172,20 @@ function SkeletonRow() {
   }, [anim])
 
   return (
-    <Animated.View
-      style={[
-        styles.row,
-        {
-          backgroundColor: colors.backgroundSecondary,
-          opacity: anim,
-          marginBottom: 4,
-        },
-      ]}
-    >
-      <View style={[styles.avatar, { backgroundColor: colors.backgroundTertiary }]} />
-      <View style={{ flex: 1, gap: 6 }}>
-        <View style={{ width: '50%', height: 12, borderRadius: 4, backgroundColor: colors.backgroundTertiary }} />
-        <View style={{ width: '30%', height: 10, borderRadius: 4, backgroundColor: colors.backgroundTertiary }} />
+    <Animated.View style={[styles.skeletonCard, { opacity: anim }]}>
+      {/* Row avatar + lignes */}
+      <View style={styles.skeletonRow}>
+        <View style={[styles.skeletonAvatar, { backgroundColor: colors.backgroundTertiary }]} />
+        <View style={{ flex: 1, gap: 8 }}>
+          <View style={[styles.skeletonLine, { width: '55%', backgroundColor: colors.backgroundTertiary }]} />
+          <View style={[styles.skeletonLine, { width: '35%', height: 10, backgroundColor: colors.backgroundTertiary }]} />
+        </View>
+        <View style={[styles.skeletonMyoPlaceholder, { backgroundColor: colors.backgroundTertiary }]} />
+      </View>
+      {/* Skeleton likes */}
+      <View style={{ flexDirection: 'row', gap: 16, paddingTop: 8 }}>
+        <View style={[styles.skeletonLine, { width: 40, height: 10, backgroundColor: colors.backgroundTertiary }]} />
+        <View style={[styles.skeletonLine, { width: 40, height: 10, backgroundColor: colors.backgroundTertiary }]} />
       </View>
     </Animated.View>
   )
@@ -80,26 +203,25 @@ function FeedItem({ item, currentUserId, onLike }: FeedItemProps) {
   const { colors } = useTheme()
 
   const displayName = item.user.username ?? item.user.full_name ?? '?'
-  const initial = displayName.charAt(0).toUpperCase()
-
-  const volumeFormatted =
-    item.total_volume_kg != null
-      ? `${Math.round(item.total_volume_kg)} kg`
-      : '—'
+  const initials = displayName
+    .split(' ')
+    .slice(0, 2)
+    .map((p: string) => p.charAt(0).toUpperCase())
+    .join('')
+  const bgColor = avatarColor(item.user.id || item.id)
+  const volumeStr = formatVolume(item.total_volume_kg)
 
   return (
-    <View style={[styles.card, { backgroundColor: colors.backgroundSecondary }]}>
+    <View style={[styles.feedItem, { borderBottomColor: colors.separator }]}>
       {/* Row principale */}
-      <View style={styles.row}>
+      <View style={styles.mainRow}>
         {/* Avatar */}
-        <View style={[styles.avatar, { backgroundColor: colors.backgroundTertiary }]}>
-          <Text style={[typography.body, { color: colors.textPrimary, fontWeight: '700' }]}>
-            {initial}
-          </Text>
+        <View style={[styles.avatar, { backgroundColor: bgColor }]}>
+          <Text style={[styles.avatarInitials, { color: colors.textPrimary }]}>{initials}</Text>
         </View>
 
         {/* Centre */}
-        <View style={{ flex: 1, paddingHorizontal: spacing.s3 }}>
+        <View style={styles.centerCol}>
           <Text
             style={[typography.body, { color: colors.textPrimary, fontFamily: 'Barlow_700Bold' }]}
             numberOfLines={1}
@@ -114,25 +236,36 @@ function FeedItem({ item, currentUserId, onLike }: FeedItemProps) {
           </Text>
         </View>
 
-        {/* Right : placeholder Myo + volume */}
-        <View style={{ alignItems: 'flex-end', gap: 2 }}>
-          <View
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: colors.accent,
-              opacity: 0.3,
-            }}
-          />
-          <Text style={[typography.caption, { color: colors.accent, fontVariant: ['tabular-nums'] }]}>
-            {volumeFormatted}
-          </Text>
+        {/* Right : Myo icon + volume + temps */}
+        <View style={styles.rightCol}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <MyoIcon size={32} bg={colors.background} />
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text
+                style={[
+                  typography.body,
+                  {
+                    color: colors.textPrimary,
+                    fontFamily: 'Barlow_700Bold',
+                    fontVariant: ['tabular-nums'],
+                  },
+                ]}
+              >
+                {volumeStr}{' '}
+                <Text style={{ color: colors.textSecondary, fontFamily: 'Barlow_400Regular', fontSize: 13 }}>
+                  kg
+                </Text>
+              </Text>
+              <Text style={[typography.caption, { color: colors.textTertiary }]}>
+                {timeAgo(item.started_at)}
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
 
       {/* Barre likes/comments */}
-      <View style={[styles.likeBar, { borderTopColor: colors.separator }]}>
+      <View style={styles.likeBar}>
         <TouchableOpacity
           style={styles.likeBtn}
           onPress={() => onLike(item.id, item.user_has_liked)}
@@ -140,7 +273,7 @@ function FeedItem({ item, currentUserId, onLike }: FeedItemProps) {
           activeOpacity={0.7}
         >
           <Heart
-            size={16}
+            size={14}
             color={item.user_has_liked ? colors.error : colors.textTertiary}
             fill={item.user_has_liked ? colors.error : 'transparent'}
           />
@@ -150,7 +283,7 @@ function FeedItem({ item, currentUserId, onLike }: FeedItemProps) {
         </TouchableOpacity>
 
         <View style={styles.likeBtn}>
-          <MessageCircle size={16} color={colors.textTertiary} />
+          <MessageCircle size={14} color={colors.textTertiary} />
           <Text style={[typography.caption, { color: colors.textTertiary, marginLeft: 4 }]}>
             {item.comments_count}
           </Text>
@@ -211,10 +344,11 @@ export default function FeedScreen() {
       total_volume_kg: number | null
       started_at: string
       pr_seance: 'gold' | 'silver' | 'bronze' | null
-      user: { id: string; username: string | null; full_name: string | null } | null
+      // Supabase retourne un array pour les foreign key joins — on prend [0]
+      user: Array<{ id: string; username: string | null; full_name: string | null }>
     }
 
-    const workoutIds = (data as RawWorkout[]).map(w => w.id)
+    const workoutIds = (data as unknown as RawWorkout[]).map(w => w.id)
 
     // Counts likes + comments par workout
     const [likesRes, commentsRes, userLikesRes] = await Promise.all([
@@ -237,13 +371,13 @@ export default function FeedScreen() {
       (userLikesRes.data ?? []).map((l: { workout_id: string }) => l.workout_id)
     )
 
-    const mapped: FeedWorkout[] = (data as RawWorkout[]).map(w => ({
+    const mapped: FeedWorkout[] = (data as unknown as RawWorkout[]).map(w => ({
       id: w.id,
       title: w.title ?? '—',
       total_volume_kg: w.total_volume_kg,
       started_at: w.started_at,
       pr_seance: w.pr_seance,
-      user: w.user ?? { id: '', username: null, full_name: null },
+      user: w.user?.[0] ?? { id: '', username: null, full_name: null },
       likes_count: likesCount.get(w.id) ?? 0,
       comments_count: commentsCount.get(w.id) ?? 0,
       user_has_liked: likedSet.has(w.id),
@@ -299,14 +433,49 @@ export default function FeedScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <Text style={[typography.title, { color: colors.textPrimary, paddingHorizontal: spacing.s5, paddingTop: spacing.s12, paddingBottom: spacing.s4 }]}>
+      {/* Header */}
+      <Text
+        style={[
+          typography.title,
+          {
+            color: colors.textPrimary,
+            paddingHorizontal: spacing.s5,
+            paddingTop: spacing.s6,
+            paddingBottom: spacing.s2,
+          },
+        ]}
+      >
         Feed
       </Text>
 
+      {/* Indicateur actualisation */}
+      {refreshing && (
+        <View style={styles.refreshIndicator}>
+          <RefreshCw size={12} color={colors.textTertiary} />
+          <Text
+            style={[
+              typography.caption,
+              { color: colors.textTertiary, letterSpacing: 1, textTransform: 'uppercase', marginLeft: 6 },
+            ]}
+          >
+            Actualisation...
+          </Text>
+        </View>
+      )}
+
       {loading ? (
-        <View style={{ paddingHorizontal: spacing.s5, paddingTop: spacing.s2 }}>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <SkeletonRow key={i} />
+        <View style={{ paddingHorizontal: spacing.s5, paddingTop: spacing.s3 }}>
+          <SkeletonCard />
+          {Array.from({ length: 4 }).map((_, i) => (
+            <View key={i} style={[styles.feedItem, { borderBottomColor: colors.separator }]}>
+              <View style={styles.mainRow}>
+                <View style={[styles.avatar, { backgroundColor: colors.backgroundSecondary }]} />
+                <View style={styles.centerCol}>
+                  <View style={{ width: '50%', height: 12, borderRadius: 4, backgroundColor: colors.backgroundSecondary, marginBottom: 6 }} />
+                  <View style={{ width: '35%', height: 10, borderRadius: 4, backgroundColor: colors.backgroundSecondary }} />
+                </View>
+              </View>
+            </View>
           ))}
         </View>
       ) : (
@@ -338,6 +507,9 @@ export default function FeedScreen() {
               <Text style={[typography.subtitle, { color: colors.textSecondary, textAlign: 'center' }]}>
                 Ton feed est vide.
               </Text>
+              <Text style={[typography.caption, { color: colors.textTertiary, textAlign: 'center', marginTop: spacing.s2 }]}>
+                Suis des athletes pour voir leurs séances.
+              </Text>
             </View>
           )}
           showsVerticalScrollIndicator={false}
@@ -353,16 +525,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  card: {
-    borderRadius: radius.md,
-    marginBottom: 4,
-    overflow: 'hidden',
-  },
-  row: {
-    height: 64,
+  refreshIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.s4,
+    justifyContent: 'center',
+    paddingBottom: spacing.s2,
+  },
+  feedItem: {
+    paddingVertical: spacing.s3,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  mainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.s3,
+    minHeight: 52,
   },
   avatar: {
     width: 40,
@@ -370,18 +547,58 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+  },
+  avatarInitials: {
+    fontSize: 14,
+    fontFamily: 'Barlow_700Bold',
+    letterSpacing: 0.5,
+  },
+  centerCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rightCol: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
   },
   likeBar: {
-    height: 32,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.s4,
     gap: spacing.s5,
-    borderTopWidth: 1,
+    paddingTop: spacing.s2,
+    paddingLeft: 52, // aligner sous le texte (avatar 40 + gap 12)
   },
   likeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  skeletonCard: {
+    paddingVertical: spacing.s3,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  skeletonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.s3,
+    minHeight: 52,
+  },
+  skeletonAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    flexShrink: 0,
+  },
+  skeletonLine: {
+    height: 12,
+    borderRadius: 4,
+  },
+  skeletonMyoPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    flexShrink: 0,
   },
   empty: {
     paddingTop: spacing.s12,

@@ -42,7 +42,7 @@ app/
 │   └── start.tsx            — placeholder FAB → /workout/session
 ├── workout/
 │   ├── session.tsx          — log séance, WheelPicker, flash PR 🥇🥈🥉, swipe delete
-│   ├── timer.tsx            — TimerWheelColumn custom, auto-start, presets, fix AppState
+│   ├── timer.tsx            — anneau SVG Figma (arc jaune SVG), -15/skip/+15, auto-start, AppState
 │   ├── summary.tsx          — résumé + nom auto + PRs + is_public + photo + géoloc + save Supabase
 │   │                          + computeAndSaveMetrics() → workout_metrics (best-effort)
 │   └── myo-orb.tsx          — Myo 3D : Three.js + expo-gl, IcosahedronGeometry, MeshPhongMaterial
@@ -62,12 +62,21 @@ lib/
 ├── myo.ts                   — calcul signature Myo 41 dims, saveMyoSignature()
 ├── db.ts                    — SQLite local : initDB(), insertLocalSet(), insertLocalSession()
 ├── storage.ts               — MMKV instance unique (id: 'orava-workout')
-└── analytics.ts             — PostHog EU + Events const (22 événements taxonomie)
+├── analytics.ts             — PostHog EU + Events const (22 événements taxonomie)
+└── utils.ts                 — formatVolume(n) → "12 450" (espace milliers)
 
 constants/theme.ts           — source couleurs dark/light
 constants/Colors.ts          — VIDE — ne pas utiliser
 types/index.ts               — VIDE — types inline dans chaque fichier
 components/                  — VIDE — ne pas peupler
+
+__tests__/                   — tests unitaires Jest (logique pure uniquement, pas d'UI)
+├── computePodium.test.ts    — 16 tests computePodium gold/silver/bronze/null
+├── theme.test.ts            — 28 tests tokens dark/light/spacing/radius/typo
+├── formatVolume.test.ts     — 16 tests formatage milliers
+├── workoutState.test.ts     — 10 tests fonctions pures WorkoutContext
+├── supabase.test.ts         — 11 tests avec mock Supabase
+└── myoDims.test.ts          — 39 tests FASCICLE_DIM, MUSCLE_DIM, computeMuscleDims
 ```
 
 ## Fichiers à créer (v4)
@@ -86,10 +95,14 @@ components/                  — VIDE — ne pas peupler
 - Types : inline dans le fichier qui les utilise — jamais dans types/index.ts
 - `components/` reste vide — UI inline dans les screens
 
-## Bug fix — incohérences v1 à corriger
+## Bug fix — historique corrections
 
-| Fichier | Problème | Fix |
+| Fichier | Problème | Statut |
 |---|---|---|
-| `app/workout/summary.tsx` | `isPublic` initialisé à `true` | Passer à `false` |
+| `app/workout/summary.tsx` | `isPublic` initialisé à `true` | ✅ Corrigé (24/05/2026) |
+| `app/auth/login.tsx` | Couleurs hardcodées, pas `useTheme()` | ✅ Corrigé (24/05/2026) |
 | `package.json` | `@react-three/fiber` installé, non utilisé pour Myo | Garder (pas de risque) |
-| `app/auth/login.tsx` | Couleurs hardcodées, pas `useTheme()` | Corriger au passage |
+| Supabase JOIN casts | `as { }` sans type guard → TS2352 dans profile, history/[id], exercise/[id], prs | ✅ Corrigé (24/05/2026) |
+
+## Comportement documenté — computePodium
+`computePodium(value, top3)` utilise des comparaisons strictes `>`. Égaler `pr1` ne donne pas gold mais silver (si pr2 existe). Comportement voulu à confirmer avec le produit.

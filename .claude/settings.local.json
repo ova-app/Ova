@@ -34,7 +34,11 @@
       "PowerShell(Copy-Item \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\design\\\\figma-export\\\\Orava_design_figma\\\\orava_logo.png\" -Destination \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\\\\assets\\\\adaptive-icon.png\" -Force)",
       "Bash(node -e ' *)",
       "Bash(git add *)",
-      "Bash(git commit -m '@ *)"
+      "Bash(git commit -m '@ *)",
+      "Bash(node -e \"const fs = require\\('fs'\\); const code = fs.readFileSync\\('app/workout/session.tsx', 'utf8'\\); const imports = code.match\\(/^import .+/gm\\); console.log\\(imports.join\\('\\\\n'\\)\\)\")",
+      "Bash(Get-Content \"C:\\\\Users\\\\SOFIAN~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-SofianeBESSILA-orava\\\\6f47af95-3b25-4802-b6b3-f39a6c738b1a\\\\tasks\\\\b19iwexft.output\" -Wait)",
+      "Bash(Select-String --line-buffered \"added|error|npm warn|ERR\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\\\\__tests__\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\SofianeBESSILA\\orava\\mobile_app\\app\\workout"

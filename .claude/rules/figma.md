@@ -6,58 +6,45 @@ Lire cette rule avant tout travail impliquant des assets design ou une mise à j
 
 ---
 
-## Structure des exports Figma
+## Structure réelle des exports Figma (état 24/05/2026)
 
-Quand le zip Figma est téléchargé, le placer dans `design/figma-export/` avec cette structure :
+⚠️ La structure réelle diffère du plan initial. Les screens sont numérotés, pas nommés.
 
 ```
-design/
-└── figma-export/
-    ├── tokens.json          — export Tokens Studio (couleurs, typo, spacing)
-    ├── screens/             — PNG 390×844 de chaque screen validé
-    │   ├── session.png
-    │   ├── summary.png
-    │   ├── timer.png
-    │   ├── feed.png
-    │   ├── history-list.png
-    │   ├── history-detail.png
-    │   ├── library.png
-    │   ├── exercise-detail.png
-    │   ├── profile.png
-    │   ├── prs.png
-    │   ├── settings.png
-    │   ├── edit-profile.png
-    │   ├── splash.png
-    │   ├── onboarding-1.png
-    │   ├── onboarding-2.png
-    │   ├── auth-login.png
-    │   └── auth-register.png
-    ├── components/          — PNG de chaque composant + ses états
-    │   ├── navigation-fab.png
-    │   ├── wheel-picker.png
-    │   ├── bottom-sheet-exercise.png
-    │   ├── pr-flash-gold.png
-    │   ├── pr-flash-silver.png
-    │   ├── pr-flash-bronze.png
-    │   ├── pr-badges.png
-    │   ├── myo-detail-panel.png
-    │   ├── empty-state-feed.png
-    │   ├── empty-state-history.png
-    │   ├── empty-state-library.png
-    │   ├── skeleton-feed.png
-    │   ├── skeleton-summary.png
-    │   └── skeleton-library.png
-    ├── states/              — PNG des états interactifs
-    │   ├── button-states.png
-    │   ├── input-states.png
-    │   ├── toggle-states.png
-    │   └── row-exercise-states.png
-    └── logo/                — assets vectoriels du logo
-        ├── logo.svg
-        ├── icon-1024.png
-        ├── icon-512.png
-        └── splash-bg.png
+design/figma-export/
+├── orava_logo.png                      — logo définitif (cercle jaune + losange noir)
+└── Orava_design_figma/
+    ├── index.html                      — Design System interactif (Colors/Typography/Spacing/Radius)
+    └── screens/                        — 33 PNGs numérotés 1.png → 33.png
+        ├── 1.png    session active (WheelPicker)
+        ├── 2.png    summary séance
+        ├── 3.png    composants PR (active state)   ← states référence
+        ├── 4.png    feed
+        ├── 5.png    historique liste
+        ├── 6.png    profil
+        ├── 7.png    timer
+        ├── 8.png    auth login + register (côte à côte)
+        ├── 9.png    détail séance (history/[id])
+        ├── 10.png   détail exercice (exercise/[id])
+        ├── 11.png   modal "Ajouter un exercice" + session
+        ├── 12.png   toasts PR overlay
+        ├── 14.png   splash / loading
+        ├── 16.png   états input (référence)
+        ├── 17.png   édition profil
+        ├── 18.png   états vides (feed / history / library)
+        ├── 19.png   skeleton screens
+        ├── 22.png   états toggles (référence)
+        ├── 23.png   états sélection exercice (référence)
+        ├── 25.png   design system logo — déclinaisons
+        ├── 26.png   design system — intro + backgrounds
+        ├── 27.png   design system — accent + text + PR colors
+        ├── 28.png   design system — status + typography intro
+        ├── 29-30.png design system — type scale détaillée
+        ├── 31-32.png design system — spacing 8pt grid
+        └── 33.png   design system — border radius scale
 ```
+
+**Pas de tokens.json** — les tokens sont dans l'HTML interactif. Les valeurs sont déjà dans `constants/theme.ts` (vérifié 24/05/2026 : correspondance exacte).
 
 ---
 
@@ -65,41 +52,43 @@ design/
 
 ### 1. Tokens → `constants/theme.ts`
 
-Si `design/figma-export/tokens.json` existe, le lire et vérifier les deltas vs `constants/theme.ts` actuel.
-**Ne modifier `theme.ts` que si une valeur diffère.** Le fichier actuel est déjà aligné sur le Design System.
+Pas de tokens.json. Lire les PNGs du design system (26.png → 33.png) pour vérifier les valeurs.
+**Ne modifier `theme.ts` que si une valeur diffère.** Vérifié 24/05/2026 — correspondance exacte confirmée.
 
-Format attendu du JSON Tokens Studio :
-```json
-{
-  "color": {
-    "background": { "value": "#0A0A0F", "type": "color" },
-    "accent": { "value": "#FFDD00", "type": "color" }
-  },
-  "spacing": {
-    "s4": { "value": "16", "type": "spacing" }
-  }
-}
-```
-
-Mapping JSON → `theme.ts` :
-| JSON key | theme.ts | Section |
+Valeurs clés confirmées Figma → theme.ts :
+| Token Figma | Valeur | theme.ts key |
 |---|---|---|
-| `color.background` | `dark.background` | Colors |
-| `color.accent` | `dark.accent` | Colors |
-| `color.textPrimary` | `dark.textPrimary` | Colors |
-| `spacing.s*` | `spacing.s*` | Spacing |
-| `radius.*` | `radius.*` | Radius |
-| `typography.hero.*` | `typography.hero` | Typography |
+| BACKGROUND | `#0A0A0F` | `dark.background` |
+| BACKGROUNDSECONDARY | `#12121A` | `dark.backgroundSecondary` |
+| BACKGROUNDTERTIARY | `#1A1A24` | `dark.backgroundTertiary` |
+| ACCENT | `#FFDD00` | `dark.accent` |
+| TEXTPRIMARY | `#F0F0F5` | `dark.textPrimary` |
+| TEXTSECONDARY | `#7A7A8C` | `dark.textSecondary` |
+| TEXTTERTIARY | `#4A4A5A` | `dark.textTertiary` |
+| PRGOLD | `#FAC775` | `dark.prGold` |
+| PRSILVER | `#C0C0C0` | `dark.prSilver` |
+| PRBRONZE | `#CD7F32` | `dark.prBronze` |
 
 ⚠️ `theme.ts` a une section `light` — ne pas la supprimer même si Figma n'a que le dark mode (Phases 0-2).
 
 ### 2. Logo → assets
 
+Logo définitif : `design/figma-export/orava_logo.png` (cercle jaune, losange noir intérieur).
+À vectoriser par le designer avant intégration dans les assets.
+
+Implémentation code (en attendant le SVG vectoriel) :
+```tsx
+// Cercle jaune 48px + losange noir 16px intérieur
+<View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+  <View style={{ width: 16, height: 16, backgroundColor: colors.background, transform: [{ rotate: '45deg' }] }} />
+</View>
 ```
-design/figma-export/logo/logo.svg        → design/system/logo/logo.svg
-design/figma-export/logo/icon-1024.png   → mobile_app/assets/icon.png
-design/figma-export/logo/icon-512.png    → mobile_app/assets/adaptive-icon.png
-design/figma-export/logo/splash-bg.png  → mobile_app/assets/splash.png
+
+Quand le SVG est prêt :
+```
+design/figma-export/orava_logo.svg  → mobile_app/assets/icon.png (export PNG 1024px)
+                                    → mobile_app/assets/adaptive-icon.png (512px)
+                                    → mobile_app/assets/splash.png
 ```
 
 Après copie, vérifier `mobile_app/app.json` :
@@ -134,27 +123,25 @@ Lire le PNG du composant avant d'écrire son code inline dans le screen.
 
 ---
 
-## Correspondance Figma → fichiers code
+## Correspondance Figma → fichiers code (numéros réels)
 
-| PNG Figma | Fichier cible | Densité |
-|---|---|---|
-| `session.png` | `app/workout/session.tsx` | Zen |
-| `summary.png` | `app/workout/summary.tsx` | Riche |
-| `timer.png` | `app/workout/timer.tsx` | Zen |
-| `feed.png` | `app/(tabs)/feed.tsx` | Dense |
-| `history-list.png` | `app/(tabs)/history.tsx` | Dense |
-| `history-detail.png` | `app/history/[id].tsx` | Dense |
-| `library.png` | `app/(tabs)/library.tsx` | Dense |
-| `exercise-detail.png` | `app/exercise/[id].tsx` | Standard |
-| `profile.png` | `app/(tabs)/profile.tsx` | Standard |
-| `prs.png` | `app/prs.tsx` | Standard |
-| `settings.png` | `app/settings.tsx` | Standard |
-| `edit-profile.png` | `app/edit-profile.tsx` | Standard |
-| `splash.png` | `app/index.tsx` | Zen |
-| `onboarding-1.png` | `app/onboarding/index.tsx` | Zen |
-| `onboarding-2.png` | `app/onboarding/first-set.tsx` | Zen |
-| `auth-login.png` | `app/auth/login.tsx` | Standard |
-| `auth-register.png` | `app/auth/register.tsx` | Standard |
+| PNG | Fichier cible | Densité | Statut |
+|---|---|---|---|
+| `1.png` | `app/workout/session.tsx` | Zen | ✅ Implémenté |
+| `2.png` | `app/workout/summary.tsx` | Riche | ✅ Implémenté |
+| `7.png` | `app/workout/timer.tsx` | Zen | ✅ Implémenté |
+| `4.png` | `app/(tabs)/feed.tsx` | Dense | ✅ Implémenté |
+| `5.png` | `app/(tabs)/history.tsx` | Dense | ✅ Implémenté |
+| `9.png` | `app/history/[id].tsx` | Dense | ✅ Implémenté |
+| `11.png` | `app/(tabs)/library.tsx` (référence) | Dense | ✅ Implémenté |
+| `10.png` | `app/exercise/[id].tsx` | Standard | ✅ Implémenté |
+| `6.png` | `app/(tabs)/profile.tsx` | Standard | ✅ Implémenté |
+| `16.png` | `app/settings.tsx` (référence) | Standard | ✅ Implémenté |
+| `17.png` | `app/edit-profile.tsx` | Standard | ✅ Implémenté |
+| `14.png` | `app/index.tsx` | Zen | ✅ Implémenté |
+| `8.png` | `app/auth/login.tsx` + `register.tsx` | Standard | ✅ Implémenté |
+| — | `app/prs.tsx` | Standard | ⏳ À faire |
+| — | `app/onboarding/` | Zen | ⏳ Phase 1 |
 
 ---
 

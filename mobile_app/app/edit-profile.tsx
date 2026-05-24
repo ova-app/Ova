@@ -17,7 +17,7 @@ import { ChevronLeft, Calendar } from 'lucide-react-native'
 import * as ImagePicker from 'expo-image-picker'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
-import { spacing, radius, typography } from '@/constants/theme'
+import { spacing, radius, typography, font } from '@/constants/theme'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -42,16 +42,31 @@ function formatDateForDisplay(isoDate: string): string {
   if (!isoDate) return ''
   const parts = isoDate.split('-')
   if (parts.length !== 3) return isoDate
-  return `${parts[2]}/${parts[1]}/${parts[0]}`
+  return `${parts[2]} / ${parts[1]} / ${parts[0]}`
 }
 
 function parseDateInput(input: string): string {
-  // Accepte dd/mm/yyyy → yyyy-mm-dd
-  const parts = input.split('/')
+  // Accepte dd/mm/yyyy ou dd / mm / yyyy → yyyy-mm-dd
+  const cleaned = input.replace(/\s/g, '').replace(/\//g, '/')
+  const parts = cleaned.split('/')
   if (parts.length === 3 && parts[2].length === 4) {
     return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`
   }
   return input
+}
+
+function getInitiales(fullName: string, username: string): string {
+  if (fullName.trim()) {
+    const words = fullName.trim().split(/\s+/)
+    if (words.length >= 2) {
+      return `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase()
+    }
+    return words[0][0].toUpperCase()
+  }
+  if (username.trim()) {
+    return username.trim().charAt(0).toUpperCase()
+  }
+  return '?'
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -126,7 +141,7 @@ export default function EditProfileScreen(): React.JSX.Element {
     const newErrors: ProfileErrors = {}
 
     if (!form.username.trim()) {
-      newErrors.username = 'Nom d\'utilisateur requis'
+      newErrors.username = "Nom d'utilisateur requis"
     } else if (form.username.length < 3) {
       newErrors.username = 'Minimum 3 caractères'
     }
@@ -158,7 +173,6 @@ export default function EditProfileScreen(): React.JSX.Element {
         ? parseDateInput(form.dateNaissance)
         : null
 
-      // Update users table
       const { error: userError } = await supabase
         .from('users')
         .update({
@@ -170,7 +184,6 @@ export default function EditProfileScreen(): React.JSX.Element {
 
       if (userError) throw userError
 
-      // Insert body_metrics si poids renseigné
       if (form.poidsKg) {
         const poidsNum = parseFloat(form.poidsKg)
         if (!isNaN(poidsNum)) {
@@ -208,7 +221,13 @@ export default function EditProfileScreen(): React.JSX.Element {
     }
   }
 
+  async function seDeconnecter(): Promise<void> {
+    await supabase.auth.signOut()
+    router.replace('/auth/login')
+  }
+
   const s = buildStyles(colors)
+  const initiales = getInitiales(form.fullName, form.username)
 
   if (loading) {
     return (
@@ -225,7 +244,7 @@ export default function EditProfileScreen(): React.JSX.Element {
     >
       <StatusBar barStyle="light-content" />
 
-      {/* Header */}
+      {/* ── Header ── */}
       <View style={s.header}>
         <Pressable
           style={s.backBtn}
@@ -258,7 +277,7 @@ export default function EditProfileScreen(): React.JSX.Element {
         keyboardShouldPersistTaps="handled"
       >
 
-        {/* Avatar */}
+        {/* ── Avatar ── */}
         <View style={s.avatarSection}>
           <Pressable
             style={s.avatarWrap}
@@ -269,24 +288,22 @@ export default function EditProfileScreen(): React.JSX.Element {
             {avatarUrl ? (
               <Image source={{ uri: avatarUrl }} style={s.avatar} />
             ) : (
-              <View style={[s.avatar, s.avatarPlaceholder]}>
-                <Text style={s.avatarInitials}>
-                  {form.fullName ? form.fullName[0].toUpperCase() : '?'}
-                </Text>
+              <View style={s.avatarPlaceholder}>
+                <Text style={s.avatarInitials}>{initiales}</Text>
               </View>
             )}
           </Pressable>
           <Text style={s.avatarChangeLabel}>Changer la photo</Text>
         </View>
 
-        {/* Erreur globale */}
+        {/* ── Erreur globale ── */}
         {errors.global ? (
           <View style={s.errorBanner}>
             <Text style={s.errorBannerText}>{errors.global}</Text>
           </View>
         ) : null}
 
-        {/* Champs */}
+        {/* ── Champs ── */}
         <View style={s.form}>
 
           {/* Nom d'utilisateur */}
@@ -328,15 +345,15 @@ export default function EditProfileScreen(): React.JSX.Element {
           {/* Date de naissance */}
           <View style={s.fieldGroup}>
             <Text style={s.fieldLabel}>DATE DE NAISSANCE</Text>
-            <View style={s.inputWithIcon}>
+            <View style={[s.inputWithIcon, errors.dateNaissance ? s.inputError : null]}>
               <TextInput
-                style={[s.input, s.inputFlex, errors.dateNaissance ? s.inputError : null]}
+                style={s.inputInner}
                 value={form.dateNaissance}
                 onChangeText={(v) => setForm(f => ({ ...f, dateNaissance: v }))}
-                placeholder="jj/mm/aaaa"
+                placeholder="jj / mm / aaaa"
                 placeholderTextColor={colors.textTertiary}
                 keyboardType="numeric"
-                maxLength={10}
+                maxLength={14}
                 accessibilityLabel="Date de naissance"
               />
               <View style={s.inputIconRight}>
@@ -351,9 +368,9 @@ export default function EditProfileScreen(): React.JSX.Element {
           {/* Poids */}
           <View style={s.fieldGroup}>
             <Text style={s.fieldLabel}>POIDS</Text>
-            <View style={s.inputWithIcon}>
+            <View style={[s.inputWithIcon, errors.poidsKg ? s.inputError : null]}>
               <TextInput
-                style={[s.input, s.inputFlex, errors.poidsKg ? s.inputError : null]}
+                style={s.inputInner}
                 value={form.poidsKg}
                 onChangeText={(v) => setForm(f => ({ ...f, poidsKg: v }))}
                 placeholder="70"
@@ -369,11 +386,22 @@ export default function EditProfileScreen(): React.JSX.Element {
               <Text style={s.fieldError}>{errors.poidsKg}</Text>
             ) : null}
             <Text style={s.fieldNote}>
-              Utilisé pour calculer tes métriques. Non visible.
+              {'Utilisé pour calculer tes métriques. '}
+              <Text style={s.fieldNoteAccent}>Non visible.</Text>
             </Text>
           </View>
 
         </View>
+
+        {/* ── Déconnexion ── */}
+        <Pressable
+          style={({ pressed }) => [s.deconnexionBtn, pressed && { opacity: 0.6 }]}
+          onPress={() => void seDeconnecter()}
+          accessibilityRole="button"
+          accessibilityLabel="Se déconnecter"
+        >
+          <Text style={s.deconnexionText}>Déconnexion</Text>
+        </Pressable>
 
         <View style={s.bottomPad} />
       </ScrollView>
@@ -393,6 +421,8 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+
+    // ── Header ──
     header: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -408,9 +438,9 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     headerTitle: {
       flex: 1,
-      ...typography.body,
-      fontFamily: 'Barlow_500Medium',
-      color: colors.textSecondary,
+      ...typography.subtitle,
+      fontFamily: font.bold,
+      color: colors.textPrimary,
       textAlign: 'center',
     },
     saveBtn: {
@@ -421,44 +451,53 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     saveBtnLabel: {
       ...typography.body,
+      fontFamily: font.bold,
       color: colors.accent,
     },
+
+    // ── Scroll ──
     scroll: {
       flex: 1,
     },
     scrollContent: {
       paddingHorizontal: spacing.s4,
     },
-    // Avatar
+
+    // ── Avatar ──
     avatarSection: {
       alignItems: 'center',
-      paddingTop: spacing.s8,
-      paddingBottom: spacing.s8,
+      paddingTop: spacing.s6,
+      paddingBottom: spacing.s6,
     },
     avatarWrap: {
-      borderRadius: 40,
-      overflow: 'hidden',
+      marginBottom: spacing.s2,
     },
     avatar: {
-      width: 80,
-      height: 80,
-      borderRadius: 40,
+      width: 72,
+      height: 72,
+      borderRadius: 36,
     },
     avatarPlaceholder: {
-      backgroundColor: colors.backgroundTertiary,
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: colors.backgroundSecondary,
       alignItems: 'center',
       justifyContent: 'center',
     },
     avatarInitials: {
-      ...typography.title,
-      color: colors.textSecondary,
+      fontSize: 24,
+      fontFamily: font.bold,
+      color: colors.accent,
+      lineHeight: 28,
     },
     avatarChangeLabel: {
       ...typography.caption,
       color: colors.accent,
-      marginTop: spacing.s2,
+      marginTop: spacing.s1,
     },
-    // Error banner
+
+    // ── Error ──
     errorBanner: {
       backgroundColor: `${colors.error}18`,
       borderRadius: radius.md,
@@ -470,7 +509,8 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       color: colors.error,
       textAlign: 'center',
     },
-    // Form
+
+    // ── Form ──
     form: {
       gap: spacing.s5,
     },
@@ -482,28 +522,34 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       color: colors.textTertiary,
       textTransform: 'uppercase',
       letterSpacing: 1.2,
+      marginBottom: spacing.s1,
     },
     input: {
       height: 52,
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: radius.md,
+      backgroundColor: colors.backgroundTertiary,
+      borderRadius: radius.sm,
       paddingHorizontal: spacing.s4,
       ...typography.body,
       color: colors.textPrimary,
     },
-    inputFlex: {
+    inputWithIcon: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.backgroundTertiary,
+      borderRadius: radius.sm,
+      height: 52,
+      overflow: 'hidden',
+    },
+    inputInner: {
       flex: 1,
+      height: 52,
+      paddingHorizontal: spacing.s4,
+      ...typography.body,
+      color: colors.textPrimary,
     },
     inputError: {
       borderWidth: 1,
       borderColor: colors.error,
-    },
-    inputWithIcon: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: radius.md,
-      overflow: 'hidden',
     },
     inputIconRight: {
       paddingHorizontal: spacing.s4,
@@ -523,8 +569,25 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     fieldNote: {
       ...typography.caption,
       color: colors.textTertiary,
-      marginTop: spacing.s1,
+      marginTop: spacing.s2,
     },
+    fieldNoteAccent: {
+      color: colors.accent,
+    },
+
+    // ── Déconnexion ──
+    deconnexionBtn: {
+      alignItems: 'center',
+      paddingVertical: spacing.s5,
+      marginTop: spacing.s8,
+      minHeight: 52,
+      justifyContent: 'center',
+    },
+    deconnexionText: {
+      ...typography.body,
+      color: colors.textTertiary,
+    },
+
     bottomPad: {
       height: spacing.s12,
     },

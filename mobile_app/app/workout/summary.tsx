@@ -3,21 +3,20 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  FlatList,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { Dumbbell, Flame, Trophy, Zap, Camera } from 'lucide-react-native'
+import { Flame, Zap } from 'lucide-react-native'
 import * as ImagePicker from 'expo-image-picker'
-import { dark, spacing, radius, typography, touchTarget } from '@/constants/theme'
-import { useWorkout, computePodium, WorkoutExercise, WorkoutSet, PrLevel } from '@/context/WorkoutContext'
+import { useTheme } from '@/context/ThemeContext'
+import { spacing, radius, typography, touchTarget } from '@/constants/theme'
+import { useWorkout, computePodium, WorkoutExercise, PrLevel } from '@/context/WorkoutContext'
 import { saveMyoSignature } from '@/lib/myo'
 import { insertLocalSet, insertLocalSession } from '@/lib/db'
 import { storage } from '@/lib/storage'
@@ -26,9 +25,18 @@ import { supabase } from '@/lib/supabase'
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDuration(sec: number): string {
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  if (h > 0) return `${h}H ${m}MIN`
+  return `${m}MIN`
+}
+
+function formatDate(date: Date | null): string {
+  if (!date) return "AUJOURD'HUI"
+  const day = date.toLocaleDateString('fr-FR', { weekday: 'long' }).toUpperCase()
+  const time = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  const isToday = new Date().toDateString() === date.toDateString()
+  return isToday ? `AUJOURD'HUI · ${time}` : `${day} · ${time}`
 }
 
 function generateWorkoutName(exercises: WorkoutExercise[], startedAt: Date | null): string {
@@ -41,7 +49,7 @@ function generateWorkoutName(exercises: WorkoutExercise[], startedAt: Date | nul
     biceps: 'Biceps', triceps: 'Triceps', quadriceps: 'Jambes',
     ischio_jambiers: 'Ischio', fessiers: 'Fessiers', mollets: 'Mollets', abdominaux: 'Abdos',
   }
-  const label = groups.slice(0, 2).map(g => groupLabels[g ?? ''] ?? g ?? '').join(' + ')
+  const label = groups.slice(0, 2).map(g => groupLabels[g ?? ''] ?? g ?? '').join(' & ')
   return `${label} — ${slot}`
 }
 
@@ -49,32 +57,28 @@ function epley1RM(w: number, r: number): number {
   return r === 1 ? w : w * (1 + r / 30)
 }
 
-// ─── PrBadge ─────────────────────────────────────────────────────────────────
-
-function PrBadge({ level, type }: { level: PrLevel; type: 'charge' | 'serie' | 'exercice' | 'seance' }) {
-  if (!level) return null
-  const colorMap: Record<string, string> = {
-    gold: dark.prGold,
-    silver: dark.prSilver,
-    bronze: dark.prBronze,
+function muscleLabelFr(key: string): string {
+  const map: Record<string, string> = {
+    pectoraux: 'Pectoraux',
+    dos: 'Dos',
+    epaules: 'Épaules',
+    biceps: 'Biceps',
+    triceps: 'Triceps',
+    quadriceps: 'Quadriceps',
+    ischio_jambiers: 'Ischio',
+    fessiers: 'Fessiers',
+    mollets: 'Mollets',
+    abdominaux: 'Abdominaux',
+    autre: 'Autre',
   }
-  const icons = { charge: Zap, serie: Flame, exercice: Dumbbell, seance: Trophy }
-  const Icon = icons[type]
-  const color = colorMap[level]
-  return (
-    <View style={[styles.badge, { borderColor: color }]}>
-      <Icon size={12} color={color} />
-      <Text style={[styles.badgeText, { color }]}>
-        {level === 'gold' ? 'OR' : level === 'silver' ? 'ARGENT' : 'BRONZE'}
-      </Text>
-    </View>
-  )
+  return map[key] ?? key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ')
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export default function SummaryScreen() {
   const router = useRouter()
+  const { colors } = useTheme()
   const { status, startedAt, exercises, elapsedSeconds, resetWorkout } = useWorkout()
 
   const [isPublic, setIsPublic] = useState(false)
@@ -82,9 +86,8 @@ export default function SummaryScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [prSeanceResult, setPrSeanceResult] = useState<PrLevel>(null)
   const [sectionAnims] = useState(() =>
-    Array.from({ length: 6 }, () => new Animated.Value(0))
+    Array.from({ length: 5 }, () => new Animated.Value(0))
   )
 
   useEffect(() => {
@@ -93,7 +96,6 @@ export default function SummaryScreen() {
       return
     }
     setWorkoutName(generateWorkoutName(exercises, startedAt))
-    // Reveal staggered 80ms par section
     const animations = sectionAnims.map((anim, i) =>
       Animated.timing(anim, {
         toValue: 1,
@@ -105,7 +107,7 @@ export default function SummaryScreen() {
     Animated.stagger(80, animations).start()
   }, [])
 
-  // ─── Métriques inline ────────────────────────────────────────────────────
+  // ─── Métriques ───────────────────────────────────────────────────────────
 
   const validSets = exercises.flatMap(ex =>
     ex.sets.filter(s => s.validated && s.weight_kg > 0 && s.reps > 0)
@@ -114,7 +116,36 @@ export default function SummaryScreen() {
   const nbSeries = validSets.length
   const nbExercices = exercises.length
 
-  // Barres musculaires depuis WorkoutContext uniquement
+  // PRs détectés (charge + série uniquement — flash visuels en session)
+  const prChargeDetected = validSets.filter(s => s.pr_charge !== null)
+  const prSerieDetected = validSets.filter(s => s.pr_serie !== null)
+  const hasPrs = prChargeDetected.length > 0 || prSerieDetected.length > 0
+
+  // PR charge : meilleur niveau détecté
+  const prChargeLevels: PrLevel[] = prChargeDetected.map(s => s.pr_charge)
+  const bestPrCharge: PrLevel = prChargeLevels.includes('gold')
+    ? 'gold'
+    : prChargeLevels.includes('silver')
+    ? 'silver'
+    : prChargeLevels.includes('bronze')
+    ? 'bronze'
+    : null
+
+  // PR série : meilleur niveau + meilleure valeur
+  const prSerieMax = prSerieDetected.reduce(
+    (best, s) => Math.max(best, Math.round(s.weight_kg * s.reps)),
+    0
+  )
+  const prSerieLevels: PrLevel[] = prSerieDetected.map(s => s.pr_serie)
+  const bestPrSerie: PrLevel = prSerieLevels.includes('gold')
+    ? 'gold'
+    : prSerieLevels.includes('silver')
+    ? 'silver'
+    : prSerieLevels.includes('bronze')
+    ? 'bronze'
+    : null
+
+  // Barres musculaires — primary vs secondary depuis muscle_group (approx)
   const muscleVolumes = exercises.reduce<Record<string, number>>((acc, ex) => {
     const key = ex.muscle_group ?? 'autre'
     const vol = ex.sets
@@ -125,6 +156,8 @@ export default function SummaryScreen() {
   }, {})
   const maxVol = Math.max(...Object.values(muscleVolumes), 1)
   const muscleEntries = Object.entries(muscleVolumes).sort((a, b) => b[1] - a[1])
+  // Primary = top muscle, secondary = rest
+  const primaryMuscle = muscleEntries[0]?.[0] ?? null
 
   // ─── computeAndSave ───────────────────────────────────────────────────────
 
@@ -180,7 +213,7 @@ export default function SummaryScreen() {
       .order('total_volume_kg', { ascending: false })
       .limit(3)
 
-    const topVols: number[] = ((topWorkouts ?? []) as any[]).map((w: any) => w.total_volume_kg ?? 0)
+    const topVols: number[] = ((topWorkouts ?? []) as { total_volume_kg: number }[]).map(w => w.total_volume_kg ?? 0)
     const top3seance = { pr1: topVols[0] ?? 0, pr2: topVols[1] ?? null, pr3: topVols[2] ?? null }
     const prSeance = computePodium(totalVolume, top3seance)
 
@@ -207,14 +240,14 @@ export default function SummaryScreen() {
         .gte('started_at', since90)
         .order('started_at', { ascending: false })
       if (recent?.length) {
-        nbSeances30j = (recent as any[]).filter((w: any) => w.started_at >= since30).length
+        nbSeances30j = (recent as { started_at: string }[]).filter(w => w.started_at >= since30).length
         frequenceHebdo = nbSeances30j / 4
-        const last = (recent as any[])[0]
+        const last = (recent as { started_at: string }[])[0]
         if (last?.started_at) {
           tempsDerniere = Math.round((Date.now() - new Date(last.started_at).getTime()) / 1000)
         }
         const weeks = new Set(
-          (recent as any[]).map((w: any) => {
+          (recent as { started_at: string }[]).map(w => {
             const d = new Date(w.started_at)
             return `${d.getFullYear()}-${Math.floor(
               (d.getTime() - new Date(d.getFullYear(), 0, 1).getTime()) / 604800000
@@ -225,7 +258,6 @@ export default function SummaryScreen() {
       }
     } catch (_) {}
 
-    // Volume 7j best-effort — requête simplifiée
     try {
       const since7 = new Date(Date.now() - 7 * 86400000).toISOString()
       const { data: wIds7j } = await supabase
@@ -233,10 +265,9 @@ export default function SummaryScreen() {
         .select('id, total_volume_kg')
         .eq('user_id', user.id)
         .gte('started_at', since7)
-      volume7j = ((wIds7j ?? []) as any[]).reduce((s: number, w: any) => s + (w.total_volume_kg ?? 0), 0)
+      volume7j = ((wIds7j ?? []) as { total_volume_kg: number }[]).reduce((s, w) => s + (w.total_volume_kg ?? 0), 0)
     } catch (_) {}
 
-    // Profil utilisateur
     let poidsCorps: number | null = null
     let ageAns: number | null = null
     try {
@@ -252,9 +283,9 @@ export default function SummaryScreen() {
         .order('measured_at', { ascending: false })
         .limit(1)
         .single()
-      if (bodyM) poidsCorps = (bodyM as any).weight_kg
-      if ((userProfile as any)?.date_naissance) {
-        const dob = new Date((userProfile as any).date_naissance)
+      if (bodyM) poidsCorps = (bodyM as { weight_kg: number }).weight_kg
+      if ((userProfile as { date_naissance?: string } | null)?.date_naissance) {
+        const dob = new Date((userProfile as { date_naissance: string }).date_naissance)
         ageAns = Math.floor((Date.now() - dob.getTime()) / (365.25 * 86400000))
       }
     } catch (_) {}
@@ -481,8 +512,7 @@ export default function SummaryScreen() {
     setSaving(true)
     setSaveError(null)
     try {
-      const { prSeance } = await computeAndSave()
-      setPrSeanceResult(prSeance)
+      await computeAndSave()
       storage.delete('workout_session_draft')
       resetWorkout()
       router.replace('/(tabs)/feed')
@@ -526,190 +556,163 @@ export default function SummaryScreen() {
     }
   }
 
-  // ─── Exercice row ─────────────────────────────────────────────────────────
-
-  function renderExerciseItem({ item: ex }: { item: WorkoutExercise }) {
-    const validatedSets = ex.sets.filter(s => s.validated && s.weight_kg > 0 && s.reps > 0)
-    if (validatedSets.length === 0) return null
-    const exVolume = validatedSets.reduce((s, set) => s + set.weight_kg * set.reps, 0)
-    const prExercice = computePodium(exVolume, ex.pr_top3_exercice)
-    return (
-      <View style={styles.exerciseRow}>
-        <View style={styles.exerciseHeader}>
-          <Text style={styles.exerciseName} numberOfLines={1}>{ex.name}</Text>
-          <PrBadge level={prExercice} type="exercice" />
-        </View>
-        <View style={styles.setsRow}>
-          {validatedSets.map((s, i) => (
-            <View key={i} style={styles.setChip}>
-              <Text style={styles.setChipText} allowFontScaling={false}>
-                {s.weight_kg}kg × {s.reps}
-              </Text>
-              {(s.pr_charge || s.pr_serie) && (
-                <View style={styles.setChipPrDot} />
-              )}
-            </View>
-          ))}
-        </View>
-      </View>
-    )
-  }
-
-  // ─── Rendu ────────────────────────────────────────────────────────────────
+  // ─── Animated style helper ───────────────────────────────────────────────
 
   const sectionStyle = (i: number) => ({
     opacity: sectionAnims[i],
     transform: [{ translateY: sectionAnims[i].interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
   })
 
+  // ─── Rendu ────────────────────────────────────────────────────────────────
+
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <Animated.View style={[styles.section, sectionStyle(0)]}>
-          <View style={styles.headerRow}>
-            <Text style={styles.headerTitle}>SÉANCE TERMINÉE</Text>
-            {prSeanceResult && <PrBadge level={prSeanceResult} type="seance" />}
-          </View>
+        {/* ── Header: date + titre ── */}
+        <Animated.View style={sectionStyle(0)}>
+          <Text style={[styles.dateCaption, { color: colors.textTertiary }]}>
+            {formatDate(startedAt)}
+          </Text>
+          <Text style={[styles.workoutTitle, { color: colors.textPrimary }]} numberOfLines={2}>
+            {workoutName}
+          </Text>
         </Animated.View>
 
-        {/* Nom */}
+        {/* ── Volume total ── */}
         <Animated.View style={[styles.section, sectionStyle(1)]}>
-          <Text style={styles.sectionLabel}>NOM</Text>
-          <TextInput
-            style={styles.nameInput}
-            value={workoutName}
-            onChangeText={setWorkoutName}
-            placeholder="Nom de la séance"
-            placeholderTextColor={dark.textTertiary}
-            maxLength={80}
-            returnKeyType="done"
-          />
-        </Animated.View>
-
-        {/* Stats hero */}
-        <Animated.View style={[styles.section, sectionStyle(2)]}>
-          <View style={styles.heroStats}>
-            <View style={styles.heroStat}>
-              <Text style={styles.heroValue} allowFontScaling={false}>
-                {Math.round(totalVolume).toLocaleString('fr-FR')}
-              </Text>
-              <Text style={styles.heroLabel}>VOLUME KG</Text>
-            </View>
-            <View style={styles.heroStatDivider} />
-            <View style={styles.heroStat}>
-              <Text style={styles.heroValue} allowFontScaling={false}>
+          <Text style={[styles.sectionLabel, { color: colors.textTertiary }]}>VOLUME TOTAL</Text>
+          <View style={styles.heroRow}>
+            <Text style={[styles.heroValue, { color: colors.accent }]} allowFontScaling={false}>
+              {Math.round(totalVolume).toLocaleString('fr-FR')}
+            </Text>
+            <Text style={[styles.heroUnit, { color: colors.accent }]}> kg</Text>
+          </View>
+          {/* Chips: durée · sets · exercices */}
+          <View style={styles.chipsRow}>
+            <View style={[styles.chip, { backgroundColor: colors.backgroundSecondary }]}>
+              <Text style={[styles.chipText, { color: colors.textSecondary }]} allowFontScaling={false}>
                 {formatDuration(elapsedSeconds)}
               </Text>
-              <Text style={styles.heroLabel}>DURÉE</Text>
             </View>
-            <View style={styles.heroStatDivider} />
-            <View style={styles.heroStat}>
-              <Text style={styles.heroValue} allowFontScaling={false}>
-                {nbSeries}
+            <View style={[styles.chip, { backgroundColor: colors.backgroundSecondary }]}>
+              <Text style={[styles.chipText, { color: colors.textSecondary }]} allowFontScaling={false}>
+                {nbSeries} SETS
               </Text>
-              <Text style={styles.heroLabel}>SETS</Text>
+            </View>
+            <View style={[styles.chip, { backgroundColor: colors.backgroundSecondary }]}>
+              <Text style={[styles.chipText, { color: colors.textSecondary }]} allowFontScaling={false}>
+                {nbExercices} EXERCICE{nbExercices > 1 ? 'S' : ''}
+              </Text>
             </View>
           </View>
         </Animated.View>
 
-        {/* Exercices */}
-        <Animated.View style={[styles.section, sectionStyle(3)]}>
-          <Text style={styles.sectionLabel}>EXERCICES</Text>
-          <FlatList
-            data={exercises}
-            keyExtractor={ex => ex.exercise_id}
-            renderItem={renderExerciseItem}
-            scrollEnabled={false}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-          />
-        </Animated.View>
-
-        {/* Muscles */}
-        {muscleEntries.length > 0 && (
-          <Animated.View style={[styles.section, sectionStyle(4)]}>
-            <Text style={styles.sectionLabel}>MUSCLES</Text>
-            {muscleEntries.map(([muscle, vol], i) => (
-              <View key={muscle} style={styles.muscleRow}>
-                <Text style={styles.muscleLabel} numberOfLines={1}>
-                  {muscle.charAt(0).toUpperCase() + muscle.slice(1).replace(/_/g, ' ')}
-                </Text>
-                <View style={styles.muscleBarBg}>
-                  <View
-                    style={[
-                      styles.muscleBarFill,
-                      {
-                        width: `${(vol / maxVol) * 100}%` as any,
-                        backgroundColor: i === 0 ? dark.accent : dark.prGold,
-                      },
-                    ]}
-                  />
-                </View>
-                <Text style={styles.muscleVolText} allowFontScaling={false}>
-                  {Math.round(vol).toLocaleString('fr-FR')}
-                </Text>
-              </View>
-            ))}
-          </Animated.View>
-        )}
-
-        {/* Visibilité + Photo */}
-        <Animated.View style={[styles.section, sectionStyle(5)]}>
-          <View style={styles.visibilityRow}>
-            <View style={styles.visibilityText}>
-              <Text style={styles.visibilityTitle}>Partager publiquement</Text>
-              <Text style={styles.visibilitySubtitle}>Visible dans le feed</Text>
-            </View>
-            <Switch
-              value={isPublic}
-              onValueChange={setIsPublic}
-              trackColor={{ false: dark.switchBackground, true: dark.accent }}
-              thumbColor={dark.textPrimary}
-              ios_backgroundColor={dark.switchBackground}
-            />
-          </View>
-
-          <TouchableOpacity style={styles.photoButton} onPress={handlePickPhoto} activeOpacity={0.7}>
-            {photoUri ? (
-              <View style={styles.photoPreviewRow}>
-                <Camera size={16} color={dark.accent} />
-                <Text style={styles.photoButtonText}>Photo ajoutée</Text>
-              </View>
-            ) : (
-              <View style={styles.photoPreviewRow}>
-                <Camera size={16} color={dark.textSecondary} />
-                <Text style={[styles.photoButtonText, { color: dark.textSecondary }]}>
-                  Ajouter une photo (optionnel)
+        {/* ── PRs détectés ── */}
+        {hasPrs && (
+          <Animated.View style={[styles.section, sectionStyle(2)]}>
+            <Text style={[styles.sectionLabel, { color: colors.textTertiary }]}>PRs DÉTECTÉS</Text>
+            {bestPrCharge !== null && (
+              <View style={[styles.prRow, { backgroundColor: colors.backgroundSecondary }]}>
+                <Zap size={16} color={colors.accent} />
+                <Text style={[styles.prText, { color: colors.textPrimary }]}>
+                  PR Charge
+                  {prChargeDetected.length > 0
+                    ? ` · +${Math.round(prChargeDetected.reduce((m, s) => Math.max(m, s.weight_kg), 0))} kg`
+                    : ''}
                 </Text>
               </View>
             )}
-          </TouchableOpacity>
+            {bestPrSerie !== null && prSerieMax > 0 && (
+              <View style={[styles.prRow, { backgroundColor: colors.backgroundSecondary, marginTop: spacing.s2 }]}>
+                <Flame size={16} color={colors.accent} />
+                <Text style={[styles.prText, { color: colors.textPrimary }]}>
+                  PR Série · {prSerieMax} pts
+                </Text>
+              </View>
+            )}
+          </Animated.View>
+        )}
+
+        {/* ── Groupes musculaires ── */}
+        {muscleEntries.length > 0 && (
+          <Animated.View style={[styles.section, sectionStyle(3)]}>
+            <Text style={[styles.sectionLabel, { color: colors.textTertiary }]}>GROUPES MUSCULAIRES</Text>
+            {/* Légende */}
+            <View style={styles.legendRow}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.accent }]} />
+                <Text style={[styles.legendText, { color: colors.textSecondary }]}>Primaire</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.textTertiary }]} />
+                <Text style={[styles.legendText, { color: colors.textSecondary }]}>Secondaire</Text>
+              </View>
+            </View>
+            {/* Barres */}
+            {muscleEntries.map(([muscle, vol]) => {
+              const pct = vol / maxVol
+              const isPrimary = muscle === primaryMuscle
+              const barColor = isPrimary ? colors.accent : colors.textSecondary
+              return (
+                <View key={muscle} style={styles.muscleRow}>
+                  <Text style={[styles.muscleLabel, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {muscleLabelFr(muscle)}
+                  </Text>
+                  <View style={[styles.muscleBarBg, { backgroundColor: colors.backgroundTertiary }]}>
+                    <View
+                      style={[
+                        styles.muscleBarFill,
+                        { width: `${Math.round(pct * 100)}%` as `${number}%`, backgroundColor: barColor },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.musclePct, { color: colors.textSecondary }]} allowFontScaling={false}>
+                    {Math.round(pct * 100)}%
+                  </Text>
+                </View>
+              )
+            })}
+          </Animated.View>
+        )}
+
+        {/* ── Partager ── */}
+        <Animated.View style={[styles.section, sectionStyle(4)]}>
+          <View style={[styles.shareRow, { backgroundColor: colors.backgroundSecondary }]}>
+            <Text style={[styles.shareLabel, { color: colors.textPrimary }]}>Partager</Text>
+            <Switch
+              value={isPublic}
+              onValueChange={setIsPublic}
+              trackColor={{ false: colors.switchBackground, true: colors.accent }}
+              thumbColor={colors.textPrimary}
+              ios_backgroundColor={colors.switchBackground}
+            />
+          </View>
         </Animated.View>
 
-        {/* Erreur */}
+        {/* ── Erreur ── */}
         {saveError && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{saveError}</Text>
+          <View style={[styles.errorBox, { backgroundColor: `${colors.error}20`, borderColor: `${colors.error}40` }]}>
+            <Text style={[styles.errorText, { color: colors.error }]}>{saveError}</Text>
           </View>
         )}
 
-        {/* Footer */}
+        {/* ── Bouton sauvegarder ── */}
         <View style={styles.footer}>
           <TouchableOpacity
-            style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+            style={[styles.saveButton, { backgroundColor: colors.accent }, saving && styles.saveButtonDisabled]}
             onPress={handleSave}
             disabled={saving}
             activeOpacity={0.85}
           >
             {saving ? (
-              <ActivityIndicator color={dark.background} />
+              <ActivityIndicator color={colors.background} />
             ) : (
-              <Text style={styles.saveButtonText}>SAUVEGARDER</Text>
+              <Text style={[styles.saveButtonText, { color: colors.background }]}>SAUVEGARDER</Text>
             )}
           </TouchableOpacity>
 
@@ -719,7 +722,7 @@ export default function SummaryScreen() {
             disabled={saving}
             activeOpacity={0.7}
           >
-            <Text style={styles.cancelButtonText}>ANNULER</Text>
+            <Text style={[styles.cancelButtonText, { color: colors.error }]}>ANNULER</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -732,201 +735,161 @@ export default function SummaryScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: dark.background,
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: spacing.s4,
-    paddingBottom: spacing.s10,
+    paddingTop: spacing.s6,
+    paddingBottom: spacing.s12,
   },
+  // Header
+  dateCaption: {
+    ...typography.caption,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    marginBottom: spacing.s2,
+  },
+  workoutTitle: {
+    ...typography.title,
+    marginBottom: spacing.s1,
+  },
+  // Sections
   section: {
     marginTop: spacing.s6,
   },
-  headerRow: {
+  sectionLabel: {
+    ...typography.caption,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    marginBottom: spacing.s3,
+  },
+  // Volume hero
+  heroRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: spacing.s4,
+  },
+  heroValue: {
+    ...typography.hero,
+    fontVariant: ['tabular-nums'],
+  },
+  heroUnit: {
+    fontSize: 28,
+    fontFamily: typography.hero.fontFamily,
+    letterSpacing: -0.5,
+    lineHeight: 60,
+    marginBottom: 4,
+  },
+  // Chips durée/sets/exercices
+  chipsRow: {
+    flexDirection: 'row',
+    gap: spacing.s2,
+    flexWrap: 'wrap',
+  },
+  chip: {
+    paddingHorizontal: spacing.s3,
+    paddingVertical: spacing.s2,
+    borderRadius: radius.sm,
+  },
+  chipText: {
+    ...typography.caption,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    fontVariant: ['tabular-nums'],
+  },
+  // PR rows
+  prRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.s3,
-  },
-  headerTitle: {
-    ...typography.title,
-    color: dark.textPrimary,
-  },
-  sectionLabel: {
-    ...typography.caption,
-    color: dark.textTertiary,
-    textTransform: 'uppercase',
-    marginBottom: spacing.s2,
-  },
-  nameInput: {
-    backgroundColor: dark.backgroundSecondary,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.s4,
+    paddingHorizontal: spacing.s3,
     paddingVertical: spacing.s3,
-    ...typography.subtitle,
-    color: dark.textPrimary,
-    borderWidth: 1,
-    borderColor: dark.border,
+    borderRadius: radius.md,
     minHeight: touchTarget.comfort,
   },
-  heroStats: {
-    flexDirection: 'row',
-    backgroundColor: dark.backgroundSecondary,
-    borderRadius: radius.lg,
-    paddingVertical: spacing.s5,
-  },
-  heroStat: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  heroStatDivider: {
-    width: 1,
-    backgroundColor: dark.separator,
-    marginVertical: spacing.s2,
-  },
-  heroValue: {
-    ...typography.title,
-    color: dark.textPrimary,
-    fontVariant: ['tabular-nums'],
-  },
-  heroLabel: {
-    ...typography.caption,
-    color: dark.textTertiary,
-    textTransform: 'uppercase',
-    marginTop: spacing.s1,
-  },
-  exerciseRow: {
-    paddingVertical: spacing.s3,
-  },
-  exerciseHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.s2,
-    marginBottom: spacing.s2,
-  },
-  exerciseName: {
+  prText: {
     ...typography.body,
-    color: dark.textPrimary,
-    flex: 1,
     fontWeight: '600',
+    flex: 1,
   },
-  setsRow: {
+  // Muscle bars
+  legendRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.s2,
+    gap: spacing.s4,
+    marginBottom: spacing.s3,
   },
-  setChip: {
-    backgroundColor: dark.backgroundTertiary,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.s3,
-    paddingVertical: spacing.s1,
+  legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.s1,
   },
-  setChipText: {
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: radius.full,
+  },
+  legendText: {
     ...typography.caption,
-    color: dark.textSecondary,
-    fontVariant: ['tabular-nums'],
-  },
-  setChipPrDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 9999,
-    backgroundColor: dark.accent,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: dark.separator,
   },
   muscleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.s3,
-    marginBottom: spacing.s2,
+    marginBottom: spacing.s3,
   },
   muscleLabel: {
-    ...typography.caption,
-    color: dark.textSecondary,
-    width: 80,
+    fontSize: 14,
+    fontFamily: typography.body.fontFamily,
+    width: 88,
   },
   muscleBarBg: {
     flex: 1,
-    height: 6,
-    backgroundColor: dark.backgroundTertiary,
-    borderRadius: radius.full,
+    height: 4,
+    borderRadius: 2,
     overflow: 'hidden',
   },
   muscleBarFill: {
     height: '100%',
-    borderRadius: radius.full,
+    borderRadius: 2,
   },
-  muscleVolText: {
+  musclePct: {
     ...typography.caption,
-    color: dark.textTertiary,
-    width: 52,
+    width: 36,
     textAlign: 'right',
     fontVariant: ['tabular-nums'],
   },
-  visibilityRow: {
+  // Partager
+  shareRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: dark.backgroundSecondary,
-    borderRadius: radius.md,
     paddingHorizontal: spacing.s4,
     paddingVertical: spacing.s3,
-    marginBottom: spacing.s3,
+    borderRadius: radius.md,
+    minHeight: touchTarget.comfort,
   },
-  visibilityText: {
-    flex: 1,
-  },
-  visibilityTitle: {
+  shareLabel: {
     ...typography.body,
-    color: dark.textPrimary,
     fontWeight: '600',
   },
-  visibilitySubtitle: {
-    ...typography.caption,
-    color: dark.textTertiary,
-    marginTop: 2,
-  },
-  photoButton: {
-    backgroundColor: dark.backgroundSecondary,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.s4,
-    paddingVertical: spacing.s3,
-    minHeight: touchTarget.comfort,
-    justifyContent: 'center',
-  },
-  photoPreviewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.s2,
-  },
-  photoButtonText: {
-    ...typography.body,
-    color: dark.accent,
-  },
+  // Erreur
   errorBox: {
     marginTop: spacing.s4,
-    backgroundColor: `${dark.error}20`,
     borderRadius: radius.md,
     padding: spacing.s4,
     borderWidth: 1,
-    borderColor: `${dark.error}40`,
   },
   errorText: {
     ...typography.caption,
-    color: dark.error,
   },
+  // Footer
   footer: {
     marginTop: spacing.s8,
   },
   saveButton: {
     height: touchTarget.hero,
-    backgroundColor: dark.accent,
     borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
@@ -936,9 +899,9 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     ...typography.subtitle,
-    color: dark.background,
     fontWeight: '900',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   cancelButton: {
     height: touchTarget.min,
@@ -948,21 +911,6 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     ...typography.body,
-    color: dark.error,
     fontWeight: '600',
-  },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: 1,
-    borderRadius: radius.full,
-    paddingHorizontal: spacing.s2,
-    paddingVertical: 2,
-  },
-  badgeText: {
-    ...typography.caption,
-    fontWeight: '700',
-    letterSpacing: 0.6,
   },
 })

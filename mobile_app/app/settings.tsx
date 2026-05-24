@@ -261,9 +261,8 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     headerTitle: {
       flex: 1,
-      ...typography.body,
-      fontFamily: 'Barlow_500Medium',
-      color: colors.textSecondary,
+      ...typography.subtitle,
+      color: colors.textPrimary,
       textAlign: 'center',
     },
     headerRight: {

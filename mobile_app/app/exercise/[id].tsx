@@ -11,11 +11,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Zap, Flame } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
-import { spacing, radius, typography } from '@/constants/theme'
+import { spacing, radius, typography, font } from '@/constants/theme'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type PrLevel = 'gold' | 'silver' | 'bronze' | null
 type MuscleRole = 'primary' | 'secondary' | 'stabilizer'
 
 interface Exercise {
@@ -42,37 +41,27 @@ interface RecordStats {
 interface RecentSession {
   workoutId: string
   startedAt: string
+  nSets: number
   maxWeight: number | null
-  totalVolume: number | null
-  delta: number | null // vs session précédente
+  delta: number | null // kg vs session précédente
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const EQUIPMENT_LABELS: Record<string, string> = {
-  barbell: 'Barre',
-  dumbbell: 'Haltères',
-  machine: 'Machine',
-  cable: 'Poulie',
-  bodyweight: 'Poids du corps',
-  kettlebell: 'Kettlebell',
-  resistance_band: 'Élastique',
-}
-
 const MUSCLE_LABEL_MAP: Record<string, string> = {
-  grand_pectoral: 'Pectoraux',
-  deltoide: 'Épaules',
+  grand_pectoral: 'Grand pectoral',
+  deltoide: 'Deltoïde',
   grand_dorsal: 'Grand dorsal',
   trapeze: 'Trapèze',
   biceps: 'Biceps',
   triceps: 'Triceps',
   quadriceps: 'Quadriceps',
   ischio_jambiers: 'Ischio-jambiers',
-  fessier_maximus: 'Fessiers',
-  fessier_median: 'Fessiers',
-  fessier_minimus: 'Fessiers',
+  fessier_maximus: 'Fessier maximus',
+  fessier_median: 'Fessier médian',
+  fessier_minimus: 'Fessier minimus',
   mollets: 'Mollets',
-  abdominaux: 'Core',
+  abdominaux: 'Abdominaux',
   grand_rond: 'Grand rond',
   rhomboide: 'Rhomboïdes',
   erecteurs_rachis: 'Érecteurs rachis',
@@ -83,6 +72,48 @@ const MUSCLE_LABEL_MAP: Record<string, string> = {
   iliopsoas: 'Iliopsoas',
   infra_epineux: 'Infra-épineux',
   serratus_anterieur: 'Serratus ant.',
+}
+
+const FASCICLE_LABEL_MAP: Record<string, string> = {
+  faisceau_claviculaire: 'faisceau claviculaire',
+  faisceau_sternal: 'faisceau sternal',
+  faisceau_abdominal: 'faisceau abdominal',
+  faisceau_anterieur: 'faisceau antérieur',
+  faisceau_median: 'faisceau médian',
+  faisceau_posterieur: 'faisceau postérieur',
+  faisceau_inferieur: 'faisceau inférieur',
+  faisceau_superieur: 'faisceau supérieur',
+  faisceau_moyen: 'faisceau moyen',
+  chef_long: 'chef long',
+  chef_court: 'chef court',
+  chef_lateral: 'chef latéral',
+  chef_medial: 'chef médial',
+  brachial: 'brachial',
+  rectus_femoris: 'rectus femoris',
+  vastus_lateralis: 'vastus lateralis',
+  vastus_medialis: 'vastus medialis',
+  biceps_femoral: 'biceps fémoral',
+  semi_membraneux: 'semi-membraneux',
+  semi_tendineux: 'semi-tendineux',
+  gastrocnemien: 'gastrocnémien',
+  gastrocnemien_lateral: 'gastrocnémien latéral',
+  gastrocnemien_medial: 'gastrocnémien médial',
+  soleus: 'soléaire',
+  obliques_externes: 'obliques ext.',
+  obliques_internes: 'obliques int.',
+  rectus_abdominis: 'rectus abdominis',
+  transverse: 'transverse',
+  extenseurs_poignet: 'extenseurs poignet',
+  flechisseurs_doigts: 'fléchisseurs doigts',
+  flechisseurs_poignet: 'fléchisseurs poignet',
+  palmaire_long: 'palmaire long',
+}
+
+function muscleName(m: MuscleMapping): string {
+  const base = MUSCLE_LABEL_MAP[m.muscle] ?? m.muscle
+  if (!m.fascicle) return base
+  const fascLabel = FASCICLE_LABEL_MAP[m.fascicle] ?? m.fascicle.replace(/_/g, ' ')
+  return `${base} — ${fascLabel}`
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -173,23 +204,34 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
       .limit(4)
 
     if (weData && weData.length > 0) {
-      const sessions: RecentSession[] = weData.slice(0, 3).map((we, idx) => {
+      type WeSessionRow = {
+        workout_id: string
+        workouts: { started_at: string; user_id: string }[] | { started_at: string; user_id: string }
+        workout_sets: Array<{ weight_kg: number | null; reps: number | null }> | null
+      }
+      const typedWeData = weData as WeSessionRow[]
+      const sessions: RecentSession[] = typedWeData.slice(0, 3).map((we, idx) => {
         const sets = (we.workout_sets ?? []) as Array<{ weight_kg: number | null; reps: number | null }>
         const maxW = Math.max(...sets.map(s => s.weight_kg ?? 0), 0)
-        const vol = sets.reduce((sum, s) => sum + (s.weight_kg ?? 0) * (s.reps ?? 0), 0)
+        const nS = sets.length
 
         let delta: number | null = null
-        if (idx < weData.length - 1) {
-          const prevSets = (weData[idx + 1].workout_sets ?? []) as Array<{ weight_kg: number | null; reps: number | null }>
-          const prevVol = prevSets.reduce((sum, s) => sum + (s.weight_kg ?? 0) * (s.reps ?? 0), 0)
-          delta = prevVol > 0 ? ((vol - prevVol) / prevVol) * 100 : null
+        if (idx < typedWeData.length - 1) {
+          const prevSets = (typedWeData[idx + 1].workout_sets ?? []) as Array<{ weight_kg: number | null; reps: number | null }>
+          const prevMaxW = Math.max(...prevSets.map(s => s.weight_kg ?? 0), 0)
+          if (prevMaxW > 0 && maxW > 0) {
+            delta = maxW - prevMaxW
+          }
         }
 
+        const workoutsRaw = we.workouts
+        const workoutsObj = Array.isArray(workoutsRaw) ? workoutsRaw[0] : workoutsRaw
+
         return {
-          workoutId: we.workout_id as string,
-          startedAt: (we.workouts as { started_at: string }).started_at,
+          workoutId: we.workout_id,
+          startedAt: workoutsObj.started_at,
+          nSets: nS,
           maxWeight: maxW > 0 ? maxW : null,
-          totalVolume: vol > 0 ? vol : null,
           delta,
         }
       })
@@ -225,10 +267,6 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
   const secondaryMuscles = muscles.filter(m => m.role === 'secondary')
   const stabilizerMuscles = muscles.filter(m => m.role === 'stabilizer')
 
-  const equipLabel = exercise.equipment_type
-    ? (EQUIPMENT_LABELS[exercise.equipment_type] ?? exercise.equipment_type)
-    : null
-
   return (
     <View style={s.container}>
       <ScrollView
@@ -250,24 +288,7 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
 
           <Text style={s.headerTitle} numberOfLines={1}>{exercise.name_fr}</Text>
 
-          <View style={s.backBtn} />
-        </View>
-
-        {/* ── Illustration placeholder ── */}
-        <View style={s.illustration}>
-          <Text style={s.illustrationText}>{exercise.muscle_group ?? '—'}</Text>
-        </View>
-
-        {/* ── Metadata chips ── */}
-        <View style={s.chipsRow}>
-          {equipLabel && (
-            <View style={s.chip}>
-              <Text style={s.chipText}>{equipLabel}</Text>
-            </View>
-          )}
-          <View style={s.chip}>
-            <Text style={s.chipText}>{exercise.is_compound ? 'Polyarticulaire' : 'Isolation'}</Text>
-          </View>
+          <View style={s.backBtnPlaceholder} />
         </View>
 
         {/* ── Muscles ── */}
@@ -281,10 +302,13 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
                 {primaryMuscles.map((m, idx) => (
                   <View key={idx} style={s.muscleRow}>
                     <View style={[s.muscleDot, { backgroundColor: colors.accent }]} />
-                    <Text style={[s.muscleName, { color: colors.textPrimary }]}>
-                      {MUSCLE_LABEL_MAP[m.muscle] ?? m.muscle}
+                    <Text style={[s.muscleName, { color: colors.textPrimary }]} numberOfLines={1}>
+                      {muscleName(m)}
                     </Text>
-                    <Text style={[s.musclePct, { color: colors.accent }]} accessibilityLabel={`${m.activation_pct} pourcent`}>
+                    <Text
+                      style={[s.musclePct, { color: colors.accent }]}
+                      accessibilityLabel={`${m.activation_pct} pourcent`}
+                    >
                       {m.activation_pct}%
                     </Text>
                   </View>
@@ -298,10 +322,13 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
                 {secondaryMuscles.map((m, idx) => (
                   <View key={idx} style={s.muscleRow}>
                     <View style={[s.muscleDot, { backgroundColor: colors.prGold }]} />
-                    <Text style={[s.muscleName, { color: colors.textSecondary }]}>
-                      {MUSCLE_LABEL_MAP[m.muscle] ?? m.muscle}
+                    <Text style={[s.muscleName, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {muscleName(m)}
                     </Text>
-                    <Text style={[s.musclePct, { color: colors.prGold }]} accessibilityLabel={`${m.activation_pct} pourcent`}>
+                    <Text
+                      style={[s.musclePct, { color: colors.prGold }]}
+                      accessibilityLabel={`${m.activation_pct} pourcent`}
+                    >
                       {m.activation_pct}%
                     </Text>
                   </View>
@@ -314,11 +341,14 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
                 <Text style={s.muscleGroupLabel}>STABILIZER</Text>
                 {stabilizerMuscles.map((m, idx) => (
                   <View key={idx} style={s.muscleRow}>
-                    <View style={[s.muscleDot, { backgroundColor: colors.border }]} />
-                    <Text style={[s.muscleName, { color: colors.textTertiary }]}>
-                      {MUSCLE_LABEL_MAP[m.muscle] ?? m.muscle}
+                    <View style={[s.muscleDot, { backgroundColor: colors.textTertiary }]} />
+                    <Text style={[s.muscleName, { color: colors.textTertiary }]} numberOfLines={1}>
+                      {muscleName(m)}
                     </Text>
-                    <Text style={[s.musclePct, { color: colors.textTertiary }]} accessibilityLabel={`${m.activation_pct} pourcent`}>
+                    <Text
+                      style={[s.musclePct, { color: colors.textTertiary }]}
+                      accessibilityLabel={`${m.activation_pct} pourcent`}
+                    >
                       {m.activation_pct}%
                     </Text>
                   </View>
@@ -328,41 +358,31 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
           </View>
         )}
 
-        {/* ── Records ── */}
+        {/* ── Mes Records ── */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>MES RECORDS</Text>
 
           <View style={s.recordsRow}>
             {/* Charge max */}
             <View style={s.recordCard}>
-              <View style={s.recordIconRow}>
-                <Zap size={16} color={colors.prGold} />
-                <Text style={[s.recordCardLabel, { color: colors.prGold }]}>CHARGE MAX</Text>
-              </View>
+              <Zap size={20} color={colors.accent} style={s.recordIcon} />
+              <Text style={s.recordCardLabel}>CHARGE MAX</Text>
               <Text style={s.recordValue} accessibilityLabel={records.maxCharge != null ? `${records.maxCharge} kilogrammes` : 'Aucun record'}>
-                {records.maxCharge != null ? `${records.maxCharge}` : '—'}
+                {records.maxCharge != null ? `${records.maxCharge} kg` : '—'}
               </Text>
-              {records.maxCharge != null && (
-                <Text style={s.recordUnit}>kg</Text>
-              )}
             </View>
 
             {/* Meilleure série */}
             <View style={s.recordCard}>
-              <View style={s.recordIconRow}>
-                <Flame size={16} color={colors.accent} />
-                <Text style={[s.recordCardLabel, { color: colors.accent }]}>MEILLEURE SÉRIE</Text>
-              </View>
+              <Flame size={20} color={colors.accent} style={s.recordIcon} />
+              <Text style={s.recordCardLabel}>MEILLEURE SÉRIE</Text>
               <Text style={s.recordValue} accessibilityLabel={
                 records.maxSerie != null
                   ? `${records.maxSerie.weight} kilogrammes ${records.maxSerie.reps} répétitions`
                   : 'Aucun record'
               }>
-                {records.maxSerie != null ? `${records.maxSerie.weight}` : '—'}
+                {records.maxSerie != null ? `${records.maxSerie.weight} × ${records.maxSerie.reps}` : '—'}
               </Text>
-              {records.maxSerie != null && (
-                <Text style={s.recordUnit}>kg × {records.maxSerie.reps}</Text>
-              )}
             </View>
           </View>
         </View>
@@ -372,48 +392,52 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
           <View style={s.section}>
             <Text style={s.sectionTitle}>HISTORIQUE</Text>
 
-            {recentSessions.map((session, idx) => {
-              const dateStr = new Date(session.startedAt).toLocaleDateString('fr-FR', {
-                day: 'numeric',
-                month: 'short',
-              })
-              const hasDelta = session.delta != null
-              const deltaPositive = (session.delta ?? 0) > 0
-              const deltaColor = hasDelta
-                ? (deltaPositive ? colors.success : colors.error)
-                : colors.textTertiary
+            <View style={s.historyCard}>
+              {recentSessions.map((session, idx) => {
+                const dateStr = new Date(session.startedAt).toLocaleDateString('fr-FR', {
+                  day: 'numeric',
+                  month: 'short',
+                })
+                const isLast = idx === recentSessions.length - 1
+                const hasDelta = session.delta != null
+                const deltaPositive = (session.delta ?? 0) > 0
+                const deltaZero = (session.delta ?? 0) === 0
+                const deltaColor = !hasDelta || deltaZero
+                  ? colors.textTertiary
+                  : deltaPositive ? colors.success : colors.error
 
-              return (
-                <Pressable
-                  key={idx}
-                  style={({ pressed }) => [s.historyRow, pressed && { opacity: 0.7 }]}
-                  onPress={() => router.push(`/history/${session.workoutId}`)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Séance du ${dateStr}`}
-                >
-                  <Text style={s.historyDate}>{dateStr}</Text>
+                const deltaText = !hasDelta || deltaZero
+                  ? '—'
+                  : deltaPositive
+                    ? `+${session.delta!} kg`
+                    : `${session.delta!} kg`
 
-                  <View style={s.historyStats}>
-                    {session.maxWeight != null && (
-                      <Text style={s.historyWeight} accessibilityLabel={`${session.maxWeight} kilogrammes`}>
-                        {session.maxWeight} kg
-                      </Text>
-                    )}
-                    {session.totalVolume != null && (
-                      <Text style={s.historyVolume} accessibilityLabel={`${Math.round(session.totalVolume)} kilogrammes volume`}>
-                        {Math.round(session.totalVolume)} kg vol.
-                      </Text>
-                    )}
-                  </View>
+                return (
+                  <Pressable
+                    key={idx}
+                    style={({ pressed }) => [
+                      s.historyRow,
+                      !isLast && s.historyRowBorder,
+                      pressed && { opacity: 0.7 },
+                    ]}
+                    onPress={() => router.push(`/history/${session.workoutId}`)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Séance du ${dateStr}`}
+                  >
+                    <Text style={s.historyDate}>{dateStr}</Text>
 
-                  {hasDelta && (
-                    <Text style={[s.historyDelta, { color: deltaColor }]} accessibilityLabel={`${deltaPositive ? '+' : ''}${Math.round(session.delta!)} pourcent`}>
-                      {deltaPositive ? '+' : ''}{Math.round(session.delta!)}%
+                    <Text style={s.historyStats} numberOfLines={1}>
+                      {session.nSets} série{session.nSets > 1 ? 's' : ''}
+                      {session.maxWeight != null ? ` · ${session.maxWeight} kg max` : ''}
                     </Text>
-                  )}
-                </Pressable>
-              )
-            })}
+
+                    <Text style={[s.historyDelta, { color: deltaColor }]}>
+                      {deltaText}
+                    </Text>
+                  </Pressable>
+                )
+              })}
+            </View>
           </View>
         )}
       </ScrollView>
@@ -457,61 +481,28 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    backBtnPlaceholder: {
+      width: 44,
+      height: 44,
+    },
     headerTitle: {
       ...typography.subtitle,
+      fontFamily: font.bold,
       color: colors.textPrimary,
       flex: 1,
       textAlign: 'center',
     },
 
-    // Illustration
-    illustration: {
-      marginHorizontal: spacing.s4,
-      height: 200,
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: radius.lg,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: spacing.s4,
-    },
-    illustrationText: {
-      ...typography.caption,
-      color: colors.textTertiary,
-      textTransform: 'uppercase',
-      letterSpacing: 1.5,
-    },
-
-    // Chips
-    chipsRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.s2,
-      paddingHorizontal: spacing.s4,
-      marginBottom: spacing.s6,
-    },
-    chip: {
-      height: 28,
-      paddingHorizontal: spacing.s3,
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: radius.full,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    chipText: {
-      ...typography.caption,
-      color: colors.textSecondary,
-    },
-
     // Section
     section: {
       paddingHorizontal: spacing.s4,
-      marginBottom: spacing.s8,
+      marginBottom: spacing.s6,
     },
     sectionTitle: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 1.2,
+      fontSize: 18,
+      fontFamily: font.bold,
+      color: colors.textPrimary,
+      letterSpacing: -0.2,
       marginBottom: spacing.s4,
     },
 
@@ -520,8 +511,8 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       marginBottom: spacing.s4,
     },
     muscleGroupLabel: {
-      fontSize: 10,
-      fontFamily: 'Barlow_700Bold',
+      fontSize: 11,
+      fontFamily: font.bold,
       color: colors.textTertiary,
       letterSpacing: 1.5,
       textTransform: 'uppercase',
@@ -543,9 +534,10 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flex: 1,
     },
     musclePct: {
-      ...typography.mono,
+      fontFamily: font.mono,
       fontVariant: ['tabular-nums'],
       fontSize: 13,
+      fontWeight: '600',
     },
 
     // Records
@@ -559,66 +551,56 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderRadius: radius.md,
       padding: spacing.s4,
     },
-    recordIconRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.s1,
+    recordIcon: {
       marginBottom: spacing.s2,
     },
     recordCardLabel: {
       fontSize: 10,
-      fontFamily: 'Barlow_700Bold',
+      fontFamily: font.bold,
+      color: colors.textTertiary,
       letterSpacing: 1,
       textTransform: 'uppercase',
+      marginBottom: spacing.s2,
     },
     recordValue: {
-      fontSize: 32,
-      fontFamily: 'Barlow_800ExtraBold',
+      fontSize: 28,
+      fontFamily: font.extraBold,
       color: colors.textPrimary,
-      letterSpacing: -1,
+      letterSpacing: -0.8,
       fontVariant: ['tabular-nums'],
-    },
-    recordUnit: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      marginTop: spacing.s1,
     },
 
     // History
+    historyCard: {
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: radius.md,
+      overflow: 'hidden',
+    },
     historyRow: {
       flexDirection: 'row',
       alignItems: 'center',
       paddingVertical: spacing.s3,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.separator,
+      paddingHorizontal: spacing.s4,
       minHeight: 52,
     },
+    historyRowBorder: {
+      borderBottomWidth: 1,
+      borderBottomColor: colors.separator,
+    },
     historyDate: {
-      ...typography.body,
-      color: colors.textSecondary,
-      width: 72,
+      ...typography.caption,
+      color: colors.textTertiary,
+      width: 56,
     },
     historyStats: {
-      flex: 1,
-      flexDirection: 'row',
-      gap: spacing.s3,
-    },
-    historyWeight: {
-      ...typography.mono,
-      fontVariant: ['tabular-nums'],
-      color: colors.textPrimary,
-    },
-    historyVolume: {
-      ...typography.mono,
-      fontVariant: ['tabular-nums'],
+      ...typography.body,
       color: colors.textSecondary,
-      fontSize: 12,
+      flex: 1,
     },
     historyDelta: {
-      ...typography.mono,
-      fontVariant: ['tabular-nums'],
+      fontFamily: font.bold,
       fontSize: 13,
-      fontFamily: 'Barlow_700Bold',
+      fontVariant: ['tabular-nums'],
     },
   })
 }

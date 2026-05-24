@@ -8,6 +8,14 @@
 - 3D Myo : `three` 0.184 + `@types/three` + `expo-gl` 16 (installés via `--legacy-peer-deps`)
 - Git : `main` stable · `dev` travail · `feat/xxx` par feature
 
+## Tests (installé 24/05/2026)
+- `jest@29.7` + `jest-expo@56` + `@types/jest` (avec `--legacy-peer-deps`)
+- Config dans `mobile_app/package.json` section `"jest"` (preset `jest-expo`)
+- Scripts : `npm test` · `npm run test:watch` · `npm run test:coverage`
+- Dossier : `mobile_app/__tests__/` — 120 tests, tous verts
+- Règle : tests logique pure uniquement — pas de render, pas de @testing-library
+- Mocks : Supabase, AsyncStorage, MMKV, SQLite toujours mockés dans les tests
+
 ## Stack v4 à installer avant de coder les features associées
 Toujours lancer avec `--legacy-peer-deps` dans `mobile_app/`.
 
