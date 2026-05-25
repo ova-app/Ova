@@ -26,7 +26,9 @@ export default function TabLayout() {
                   { borderColor: color === dark.accent ? dark.accent : dark.textSecondary },
                 ]}
               >
-                <View style={styles.logoDiamond} />
+                <View style={styles.logoInnerRing}>
+                  <View style={styles.logoCenterDot} />
+                </View>
               </View>
             </View>
           ),
@@ -97,11 +99,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
   },
-  logoDiamond: {
-    width: 16,
-    height: 16,
+  logoInnerRing: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: dark.background,
-    transform: [{ rotate: '45deg' }],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoCenterDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: dark.accent,
   },
   fabContainer: {
     width: 64,

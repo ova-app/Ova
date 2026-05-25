@@ -137,12 +137,23 @@ function LogoOrava() {
     >
       <View
         style={{
-          width: 16,
-          height: 16,
+          width: 22,
+          height: 22,
+          borderRadius: 11,
           backgroundColor: colors.background,
-          transform: [{ rotate: '45deg' }],
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
-      />
+      >
+        <View
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: colors.accent,
+          }}
+        />
+      </View>
     </View>
   )
 }
@@ -651,6 +662,7 @@ export default function SessionScreen() {
     startedAt,
     exercises,
     currentIndex,
+    elapsedSeconds,
     startWorkout,
     finishWorkout,
     addExercise,
@@ -789,12 +801,12 @@ export default function SessionScreen() {
     const events = buildPrEvents(prCharge, prSerie, draftWeight, draftReps)
     if (events.length > 0) {
       setPrFlash(events)
+      // PR: laisser le flash respirer avant timer
+      setTimeout(() => router.push('/workout/timer'), 2500)
+    } else {
+      // Pas de PR: timer immédiat dès validation
+      setTimeout(() => router.push('/workout/timer'), 250)
     }
-
-    // Auto-navigate to timer after PR flash (2500ms)
-    setTimeout(() => {
-      router.push('/workout/timer')
-    }, 2500)
   }
 
   async function handleAddExercise(ex: ExerciseRow) {
@@ -850,7 +862,26 @@ export default function SessionScreen() {
       <View style={{ paddingTop: insets.top }}>
         <View style={[styles.header, { borderBottomColor: colors.separator }]}>
           <LogoOrava />
-          <View style={styles.headerCenter} />
+          <View style={styles.headerCenter}>
+            <Text
+              style={{
+                color: colors.textPrimary,
+                fontFamily: 'Barlow_700Bold',
+                fontSize: 32,
+                letterSpacing: -0.5,
+                fontVariant: ['tabular-nums'],
+              }}
+            >
+              {(() => {
+                const h = Math.floor(elapsedSeconds / 3600)
+                const m = Math.floor((elapsedSeconds % 3600) / 60)
+                const s = elapsedSeconds % 60
+                return h > 0
+                  ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+                  : `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+              })()}
+            </Text>
+          </View>
           {exercises.length > 0 && (
             <TouchableOpacity
               style={[styles.finishButton, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border }]}
@@ -1084,6 +1115,8 @@ const styles = StyleSheet.create({
   },
   headerCenter: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   finishButton: {
     height: 36,

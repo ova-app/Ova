@@ -158,12 +158,23 @@ function OravaLogo({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }
     >
       <View
         style={{
-          width: 16,
-          height: 16,
+          width: 22,
+          height: 22,
+          borderRadius: 11,
           backgroundColor: colors.background,
-          transform: [{ rotate: '45deg' }],
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
-      />
+      >
+        <View
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: colors.accent,
+          }}
+        />
+      </View>
     </View>
   )
 }
@@ -734,6 +745,22 @@ function KPIBandeau({ workoutsThisMonth, trendPercent }: KPIBandeauProps) {
   const TrendIcon = trendPercent > 5 ? TrendingUp : trendPercent < -5 ? TrendingDown : null
 
   return (
+    <View>
+      <Text
+        style={[
+          typography.caption,
+          {
+            color: colors.textTertiary,
+            paddingHorizontal: spacing.s4,
+            paddingTop: spacing.s3,
+            letterSpacing: 1,
+            textTransform: 'uppercase',
+            fontFamily: 'Barlow_700Bold',
+          },
+        ]}
+      >
+        Stats ce mois
+      </Text>
     <View style={[styles.kpiBandeau, { paddingHorizontal: spacing.s4, gap: spacing.s3 }]}>
       {/* Salles de sport */}
       <TouchableOpacity
@@ -797,6 +824,7 @@ function KPIBandeau({ workoutsThisMonth, trendPercent }: KPIBandeauProps) {
         </Text>
       </View>
     </View>
+    </View>
   )
 }
 
@@ -828,18 +856,21 @@ export default function FeedScreen() {
   const greetingOpacity = useSharedValue(0)
   const greetingTranslate = useSharedValue(-20)
 
-  // ─── Animation greeting ─────────────────────────────────────────────────────
+  // ─── Animation greeting — sort du logo (translateX depuis 0, ease out) ──────
 
   useEffect(() => {
-    greetingOpacity.value = withTiming(1, { duration: 300, easing: Easing.out(Easing.ease) })
-    greetingTranslate.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.ease) })
+    if (!currentUserFirstName) return
+    greetingOpacity.value = 0
+    greetingTranslate.value = -40
+    greetingOpacity.value = withTiming(1, { duration: 450, easing: Easing.out(Easing.ease) })
+    greetingTranslate.value = withTiming(0, { duration: 450, easing: Easing.out(Easing.ease) })
 
     const timer = setTimeout(() => {
-      greetingOpacity.value = withTiming(0, { duration: 300, easing: Easing.in(Easing.ease) })
+      greetingOpacity.value = withTiming(0, { duration: 400, easing: Easing.in(Easing.ease) })
     }, 5000)
 
     return () => clearTimeout(timer)
-  }, [])
+  }, [currentUserFirstName])
 
   const greetingAnimStyle = useAnimatedStyle(() => ({
     opacity: greetingOpacity.value,
@@ -1048,16 +1079,25 @@ export default function FeedScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Header — Logo + Greeting + Avatar */}
+      {/* Header — Logo + Greeting animé (sort du logo) + Avatar */}
       <View style={[styles.header, { paddingHorizontal: spacing.s4, paddingVertical: spacing.s3 }]}>
-        <TouchableOpacity onPress={() => router.push('/chat')}>
+        <TouchableOpacity onPress={() => router.push('/chat')} activeOpacity={0.8}>
           <OravaLogo colors={colors} />
         </TouchableOpacity>
-        <Text
-          style={[typography.subtitle, { color: colors.textPrimary, fontFamily: 'Barlow_600SemiBold', flex: 1, textAlign: 'center' }]}
-        >
-          Bonjour {currentUserFirstName}
-        </Text>
+        <Animated.View style={[{ flex: 1, marginLeft: spacing.s3, overflow: 'hidden' }, greetingAnimStyle]}>
+          <Text
+            style={[typography.body, { color: colors.textPrimary, fontFamily: 'Barlow_600SemiBold' }]}
+            numberOfLines={1}
+          >
+            Bonjour {currentUserFirstName},
+          </Text>
+          <Text
+            style={[typography.caption, { color: colors.textSecondary }]}
+            numberOfLines={1}
+          >
+            as-tu une question ?
+          </Text>
+        </Animated.View>
         <TouchableOpacity onPress={handleNavigateProfile}>
           <View style={[styles.avatarSmallHeader, { backgroundColor: colors.backgroundSecondary }]}>
             <Text style={[styles.avatarInitialsSmall, { color: colors.textPrimary }]}>
@@ -1066,13 +1106,6 @@ export default function FeedScreen() {
           </View>
         </TouchableOpacity>
       </View>
-
-      {/* Animated greeting message */}
-      <Animated.View style={[styles.greetingContainer, greetingAnimStyle, { paddingHorizontal: spacing.s4 }]}>
-        <Text style={[typography.body, { color: colors.textSecondary }]}>
-          As-tu une question ?
-        </Text>
-      </Animated.View>
 
       {/* KPI Bandeau */}
       {!loading && (

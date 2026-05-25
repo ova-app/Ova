@@ -58,7 +58,15 @@
       "Bash(bash /tmp/fix-eslint.sh)",
       "Bash(cd \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\" && npm run lint 2>&1 > /tmp/lint-output.txt && grep -A5 \"error\" /tmp/lint-output.txt | head -40)",
       "Read(//tmp/**)",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(python /tmp/fix_session.py)",
+      "Bash(npm test *)",
+      "Bash(python apply_fix.py)",
+      "Bash(grep -E \"^\\(✖|✓|C:\\\\\\\\\\)\")",
+      "Bash(python)",
+      "Bash(git restore *)",
+      "Bash(python3)",
+      "Bash(git commit -m ' *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\SofianeBESSILA\\orava\\mobile_app\\app\\workout"
