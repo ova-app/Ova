@@ -260,44 +260,48 @@ function LikesModal({ visible, likes, onClose }: LikesModalProps) {
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType="fade"
       onRequestClose={onClose}
     >
-      <SafeAreaView style={[styles.modalContainer, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
-        {/* Header */}
-        <View style={[styles.modalHeader, { borderBottomColor: colors.separator }]}>
-          <Text style={[typography.subtitle, { color: colors.textPrimary, fontFamily: 'Barlow_700Bold' }]}>
-            {likes.length} j'aime
-          </Text>
-          <TouchableOpacity onPress={onClose}>
-            <X size={24} color={colors.textPrimary} />
-          </TouchableOpacity>
-        </View>
+      <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
+        <View style={[styles.likesModalContent, { backgroundColor: colors.backgroundSecondary }]}>
+          {/* Header */}
+          <View style={[styles.likesModalHeader, { borderBottomColor: colors.separator }]}>
+            <Text style={[typography.subtitle, { color: colors.textPrimary, fontFamily: 'Barlow_700Bold' }]}>
+              Aimé par
+            </Text>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+              <X size={24} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
 
-        {/* Likes list */}
-        <FlatList
-          data={likes}
-          keyExtractor={(_, i) => i.toString()}
-          renderItem={({ item }) => {
-            const user = item.users
-            const displayName = user?.username ?? user?.full_name ?? '?'
-            const bgColor = avatarColor(user?.id || '')
-            return (
-              <View style={[styles.likeRow, { borderBottomColor: colors.separator }]}>
-                <View style={[styles.avatarSmall, { backgroundColor: bgColor }]}>
-                  <Text style={[styles.avatarInitialsSmall, { color: colors.textPrimary }]}>
-                    {displayName.split(' ').slice(0, 2).map((p: string) => p.charAt(0).toUpperCase()).join('')}
+          {/* Likes list — scrollable */}
+          <FlatList
+            data={likes}
+            keyExtractor={(_, i) => i.toString()}
+            scrollEnabled={true}
+            renderItem={({ item }) => {
+              const user = item.users
+              const displayName = user?.username ?? user?.full_name ?? '?'
+              const bgColor = avatarColor(user?.id || '')
+              return (
+                <View style={[styles.likeRow, { borderBottomColor: colors.separator }]}>
+                  <View style={[styles.avatarSmall, { backgroundColor: bgColor }]}>
+                    <Text style={[styles.avatarInitialsSmall, { color: colors.textPrimary }]}>
+                      {displayName.split(' ').slice(0, 2).map((p: string) => p.charAt(0).toUpperCase()).join('')}
+                    </Text>
+                  </View>
+                  <Text style={[typography.body, { color: colors.textPrimary, fontFamily: 'Barlow_600SemiBold' }]}>
+                    {displayName}
                   </Text>
                 </View>
-                <Text style={[typography.body, { color: colors.textPrimary, fontFamily: 'Barlow_600SemiBold' }]}>
-                  {displayName}
-                </Text>
-              </View>
-            )
-          }}
-          contentContainerStyle={{ paddingHorizontal: spacing.s4 }}
-        />
-      </SafeAreaView>
+              )
+            }}
+            contentContainerStyle={{ paddingHorizontal: spacing.s4, paddingVertical: spacing.s3 }}
+            showsVerticalScrollIndicator={false}
+          />
+        </View>
+      </View>
     </Modal>
   )
 }
@@ -821,6 +825,26 @@ export default function FeedScreen() {
   const [currentUserFirstName, setCurrentUserFirstName] = useState<string>('')
   const [workoutsThisMonth, setWorkoutsThisMonth] = useState(0)
   const [trendPercent, setTrendPercent] = useState(0)
+  const greetingOpacity = useSharedValue(0)
+  const greetingTranslate = useSharedValue(-20)
+
+  // ─── Animation greeting ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    greetingOpacity.value = withTiming(1, { duration: 300, easing: Easing.out(Easing.ease) })
+    greetingTranslate.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.ease) })
+
+    const timer = setTimeout(() => {
+      greetingOpacity.value = withTiming(0, { duration: 300, easing: Easing.in(Easing.ease) })
+    }, 5000)
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  const greetingAnimStyle = useAnimatedStyle(() => ({
+    opacity: greetingOpacity.value,
+    transform: [{ translateX: greetingTranslate.value }],
+  }))
 
   // ─── Auth ───────────────────────────────────────────────────────────────────
 
@@ -1011,7 +1035,7 @@ export default function FeedScreen() {
   // ─── Navigate to detail ─────────────────────────────────────────────────────
 
   const handleNavigateDetail = useCallback((workoutId: string) => {
-    router.push(`/history/${workoutId}`)
+    router.push(`/feed/${workoutId}`)
   }, [router])
 
   // ─── Navigate to profile ─────────────────────────────────────────────────────
@@ -1026,7 +1050,9 @@ export default function FeedScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       {/* Header — Logo + Greeting + Avatar */}
       <View style={[styles.header, { paddingHorizontal: spacing.s4, paddingVertical: spacing.s3 }]}>
-        <OravaLogo colors={colors} />
+        <TouchableOpacity onPress={() => router.push('/chat')}>
+          <OravaLogo colors={colors} />
+        </TouchableOpacity>
         <Text
           style={[typography.subtitle, { color: colors.textPrimary, fontFamily: 'Barlow_600SemiBold', flex: 1, textAlign: 'center' }]}
         >
@@ -1040,6 +1066,13 @@ export default function FeedScreen() {
           </View>
         </TouchableOpacity>
       </View>
+
+      {/* Animated greeting message */}
+      <Animated.View style={[styles.greetingContainer, greetingAnimStyle, { paddingHorizontal: spacing.s4 }]}>
+        <Text style={[typography.body, { color: colors.textSecondary }]}>
+          As-tu une question ?
+        </Text>
+      </Animated.View>
 
       {/* KPI Bandeau */}
       {!loading && (
@@ -1288,5 +1321,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.s3,
     paddingVertical: spacing.s2,
     borderRadius: radius.md,
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingHorizontal: spacing.s4,
+    paddingBottom: spacing.s4,
+  },
+  likesModalContent: {
+    maxHeight: '70%',
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
+  likesModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.s4,
+    paddingVertical: spacing.s4,
+    borderBottomWidth: 1,
+  },
+  greetingContainer: {
+    paddingVertical: spacing.s2,
+    marginBottom: spacing.s2,
   },
 })
