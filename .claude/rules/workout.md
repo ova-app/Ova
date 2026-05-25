@@ -19,7 +19,16 @@ Podium : `gold` = nouveau record absolu · `silver` = 2e · `bronze` = 3e · `nu
 - 3 top-3 chargés par `addExercise` : `pr_top3_charge`, `pr_top3_serie`, `pr_top3_exercice`
 - `computePodium(value, top3)` exporté — utilisé dans `summary.tsx`
 - `rest_seconds` : delta ms depuis dernier set validé (global workout)
-- **[Phase 0]** Ajouter snapshot MMKV à chaque mutation → crash-safe
+- **[Phase 0]** Snapshot MMKV à chaque mutation → crash-safe ✅
+
+## Session UI — comportements clés (25/05/2026)
+- **Header** : Logo Orava 48px (bullseye) + timer séance centré (elapsedSeconds, 32px mono) + bouton TERMINER
+- **WheelPickerModal** : composant dédié `workout/wheel-picker-modal.tsx` — bottom-sheet 80% hauteur, 3 roues (poids/reps/RPE), snap damping 18
+- **Rest timer post-validation** :
+  - Avec PR → délai 2500ms (laisse le flash PR respirer)
+  - Sans PR → délai 250ms (quasi-immédiat)
+  - Navigation vers `workout/timer`
+- **Ghost mode** : indicateur vert discret, double haptic pulse (Medium + 120ms + Medium) si fantôme battu
 
 ## Calcul au save (summary.tsx)
 - `pr_exercice` : `computePodium(Σ poids×reps des sets, ex.pr_top3_exercice)` → `workout_exercises`

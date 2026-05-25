@@ -127,10 +127,10 @@ Lire le PNG du composant avant d'écrire son code inline dans le screen.
 
 | PNG | Fichier cible | Densité | Statut |
 |---|---|---|---|
-| `1.png` | `app/workout/session.tsx` | Zen | ✅ Implémenté |
-| `2.png` | `app/workout/summary.tsx` | Riche | ✅ Implémenté |
+| `1.png` | `app/workout/session.tsx` | Zen | ✅ Reinventé (25/05) — timer header + WheelPickerModal |
+| `2.png` | `app/workout/summary.tsx` | Riche | ✅ + animation volume défilant (25/05) |
 | `7.png` | `app/workout/timer.tsx` | Zen | ✅ Implémenté |
-| `4.png` | `app/(tabs)/feed.tsx` | Dense | ✅ Implémenté |
+| `4.png` | `app/(tabs)/feed.tsx` | Dense | ✅ + likes fix + lieu séance + greeting animé (25/05) |
 | `5.png` | `app/(tabs)/history.tsx` | Dense | ✅ Implémenté |
 | `9.png` | `app/history/[id].tsx` | Dense | ✅ Implémenté |
 | `11.png` | `app/(tabs)/library.tsx` (référence) | Dense | ✅ Implémenté |
@@ -141,7 +141,9 @@ Lire le PNG du composant avant d'écrire son code inline dans le screen.
 | `14.png` | `app/index.tsx` | Zen | ✅ Implémenté |
 | `8.png` | `app/auth/login.tsx` + `register.tsx` | Standard | ✅ Implémenté |
 | — | `app/prs.tsx` | Standard | ⏳ À faire |
-| — | `app/onboarding/` | Zen | ⏳ Phase 1 |
+| — | `app/onboarding/` | Zen | ✅ Implémenté (Phase 1) |
+| — | `app/feed/[id].tsx` | Riche | ✅ Créé (25/05) — Myo 80% + photos + recap + comments |
+| — | `app/chat.tsx` | Zen | ✅ Placeholder (Phase 2 design à faire) |
 
 ---
 

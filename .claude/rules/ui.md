@@ -315,12 +315,24 @@ sessionSave()    → NotificationFeedbackType.Success
 
 ## Logo Orava — directives
 
-**Nouveau logo à créer** — prompts Midjourney dans `design/system/logo-prompts.md`.
+**Design validé (25/05/2026)** : bullseye 3 couches — cercle jaune extérieur + cercle noir intermédiaire + point jaune central. Source : `image-3.png` racine repo.
 
-Règles d'usage une fois validé :
+Implémentation code (utilisée partout) :
+```tsx
+// Cercle jaune 48px + cercle noir 22px + dot jaune 8px
+<View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+  <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent }} />
+  </View>
+</View>
+```
+
+Règles d'usage :
 - App icon : symbole seul sur fond `#0A0A0F`, sans texte
 - Wordmark : symbole + "ORAVA" en typo bold condensed
 - Couleur symbole : `#FFDD00` sur fond noir — jamais inversé (noir sur blanc)
+- Interactif dans header feed → `/chat` (tap)
+- Non-cliquable pendant séance active
 - Formats à exporter : SVG + PNG 1024×1024 + PNG 512×512
 - Placer dans `design/system/logo/` avant intégration dans `mobile_app/assets/`
 

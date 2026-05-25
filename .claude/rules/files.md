@@ -32,20 +32,25 @@ Tout le code est dans `mobile_app/`. Les chemins ci-dessous sont relatifs à `mo
 app/
 ├── _layout.tsx              — guard auth + WorkoutProvider + ThemeProvider + StatusBar
 ├── index.tsx                — splash animé → redirect /auth/login
+├── chat.tsx                 — placeholder chatbot Phase 2 (accessible via logo Orava header feed)
 ├── auth/                    — login.tsx · register.tsx
 ├── (tabs)/
-│   ├── _layout.tsx          — tabs + FAB central → /workout/session
-│   ├── feed.tsx             — timeline sociale (likes + commentaires + photo_url + Myo fractal SVG)
+│   ├── _layout.tsx          — 3 tabs SEULEMENT : feed (logo Orava bullseye) · FAB 64px (session) · library
+│   ├── feed.tsx             — timeline sociale · likes longpress bottom-sheet max 70% · greeting animé logo
 │   ├── history.tsx          — SectionList antichronologique par mois
 │   ├── library.tsx          — 113+ exos, SectionList par muscle, filtres chips, normalize NFD
 │   ├── profile.tsx          — stats mois, PRs top 20, déconnexion
 │   └── start.tsx            — placeholder FAB → /workout/session
 ├── workout/
-│   ├── session.tsx          — log séance, WheelPicker, flash PR 🥇🥈🥉, swipe delete
+│   ├── session.tsx          — log séance, WheelPickerModal full-screen, flash PR, ghost bar, timer header
+│   ├── wheel-picker-modal.tsx — modal 80% hauteur, 3 roues (poids/reps/RPE), snap fluide Reanimated
 │   ├── timer.tsx            — anneau SVG Figma (arc jaune SVG), -15/skip/+15, auto-start, AppState
 │   ├── summary.tsx          — résumé + nom auto + PRs + is_public + photo + géoloc + save Supabase
 │   │                          + computeAndSaveMetrics() → workout_metrics (best-effort)
+│   │                          + animation volume kg défilant (0→final, 500ms, easeOutExpo)
 │   └── myo-orb.tsx          — Myo 3D : Three.js + expo-gl, IcosahedronGeometry, MeshPhongMaterial
+├── feed/[id].tsx            — détail activité feed : Myo géant + 8-family selector + photos lightbox
+│                              + recap collapsible + commentaires + like sticky
 ├── history/[id].tsx         — détail séance + photo_url + barres muscles + badges PR
 ├── exercise/[id].tsx        — fiche exercice + barres musculaires (primary/secondary/stabilizer)
 ├── analytics.tsx            — stats complètes, charts View RN (PAS Victory Native)
@@ -81,13 +86,16 @@ __tests__/                   — tests unitaires Jest (logique pure uniquement, 
 
 ## Fichiers à créer (v4)
 
-| Fichier | Phase | Description |
-|---|---|---|
-| `app/workout/ghost.ts` | Phase 1 | `getGhostReference(exerciseId, limitDays)` → SQLite |
-| `lib/predictor.ts` | Phase 2 | Régression linéaire pondérée on-device → SQLite |
-| `app/onboarding/` | Phase 1 | 2 écrans max, < 60s à la 1re série |
-| `app/paywall.tsx` | Phase 2 | Paywall Pro — RevenueCat, A/B PostHog |
-| `app/athletic-dna.tsx` | Phase 3 | ADN Athlétique — Skia, 6 dimensions |
+| Fichier | Phase | Description | Statut |
+|---|---|---|---|
+| `app/workout/ghost.ts` | Phase 1 | `getGhostReference(exerciseId, limitDays)` → SQLite | ✅ Créé |
+| `app/workout/wheel-picker-modal.tsx` | Phase 1 | Modal full-screen 3 roues (poids/reps/RPE) | ✅ Créé |
+| `app/chat.tsx` | Phase 1 | Placeholder chatbot accessible via logo Orava | ✅ Créé |
+| `app/feed/[id].tsx` | Phase 1 | Détail activité feed (Myo + photos + recap + comments) | ✅ Créé |
+| `lib/predictor.ts` | Phase 2 | Régression linéaire pondérée on-device → SQLite | ⏳ À faire |
+| `app/onboarding/` | Phase 1 | 2 écrans max, < 60s à la 1re série | ✅ Créé |
+| `app/paywall.tsx` | Phase 2 | Paywall Pro — RevenueCat, A/B PostHog | ⏳ À faire |
+| `app/athletic-dna.tsx` | Phase 3 | ADN Athlétique — Skia, 6 dimensions | ⏳ À faire |
 
 ## Règles de structure
 - Jamais créer de dossier hors spec sans validation
@@ -103,6 +111,16 @@ __tests__/                   — tests unitaires Jest (logique pure uniquement, 
 | `app/auth/login.tsx` | Couleurs hardcodées, pas `useTheme()` | ✅ Corrigé (24/05/2026) |
 | `package.json` | `@react-three/fiber` installé, non utilisé pour Myo | Garder (pas de risque) |
 | Supabase JOIN casts | `as { }` sans type guard → TS2352 dans profile, history/[id], exercise/[id], prs | ✅ Corrigé (24/05/2026) |
+| `(tabs)/_layout.tsx` | 5 tabs → 3 tabs (feed logo bullseye, FAB session, library) | ✅ Corrigé (25/05/2026) |
+| `(tabs)/feed.tsx` | Likes longpress bottom-sheet débordait écran | ✅ Corrigé (25/05/2026) |
+| `(tabs)/feed.tsx` | Logo Orava losange → bullseye (cercle + cercle noir + dot jaune) | ✅ Corrigé (25/05/2026) |
+| `(tabs)/feed.tsx` | Greeting splitté en 2 textes → unifié, slide depuis logo, disparaît 5s | ✅ Corrigé (25/05/2026) |
+| `(tabs)/feed.tsx` | KPI bandeau sans label "ce mois" | ✅ Corrigé (25/05/2026) |
+| `workout/session.tsx` | Logo Orava losange → bullseye | ✅ Corrigé (25/05/2026) |
+| `workout/session.tsx` | Header center vide (timer séance manquant) | ✅ Corrigé (25/05/2026) |
+| `workout/session.tsx` | WheelPicker non fluide, nombres masqués | ✅ Remplacé par WheelPickerModal (25/05/2026) |
+| `workout/session.tsx` | Rest timer 2500ms même sans PR | ✅ Corrigé : 250ms sans PR, 2500ms avec PR (25/05/2026) |
+| `workout/summary.tsx` | Animation volume total manquante | ✅ Ajouté défilement 0→final 500ms easeOutExpo (25/05/2026) |
 
 ## Comportement documenté — computePodium
 `computePodium(value, top3)` utilise des comparaisons strictes `>`. Égaler `pr1` ne donne pas gold mais silver (si pr2 existe). Comportement voulu à confirmer avec le produit.
