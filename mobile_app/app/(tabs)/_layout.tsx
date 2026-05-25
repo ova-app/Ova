@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from 'expo-router'
-import { TouchableOpacity, View, StyleSheet } from 'react-native'
+import { TouchableOpacity, StyleSheet } from 'react-native'
 import { Home, BookOpen, History, User } from 'lucide-react-native'
 import { dark, spacing, radius } from '@/constants/theme'
 import { Dumbbell } from 'lucide-react-native'

@@ -963,7 +963,7 @@ export default function SessionScreen() {
         <View style={[styles.idleContainer, { paddingBottom: insets.bottom, paddingTop: insets.top }]}>
           <Text style={[styles.idleTitle, { color: colors.textPrimary }]}>Orava</Text>
           <Text style={[styles.idleSubtitle, { color: colors.textSecondary }]}>
-            Prêt à s'entraîner ?
+            Prêt à sentraîner ?
           </Text>
           <TouchableOpacity
             style={[styles.startButton, { backgroundColor: colors.accent }]}

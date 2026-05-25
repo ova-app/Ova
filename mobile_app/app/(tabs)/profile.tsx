@@ -296,9 +296,9 @@ export default function ProfileScreen(): React.JSX.Element {
             style={({ pressed }) => [s.armurerieBtn, pressed && { opacity: 0.7 }]}
             onPress={() => router.push('/prs')}
             accessibilityRole="button"
-            accessibilityLabel="Voir l'Armurerie"
+            accessibilityLabel="Voir l&apos;Armurerie"
           >
-            <Text style={s.armurerieBtnText}>Voir l'Armurerie →</Text>
+            <Text style={s.armurerieBtnText}>Voir l&apos;Armurerie →</Text>
           </Pressable>
         </View>
 
@@ -325,6 +325,7 @@ export default function ProfileScreen(): React.JSX.Element {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
+// eslint-disable-next-line react-native/no-unused-styles
 function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     container: {

@@ -51,7 +51,13 @@
       "Bash(python -c \"import sys,json; p=json.load\\(sys.stdin\\); print\\(p.get\\('dependencies',{}\\).get\\('expo-haptics','MISSING'\\)\\)\")",
       "Bash(Remove-Item \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\\\\app\\\\workout\\\\ghost.ts\")",
       "Bash(npx jest *)",
-      "Bash(Test-Path \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\\\\app\\\\prs.tsx\")"
+      "Bash(Test-Path \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\\\\app\\\\prs.tsx\")",
+      "Bash(npm run *)",
+      "Bash(cat)",
+      "Bash(chmod +x /tmp/fix-eslint.sh)",
+      "Bash(bash /tmp/fix-eslint.sh)",
+      "Bash(cd \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\" && npm run lint 2>&1 > /tmp/lint-output.txt && grep -A5 \"error\" /tmp/lint-output.txt | head -40)",
+      "Read(//tmp/**)"
     ],
     "additionalDirectories": [
       "c:\\Users\\SofianeBESSILA\\orava\\mobile_app\\app\\workout"

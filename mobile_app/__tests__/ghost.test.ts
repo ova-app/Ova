@@ -15,13 +15,14 @@
 
 // ─── Mock expo-sqlite via getDB ───────────────────────────────────────────────
 
-let mockGetFirstAsync: jest.Mock
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let mockGetFirstAsync: any
 
 jest.mock('../lib/db', () => ({
   getDB: () => ({ getFirstAsync: mockGetFirstAsync }),
 }))
 
-import { getGhostReference, GhostSet } from '../lib/ghost'
+import { getGhostReference } from '../lib/ghost'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ describe('getGhostReference — cutoff temporel', () => {
     await getGhostReference('uuid-bench', 30)
     const after = Date.now()
 
-    const [_sql, _exerciseId, cutoff] = mockGetFirstAsync.mock.calls[0] as [string, string, number]
+    const [, , cutoff] = mockGetFirstAsync.mock.calls[0] as [string, string, number]
 
     const expectedMin = before - 30 * 24 * 60 * 60 * 1000
     const expectedMax = after  - 30 * 24 * 60 * 60 * 1000

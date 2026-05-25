@@ -284,7 +284,7 @@ export default function SummaryScreen() {
     let frequenceHebdo = 0
     let volume7j = 0
     let tempsDerniere: number | null = null
-    let evolutionRepos: number | null = null
+    const evolutionRepos: number | null = null
     try {
       const since90 = new Date(Date.now() - 90 * 86400000).toISOString()
       const since30 = new Date(Date.now() - 30 * 86400000).toISOString()

@@ -151,6 +151,7 @@ describe('ghost.ts — file location', () => {
   it('ghost.ts lives in lib/, not in app/workout/ (would break Expo Router)', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const fs = require('fs') as typeof import('fs')
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const path = require('path') as typeof import('path')
     const libPath = path.resolve(__dirname, '../lib/ghost.ts')
     const appPath = path.resolve(__dirname, '../app/workout/ghost.ts')

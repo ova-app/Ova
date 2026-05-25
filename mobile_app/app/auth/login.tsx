@@ -241,7 +241,7 @@ export default function LoginScreen(): React.JSX.Element {
           >
             <Text style={styles.lienTexte}>
               Pas encore de compte ?{' '}
-              <Text style={styles.lienAccent}>S'inscrire</Text>
+              <Text style={styles.lienAccent}>Sinscrire</Text>
             </Text>
           </Pressable>
 

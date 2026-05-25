@@ -47,16 +47,8 @@ jest.mock('../lib/supabase', () => {
 import { supabase } from '../lib/supabase'
 
 // Récupère les mocks depuis la factory via le module mocké
-const mocks = (supabase as any)._mocks as {
-  mockFrom:    jest.Mock
-  mockSelect:  jest.Mock
-  mockEq:      jest.Mock
-  mockOrder:   jest.Mock
-  mockSignIn:  jest.Mock
-  mockSignUp:  jest.Mock
-  mockGetUser: jest.Mock
-  mockSignOut: jest.Mock
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mocks = (supabase as any)._mocks as Record<string, any>
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 

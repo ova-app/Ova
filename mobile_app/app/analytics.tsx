@@ -489,6 +489,7 @@ export default function AnalyticsScreen(): React.JSX.Element {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
+// eslint-disable-next-line react-native/no-unused-styles
 function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
     container: {

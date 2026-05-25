@@ -173,11 +173,11 @@ function SkeletonCard() {
 
 interface FeedItemProps {
   item: FeedWorkout
-  currentUserId: string | null
+  _currentUserId: string | null
   onLike: (workoutId: string, hasLiked: boolean) => void
 }
 
-function FeedItem({ item, currentUserId, onLike }: FeedItemProps) {
+function FeedItem({ item, _currentUserId, onLike }: FeedItemProps) {
   const { colors } = useTheme()
 
   const displayName = item.user.username ?? item.user.full_name ?? '?'
@@ -297,7 +297,7 @@ function FeedEmptyState() {
         <FeedGhostCard opacity={0.18} colors={colors} />
       </View>
       <Text style={[s.title, { marginTop: spacing.s4 }]}>Ton feed est vide.</Text>
-      <Text style={s.subtitle}>Suis d'autres athlètes pour voir leurs séances.</Text>
+      <Text style={s.subtitle}>Suis d&apos;autres athlètes pour voir leurs séances.</Text>
     </View>
   )
 }
@@ -539,7 +539,7 @@ export default function FeedScreen() {
           renderItem={({ item }) => (
             <FeedItem
               item={item}
-              currentUserId={currentUserId}
+              _currentUserId={currentUserId}
               onLike={handleLike}
             />
           )}

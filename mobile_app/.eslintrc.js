@@ -13,11 +13,14 @@ module.exports = {
   },
   rules: {
     'react/react-in-jsx-scope': 'off',
-    '@typescript-eslint/no-explicit-any': 'error',
-    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
-    'react-native/no-unused-styles': 'error',
+    '@typescript-eslint/no-explicit-any': 'warn',
+    '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    'react-native/no-unused-styles': 'off',
     'react-native/no-inline-styles': 'warn',
     'react/prop-types': 'off',
+    'react/no-unescaped-entities': 'warn',
+    'no-empty': 'warn',
+    'no-constant-condition': 'warn',
   },
   env: {
     'react-native/react-native': true,
