@@ -451,44 +451,46 @@ export default function PrsScreen(): React.JSX.Element {
       return
     }
 
-    const [chargeRes, serieRes] = await Promise.all([
-      supabase
-        .from('workout_sets')
-        .select(`
-          weight_kg, reps, pr_charge, pr_serie,
-          workout_exercises!inner(
-            exercise_id,
-            exercises!inner(name_fr, muscle_group)
-          )
-        `)
-        .eq('workout_exercises.workouts.user_id', user.id)
-        .not('pr_charge', 'is', null)
-        .order('weight_kg', { ascending: false }),
+    const { data, error } = await supabase
+      .from('workouts')
+      .select(`
+        workout_exercises (
+          exercise_id,
+          exercises (name_fr, muscle_group),
+          workout_sets (weight_kg, reps, pr_charge, pr_serie)
+        )
+      `)
+      .eq('user_id', user.id)
+      .limit(10000)
 
-      supabase
-        .from('workout_sets')
-        .select(`
-          weight_kg, reps, pr_charge, pr_serie,
-          workout_exercises!inner(
-            exercise_id,
-            exercises!inner(name_fr, muscle_group)
-          )
-        `)
-        .eq('workout_exercises.workouts.user_id', user.id)
-        .not('pr_serie', 'is', null)
-        .order('weight_kg', { ascending: false }),
-    ])
-
-    if (chargeRes.error || serieRes.error) {
+    if (error || !data) {
       setHasError(true)
       setLoading(false)
       return
     }
 
-    const allRows: RawSetRow[] = [
-      ...(chargeRes.data as RawSetRow[]),
-      ...(serieRes.data as RawSetRow[]),
-    ]
+    // Flatten all sets from all workouts with their exercise info
+    const allRows: RawSetRow[] = []
+    for (const workout of data as any[]) {
+      for (const we of workout.workout_exercises || []) {
+        const ex = Array.isArray(we.exercises) ? we.exercises[0] : we.exercises
+        if (!ex) continue
+        for (const set of we.workout_sets || []) {
+          if (set.pr_charge || set.pr_serie) {
+            allRows.push({
+              weight_kg: set.weight_kg,
+              reps: set.reps,
+              pr_charge: set.pr_charge,
+              pr_serie: set.pr_serie,
+              workout_exercises: {
+                exercise_id: we.exercise_id,
+                exercises: ex,
+              },
+            } as RawSetRow)
+          }
+        }
+      }
+    }
 
     setPrs(buildExercisePRs(allRows))
     setLoading(false)

@@ -4,6 +4,7 @@ import * as SplashScreen from 'expo-splash-screen'
 import { useEffect } from 'react'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { hydrateStorage } from '@/lib/storage'
+import { initDB } from '@/lib/db'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { WorkoutProvider } from '@/context/WorkoutContext'
 import { useFonts } from 'expo-font'
@@ -34,6 +35,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     hydrateStorage()
+    initDB()
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync()
     }
