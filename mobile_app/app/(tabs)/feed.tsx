@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  Dimensions,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -15,14 +16,21 @@ import Animated, {
   useSharedValue,
   withRepeat,
   withTiming,
+  withSpring,
+  withSequence,
   useAnimatedStyle,
+  useAnimatedProps,
   Easing,
+  cancelAnimation,
 } from 'react-native-reanimated'
 import Svg, { Path, Circle } from 'react-native-svg'
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle)
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Heart, MessageCircle, RefreshCw, MapPin, Dumbbell, TrendingUp, TrendingDown, X } from 'lucide-react-native'
+import { Heart, MessageCircle, RefreshCw, MapPin, X } from 'lucide-react-native'
 import { useTheme } from '@/context/ThemeContext'
 import { useRouter } from 'expo-router'
+import { useFocusEffect } from '@react-navigation/core'
 import { spacing, typography, radius } from '@/constants/theme'
 import { emptyStateRecipe } from '@/constants/recipes'
 import { supabase } from '@/lib/supabase'
@@ -146,36 +154,14 @@ function MyoIcon({ size = 80, bg = '#0A0A0F' }: { size?: number; bg?: string }) 
 
 function OravaLogo({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
   return (
-    <View
-      style={{
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: colors.accent,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <View
-        style={{
-          width: 22,
-          height: 22,
-          borderRadius: 11,
-          backgroundColor: colors.background,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <View
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: colors.accent,
-          }}
-        />
-      </View>
-    </View>
+    <Svg width={48} height={48} viewBox="0 0 100 100">
+      <Circle cx="50" cy="50" r="44"   stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="35.5" stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="27"   stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="18.5" stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="10"   stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="3.5"  fill={colors.accent} />
+    </Svg>
   )
 }
 
@@ -728,21 +714,212 @@ function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemPro
 
 // ─── KPIs Bandeau ────────────────────────────────────────────────────────────
 
+// TrendArrow — reproduit exactement TrendingUp/TrendingDown Lucide (viewBox 0 0 24 24)
+// 3 paths séparés tracés en séquence : polyligne → branche H → branche V
+// Longueurs mesurées : polyligne ≈ 30, branche H = 6, branche V = 6
+const AnimatedPath = Animated.createAnimatedComponent(Path)
+
+function TrendArrow({ color, up, drawProgress }: {
+  color: string
+  up: boolean
+  drawProgress: ReturnType<typeof useSharedValue<number>>
+}) {
+  // Path 1 : polyligne principale (longueur ≈ 30)
+  const L1 = 30
+  // Path 2 : segment horizontal du coin (longueur = 6)
+  const L2 = 6
+  // Path 3 : segment vertical du coin (longueur = 6)
+  const L3 = 6
+
+  // progress [0,1] → anime les 3 paths en séquence
+  // p1 : 0→0.7, p2 : 0.7→0.85, p3 : 0.85→1
+  const props1 = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.min(drawProgress.value / 0.7, 1)
+    return { strokeDashoffset: L1 * (1 - p) }
+  })
+  const props2 = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.max(0, Math.min((drawProgress.value - 0.7) / 0.15, 1))
+    return { strokeDashoffset: L2 * (1 - p) }
+  })
+  const props3 = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.max(0, Math.min((drawProgress.value - 0.85) / 0.15, 1))
+    return { strokeDashoffset: L3 * (1 - p) }
+  })
+
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      {up ? (
+        <>
+          {/* polyligne : 1,17 → 9,9 → 14,14 → 23,5 */}
+          <AnimatedPath
+            d="M1 17 L9 9 L14 14 L23 5"
+            stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+            fill="none" strokeDasharray={L1} animatedProps={props1}
+          />
+          {/* branche H : 17,5 → 23,5 */}
+          <AnimatedPath
+            d="M17 5 L23 5"
+            stroke={color} strokeWidth={2} strokeLinecap="round"
+            fill="none" strokeDasharray={L2} animatedProps={props2}
+          />
+          {/* branche V : 23,5 → 23,11 */}
+          <AnimatedPath
+            d="M23 5 L23 11"
+            stroke={color} strokeWidth={2} strokeLinecap="round"
+            fill="none" strokeDasharray={L3} animatedProps={props3}
+          />
+        </>
+      ) : (
+        <>
+          {/* polyligne down : 1,7 → 9,15 → 14,10 → 23,19 */}
+          <AnimatedPath
+            d="M1 7 L9 15 L14 10 L23 19"
+            stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+            fill="none" strokeDasharray={L1} animatedProps={props1}
+          />
+          {/* branche H : 17,19 → 23,19 */}
+          <AnimatedPath
+            d="M17 19 L23 19"
+            stroke={color} strokeWidth={2} strokeLinecap="round"
+            fill="none" strokeDasharray={L2} animatedProps={props2}
+          />
+          {/* branche V : 23,13 → 23,19 */}
+          <AnimatedPath
+            d="M23 13 L23 19"
+            stroke={color} strokeWidth={2} strokeLinecap="round"
+            fill="none" strokeDasharray={L3} animatedProps={props3}
+          />
+        </>
+      )}
+    </Svg>
+  )
+}
+
+function MapPinIcon({ color, drawProgress }: { color: string; drawProgress: ReturnType<typeof useSharedValue<number>> }) {
+  const L_SHAPE = 70   // teardrop bezier (overestimate)
+  const L_CIRCLE = 19  // 2π×3
+
+  const shapeProps = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.min(drawProgress.value / 0.7, 1)
+    return { strokeDashoffset: L_SHAPE * (1 - p) }
+  })
+  const circleProps = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.max(0, Math.min((drawProgress.value - 0.7) / 0.3, 1))
+    return { strokeDashoffset: L_CIRCLE * (1 - p) }
+  })
+
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <AnimatedPath
+        d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"
+        stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+        fill="none" strokeDasharray={L_SHAPE} animatedProps={shapeProps}
+      />
+      <AnimatedCircle
+        cx={12} cy={10} r={3}
+        stroke={color} strokeWidth={2}
+        fill="none" strokeDasharray={L_CIRCLE} animatedProps={circleProps}
+      />
+    </Svg>
+  )
+}
+
+function DumbbellIcon({ color, drawProgress }: { color: string; drawProgress: ReturnType<typeof useSharedValue<number>> }) {
+  const L_BAR = 10
+  const L_RIGHT = 100
+  const L_LEFT = 100
+  const L_ACCENT = 5
+
+  const barProps = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.min(drawProgress.value / 0.2, 1)
+    return { strokeDashoffset: L_BAR * (1 - p) }
+  })
+  const rightProps = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.max(0, Math.min((drawProgress.value - 0.2) / 0.35, 1))
+    return { strokeDashoffset: L_RIGHT * (1 - p) }
+  })
+  const accentRProps = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.max(0, Math.min((drawProgress.value - 0.5) / 0.1, 1))
+    return { strokeDashoffset: L_ACCENT * (1 - p) }
+  })
+  const leftProps = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.max(0, Math.min((drawProgress.value - 0.6) / 0.3, 1))
+    return { strokeDashoffset: L_LEFT * (1 - p) }
+  })
+  const accentLProps = useAnimatedProps(() => {
+    'worklet'
+    const p = Math.max(0, Math.min((drawProgress.value - 0.88) / 0.12, 1))
+    return { strokeDashoffset: L_ACCENT * (1 - p) }
+  })
+
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <AnimatedPath
+        d="M9.6 14.4 L14.4 9.6"
+        stroke={color} strokeWidth={2} strokeLinecap="round"
+        fill="none" strokeDasharray={L_BAR} animatedProps={barProps}
+      />
+      <AnimatedPath
+        d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z"
+        stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+        fill="none" strokeDasharray={L_RIGHT} animatedProps={rightProps}
+      />
+      <AnimatedPath
+        d="M20.1 3.9 L21.5 2.5"
+        stroke={color} strokeWidth={2} strokeLinecap="round"
+        fill="none" strokeDasharray={L_ACCENT} animatedProps={accentRProps}
+      />
+      <AnimatedPath
+        d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z"
+        stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+        fill="none" strokeDasharray={L_LEFT} animatedProps={leftProps}
+      />
+      <AnimatedPath
+        d="M2.5 21.5 L3.9 20.1"
+        stroke={color} strokeWidth={2} strokeLinecap="round"
+        fill="none" strokeDasharray={L_ACCENT} animatedProps={accentLProps}
+      />
+    </Svg>
+  )
+}
+
 interface KPIBandeauProps {
   workoutsThisMonth: number
   trendPercent: number
+  scaleSeances: ReturnType<typeof useSharedValue<number>>
+  scaleTrend: ReturnType<typeof useSharedValue<number>>
+  drawArrow: ReturnType<typeof useSharedValue<number>>
+  drawMapPin: ReturnType<typeof useSharedValue<number>>
+  drawDumbbell: ReturnType<typeof useSharedValue<number>>
 }
 
-function KPIBandeau({ workoutsThisMonth, trendPercent }: KPIBandeauProps) {
+function KPIBandeau({ workoutsThisMonth, trendPercent, scaleSeances, scaleTrend, drawArrow, drawMapPin, drawDumbbell }: KPIBandeauProps) {
   const { colors } = useTheme()
   const router = useRouter()
+
+  const seancesStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scaleSeances.value }],
+  }))
+  const trendStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scaleTrend.value }],
+  }))
 
   const trendColor =
     trendPercent > 5 ? colors.success :
     trendPercent < -5 ? colors.error :
     colors.textSecondary
 
-  const TrendIcon = trendPercent > 5 ? TrendingUp : trendPercent < -5 ? TrendingDown : null
+  const showArrow = trendPercent > 5 || trendPercent < -5
+  const arrowUp = trendPercent > 5
 
   return (
     <View>
@@ -767,7 +944,7 @@ function KPIBandeau({ workoutsThisMonth, trendPercent }: KPIBandeauProps) {
         onPress={() => router.push('/gyms')}
         style={[styles.kpiItem, { backgroundColor: colors.backgroundSecondary }]}
       >
-        <MapPin size={20} color={colors.textSecondary} />
+        <MapPinIcon color={colors.textSecondary} drawProgress={drawMapPin} />
         <Text
           style={[typography.caption, { color: colors.textSecondary, textAlign: 'center' }]}
           numberOfLines={1}
@@ -778,20 +955,22 @@ function KPIBandeau({ workoutsThisMonth, trendPercent }: KPIBandeauProps) {
 
       {/* Séances ce mois */}
       <View style={[styles.kpiItem, { backgroundColor: colors.backgroundSecondary }]}>
-        <Dumbbell size={20} color={colors.textSecondary} />
-        <Text
-          style={[
-            typography.body,
-            {
-              color: colors.textPrimary,
-              fontFamily: 'Barlow_700Bold',
-              fontVariant: ['tabular-nums'],
-              textAlign: 'center',
-            },
-          ]}
-        >
-          {workoutsThisMonth}
-        </Text>
+        <DumbbellIcon color={colors.textSecondary} drawProgress={drawDumbbell} />
+        <Animated.View style={seancesStyle}>
+          <Text
+            style={[
+              typography.body,
+              {
+                color: colors.textPrimary,
+                fontFamily: 'Barlow_700Bold',
+                fontVariant: ['tabular-nums'],
+                textAlign: 'center',
+              },
+            ]}
+          >
+            {workoutsThisMonth}
+          </Text>
+        </Animated.View>
         <Text
           style={[typography.caption, { color: colors.textSecondary, textAlign: 'center' }]}
           numberOfLines={1}
@@ -802,20 +981,22 @@ function KPIBandeau({ workoutsThisMonth, trendPercent }: KPIBandeauProps) {
 
       {/* Tendance */}
       <View style={[styles.kpiItem, { backgroundColor: colors.backgroundSecondary }]}>
-        {TrendIcon && <TrendIcon size={20} color={trendColor} />}
-        <Text
-          style={[
-            typography.body,
-            {
-              color: trendColor,
-              fontFamily: 'Barlow_700Bold',
-              fontVariant: ['tabular-nums'],
-              textAlign: 'center',
-            },
-          ]}
-        >
-          {trendPercent > 0 ? '+' : ''}{Math.round(trendPercent)}%
-        </Text>
+        {showArrow && <TrendArrow color={trendColor} up={arrowUp} drawProgress={drawArrow} />}
+        <Animated.View style={trendStyle}>
+          <Text
+            style={[
+              typography.body,
+              {
+                color: trendColor,
+                fontFamily: 'Barlow_700Bold',
+                fontVariant: ['tabular-nums'],
+                textAlign: 'center',
+              },
+            ]}
+          >
+            {trendPercent > 0 ? '+' : ''}{Math.round(trendPercent)}%
+          </Text>
+        </Animated.View>
         <Text
           style={[typography.caption, { color: colors.textSecondary, textAlign: 'center' }]}
           numberOfLines={1}
@@ -854,28 +1035,141 @@ export default function FeedScreen() {
   const [workoutsThisMonth, setWorkoutsThisMonth] = useState(0)
   const [trendPercent, setTrendPercent] = useState(0)
   const greetingOpacity = useSharedValue(0)
-  const greetingTranslate = useSharedValue(-20)
+  const greetingTranslate = useSharedValue(8)
+  const logoScale = useSharedValue(1)
+  const refreshSpin = useSharedValue(0)
+  const listOpacity = useSharedValue(1)
+  const listTranslateY = useSharedValue(0)
+  const listTranslateX = useSharedValue(0)
+  const dotAngle = useSharedValue(0)
+  const scaleSeances = useSharedValue(1)
+  const scaleTrend = useSharedValue(1)
+  const drawArrow = useSharedValue(1)
+  const drawMapPin = useSharedValue(1)
+  const drawDumbbell = useSharedValue(1)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const kpiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isFirstFocus = useRef(true)
+  const firstNameRef = useRef('')
 
-  // ─── Animation greeting — sort du logo (translateX depuis 0, ease out) ──────
+  // Garder le ref à jour sans recréer l'interval
+  useEffect(() => {
+    firstNameRef.current = currentUserFirstName
+  }, [currentUserFirstName])
+
+  // ─── Interval unique monté une fois — logo + greeting synchronisés ───────────
 
   useEffect(() => {
-    if (!currentUserFirstName) return
-    greetingOpacity.value = 0
-    greetingTranslate.value = -40
-    greetingOpacity.value = withTiming(1, { duration: 450, easing: Easing.out(Easing.ease) })
-    greetingTranslate.value = withTiming(0, { duration: 450, easing: Easing.out(Easing.ease) })
+    const tick = () => {
+      logoScale.value = withSequence(
+        withSpring(1.22, { damping: 5, stiffness: 500 }),
+        withSpring(1.0, { damping: 10, stiffness: 300 }),
+        withSpring(1.1, { damping: 7, stiffness: 420 }),
+        withSpring(1.0, { damping: 14, stiffness: 260 })
+      )
 
-    const timer = setTimeout(() => {
-      greetingOpacity.value = withTiming(0, { duration: 400, easing: Easing.in(Easing.ease) })
-    }, 5000)
+      scaleSeances.value = 1
+      scaleSeances.value = withSequence(
+        withTiming(1.18, { duration: 120, easing: Easing.bezier(0.34, 1.56, 0.64, 1) }),
+        withTiming(1.0, { duration: 200, easing: Easing.bezier(0.37, 0, 0.63, 1) })
+      )
+      drawMapPin.value = 0
+      drawMapPin.value = withTiming(1, { duration: 1100, easing: Easing.bezier(0.37, 0, 0.63, 1) })
+      drawDumbbell.value = 0
+      drawDumbbell.value = withTiming(1, { duration: 1100, easing: Easing.bezier(0.37, 0, 0.63, 1) })
+      drawArrow.value = 0
+      drawArrow.value = withTiming(1, { duration: 1100, easing: Easing.bezier(0.37, 0, 0.63, 1) })
+      if (kpiTimerRef.current) clearTimeout(kpiTimerRef.current)
+      kpiTimerRef.current = setTimeout(() => {
+        scaleTrend.value = 1
+        scaleTrend.value = withSequence(
+          withTiming(1.18, { duration: 120, easing: Easing.bezier(0.34, 1.56, 0.64, 1) }),
+          withTiming(1.0, { duration: 200, easing: Easing.bezier(0.37, 0, 0.63, 1) })
+        )
+      }, 150)
 
-    return () => clearTimeout(timer)
-  }, [currentUserFirstName])
+      // Point qui fait le tour du cercle avatar en 1s
+      dotAngle.value = 0
+      dotAngle.value = withTiming(2 * Math.PI, {
+        duration: 1000,
+        easing: Easing.bezier(0.37, 0, 0.63, 1),
+      })
+
+      if (!firstNameRef.current) return
+
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+      greetingOpacity.value = 0
+      greetingTranslate.value = 8
+      greetingOpacity.value = withTiming(1, { duration: 500, easing: Easing.bezier(0.16, 1, 0.3, 1) })
+      greetingTranslate.value = withSpring(0, { damping: 25, stiffness: 120 })
+
+      hideTimerRef.current = setTimeout(() => {
+        greetingOpacity.value = withTiming(0, { duration: 450, easing: Easing.bezier(0.37, 0, 0.63, 1) })
+        greetingTranslate.value = withTiming(-4, { duration: 400, easing: Easing.bezier(0.37, 0, 0.63, 1) })
+      }, 4000)
+    }
+
+    tick()
+    const id = setInterval(tick, 5000)
+
+    return () => {
+      clearInterval(id)
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+      cancelAnimation(logoScale)
+      cancelAnimation(greetingOpacity)
+      cancelAnimation(greetingTranslate)
+      cancelAnimation(dotAngle)
+      cancelAnimation(scaleSeances)
+      cancelAnimation(scaleTrend)
+      cancelAnimation(drawArrow)
+      cancelAnimation(drawMapPin)
+      cancelAnimation(drawDumbbell)
+      if (kpiTimerRef.current) clearTimeout(kpiTimerRef.current)
+    }
+  }, [])
 
   const greetingAnimStyle = useAnimatedStyle(() => ({
     opacity: greetingOpacity.value,
-    transform: [{ translateX: greetingTranslate.value }],
+    transform: [{ translateY: greetingTranslate.value }],
   }))
+
+  const logoAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: logoScale.value }],
+  }))
+
+  const refreshSpinStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${refreshSpin.value}deg` }],
+  }))
+
+  // Point animé — r orbital=21 → point (r=4.5) reste dans wrapper 52px (centre=26)
+  const dotAnimatedProps = useAnimatedProps(() => {
+    'worklet'
+    const a = dotAngle.value - Math.PI / 4
+    return {
+      cx: 26 + 21 * Math.cos(a),
+      cy: 26 + 21 * Math.sin(a),
+    }
+  })
+
+  const listAnimStyle = useAnimatedStyle(() => ({
+    opacity: listOpacity.value,
+    transform: [{ translateY: listTranslateY.value }, { translateX: listTranslateX.value }],
+  }))
+
+  // ─── Refresh spin ───────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (refreshing) {
+      refreshSpin.value = 0
+      refreshSpin.value = withRepeat(
+        withTiming(360, { duration: 700, easing: Easing.linear }),
+        -1,
+        false
+      )
+    } else {
+      cancelAnimation(refreshSpin)
+    }
+  }, [refreshing])
 
   // ─── Auth ───────────────────────────────────────────────────────────────────
 
@@ -1020,16 +1314,37 @@ export default function FeedScreen() {
     computeKPIs(mapped)
   }, [computeKPIs])
 
-  useEffect(() => {
-    fetchFeed().finally(() => setLoading(false))
-  }, [fetchFeed])
+  useFocusEffect(
+    useCallback(() => {
+      if (isFirstFocus.current) {
+        isFirstFocus.current = false
+        fetchFeed().finally(() => setLoading(false))
+      } else {
+        // Retour sur le tab — slide depuis la droite + actualisation
+        const W = Dimensions.get('window').width
+        listTranslateX.value = W
+        listOpacity.value = 0.85
+        listTranslateX.value = withSpring(0, { damping: 22, stiffness: 180, mass: 0.8 })
+        listOpacity.value = withTiming(1, { duration: 220, easing: Easing.bezier(0.16, 1, 0.3, 1) })
+        listTranslateY.value = 0
+        setRefreshing(true)
+        Promise.all([fetchFeed(), new Promise(r => setTimeout(r, 1500))]).finally(() => {
+          setRefreshing(false)
+        })
+      }
+    }, [fetchFeed])
+  )
 
   // ─── Pull to refresh ────────────────────────────────────────────────────────
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
-    await fetchFeed()
+    listOpacity.value = 0.6
+    listTranslateY.value = 6
+    await Promise.all([fetchFeed(), new Promise(r => setTimeout(r, 1500))])
     setRefreshing(false)
+    listOpacity.value = withTiming(1, { duration: 300, easing: Easing.bezier(0.16, 1, 0.3, 1) })
+    listTranslateY.value = withSpring(0, { damping: 20, stiffness: 300 })
   }, [fetchFeed])
 
   // ─── Like toggle ────────────────────────────────────────────────────────────
@@ -1079,43 +1394,60 @@ export default function FeedScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Header — Logo + Greeting animé (sort du logo) + Avatar */}
+      {/* Header — Logo animé + Greeting émerge + Avatar */}
       <View style={[styles.header, { paddingHorizontal: spacing.s4, paddingVertical: spacing.s3 }]}>
-        <TouchableOpacity onPress={() => router.push('/chat')} activeOpacity={0.8}>
-          <OravaLogo colors={colors} />
-        </TouchableOpacity>
-        <Animated.View style={[{ flex: 1, marginLeft: spacing.s3, overflow: 'hidden' }, greetingAnimStyle]}>
-          <Text
-            style={[typography.body, { color: colors.textPrimary, fontFamily: 'Barlow_600SemiBold' }]}
-            numberOfLines={1}
-          >
-            Bonjour {currentUserFirstName},
-          </Text>
-          <Text
-            style={[typography.caption, { color: colors.textSecondary }]}
-            numberOfLines={1}
-          >
-            as-tu une question ?
-          </Text>
+        <Animated.View style={logoAnimStyle}>
+          <TouchableOpacity onPress={() => router.push('/chat')} activeOpacity={0.8}>
+            <OravaLogo colors={colors} />
+          </TouchableOpacity>
         </Animated.View>
-        <TouchableOpacity onPress={handleNavigateProfile}>
-          <View style={[styles.avatarSmallHeader, { backgroundColor: colors.backgroundSecondary }]}>
-            <Text style={[styles.avatarInitialsSmall, { color: colors.textPrimary }]}>
-              {currentUserFirstName.charAt(0).toUpperCase()}
+        {/* Clip parent — le texte émerge depuis le bord gauche */}
+        <View style={{ flex: 1, marginLeft: spacing.s3 }}>
+          <Animated.View style={greetingAnimStyle}>
+            <Text
+              style={[typography.body, { color: colors.textPrimary, fontFamily: 'Barlow_600SemiBold' }]}
+              numberOfLines={1}
+            >
+              Bonjour {currentUserFirstName},
             </Text>
+            <Text
+              style={[typography.caption, { color: colors.textSecondary }]}
+              numberOfLines={1}
+            >
+              as-tu une question ?
+            </Text>
+          </Animated.View>
+        </View>
+        <TouchableOpacity onPress={handleNavigateProfile} hitSlop={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+          {/* Wrapper 44×44 — avatar 40×40 centré, SVG overlay pour le point orbital */}
+          <View style={styles.avatarHeaderWrap}>
+            <View style={[styles.avatarSmallHeader, { backgroundColor: colors.backgroundSecondary, borderColor: colors.accent }]}>
+              <Text style={[styles.avatarInitialsSmall, { color: colors.textPrimary }]}>
+                {currentUserFirstName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <Svg width={52} height={52} style={StyleSheet.absoluteFill} pointerEvents="none">
+              <AnimatedCircle
+                r={4.5}
+                fill={colors.accent}
+                animatedProps={dotAnimatedProps}
+              />
+            </Svg>
           </View>
         </TouchableOpacity>
       </View>
 
       {/* KPI Bandeau */}
       {!loading && (
-        <KPIBandeau workoutsThisMonth={workoutsThisMonth} trendPercent={trendPercent} />
+        <KPIBandeau workoutsThisMonth={workoutsThisMonth} trendPercent={trendPercent} scaleSeances={scaleSeances} scaleTrend={scaleTrend} drawArrow={drawArrow} drawMapPin={drawMapPin} drawDumbbell={drawDumbbell} />
       )}
 
       {/* Refresh indicator */}
       {refreshing && (
         <View style={styles.refreshIndicator}>
-          <RefreshCw size={12} color={colors.textTertiary} />
+          <Animated.View style={refreshSpinStyle}>
+            <RefreshCw size={12} color={colors.accent} />
+          </Animated.View>
           <Text
             style={[
               typography.caption,
@@ -1135,6 +1467,7 @@ export default function FeedScreen() {
           ))}
         </View>
       ) : (
+        <Animated.View style={[{ flex: 1 }, listAnimStyle]}>
         <FlatList
           data={workouts}
           keyExtractor={item => item.id}
@@ -1163,6 +1496,7 @@ export default function FeedScreen() {
           ListEmptyComponent={() => <FeedEmptyState />}
           showsVerticalScrollIndicator={false}
         />
+        </Animated.View>
       )}
     </SafeAreaView>
   )
@@ -1180,12 +1514,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.s3,
   },
+  avatarHeaderWrap: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
   avatarSmallHeader: {
     width: 40,
     height: 40,
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1.5,
   },
   kpiBandeau: {
     flexDirection: 'row',

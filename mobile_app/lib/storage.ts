@@ -11,6 +11,15 @@ export const storage = {
   getString(key: string): string | undefined {
     return cache.get(key)
   },
+  getNumber(key: string): number | undefined {
+    const v = cache.get(key)
+    if (v === undefined) return undefined
+    const n = Number(v)
+    return isNaN(n) ? undefined : n
+  },
+  setNumber(key: string, value: number): void {
+    this.set(key, String(value))
+  },
   delete(key: string): void {
     cache.delete(key)
     AsyncStorage.removeItem(PREFIX + key).catch(() => {})

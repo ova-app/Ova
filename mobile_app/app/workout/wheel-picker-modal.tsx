@@ -200,7 +200,7 @@ export default function WheelPickerModal({
   useEffect(() => {
     if (isVisible) {
       setMounted(true)
-      slideValue.value = withSpring(0, spring.standard)
+      slideValue.value = withTiming(0, { duration: 320, easing: Easing.bezier(0.16, 1, 0.3, 1) })
       backdropOpacity.value = withTiming(1, { duration: 200 })
     } else {
       slideValue.value = withSpring(Dimensions.get('window').height, spring.snappy)

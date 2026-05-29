@@ -27,6 +27,7 @@ import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, touchTarget, spring } from '@/constants/theme'
 import { prBadgeRecipe, type PrType } from '@/constants/recipes'
 import { useWorkout, computePodium, WorkoutExercise, PrLevel } from '@/context/WorkoutContext'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { saveMyoSignature } from '@/lib/myo'
 import { insertLocalSet, insertLocalSession } from '@/lib/db'
 import { storage } from '@/lib/storage'
@@ -162,6 +163,12 @@ export default function SummaryScreen() {
       runOnJS(setDisplayVolume)(Math.round(value))
     }
   )
+
+  useEffect(() => {
+    void AsyncStorage.getItem('settings_public_workouts').then(v => {
+      if (v === 'true') setIsPublic(true)
+    })
+  }, [])
 
   useEffect(() => {
     if (status !== 'done') {

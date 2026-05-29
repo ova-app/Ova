@@ -24,7 +24,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Haptics from 'expo-haptics'
-import { Plus, Trash2, X, Search, Zap, Flame, Trophy, Dumbbell, Check } from 'lucide-react-native'
+import { Plus, Trash2, X, Search, Zap, Flame, Trophy, Dumbbell, Check, ChevronLeft } from 'lucide-react-native'
+import Svg, { Circle } from 'react-native-svg'
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, touchTarget, spring } from '@/constants/theme'
 import {
@@ -125,36 +126,14 @@ function normalizeNFD(s: string): string {
 function LogoOrava() {
   const { colors } = useTheme()
   return (
-    <View
-      style={{
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: colors.accent,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <View
-        style={{
-          width: 22,
-          height: 22,
-          borderRadius: 11,
-          backgroundColor: colors.background,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <View
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: colors.accent,
-          }}
-        />
-      </View>
-    </View>
+    <Svg width={48} height={48} viewBox="0 0 100 100">
+      <Circle cx="50" cy="50" r="44"   stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="35.5" stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="27"   stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="18.5" stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="10"   stroke={colors.accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="3.5"  fill={colors.accent} />
+    </Svg>
   )
 }
 
@@ -168,39 +147,59 @@ interface SetRowProps {
 
 function SetRow({ set, onDelete, colors }: SetRowProps) {
   const translateX = useSharedValue(0)
-  const THRESHOLD = 80
+  const baseOffset = useSharedValue(0)
+  const rowHeight = useSharedValue(touchTarget.comfort)
+  const rowOpacity = useSharedValue(1)
+  const THRESHOLD = 56
+  const DELETE_REVEAL = 68
 
   const panGesture = Gesture.Pan()
     .activeOffsetX([-6, 6])
     .failOffsetY([-20, 20])
     .onUpdate((e: GestureUpdateEvent<PanGestureHandlerEventPayload>) => {
-      if (e.translationX < 0) {
-        translateX.value = e.translationX
-      }
+      const next = baseOffset.value + e.translationX
+      translateX.value = Math.min(0, Math.max(next, -DELETE_REVEAL))
     })
     .onEnd((e: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
-      if (e.translationX < -THRESHOLD) {
-        translateX.value = withSpring(-300, spring.snappy, (finished) => {
-          'worklet'
-          if (finished) runOnJS(onDelete)()
-        })
+      const next = baseOffset.value + e.translationX
+      if (next < -THRESHOLD) {
+        translateX.value = withSpring(-DELETE_REVEAL, spring.snappy)
+        baseOffset.value = -DELETE_REVEAL
       } else {
         translateX.value = withSpring(0, spring.snappy)
+        baseOffset.value = 0
       }
     })
 
+  function handleDeleteConfirm() {
+    rowOpacity.value = withTiming(0, { duration: 180, easing: Easing.out(Easing.quad) })
+    rowHeight.value = withTiming(0, { duration: 260, easing: Easing.bezier(0.16, 1, 0.3, 1) }, (finished) => {
+      'worklet'
+      if (finished) runOnJS(onDelete)()
+    })
+  }
+
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
+  }))
+
+  const wrapperAnimStyle = useAnimatedStyle(() => ({
+    height: rowHeight.value,
+    opacity: rowOpacity.value,
   }))
 
   const prLevel = bestPrLevel(set.pr_charge, set.pr_serie)
   const prColor = prLevelColor(prLevel, colors)
 
   return (
-    <View style={[styles.setRowWrapper, { borderRadius: radius.md }]}>
-      <View style={[styles.setRowDeleteBg, { backgroundColor: colors.error, borderRadius: radius.md }]}>
-        <Trash2 size={20} color="#fff" />
-      </View>
+    <Animated.View style={[styles.setRowWrapper, { borderRadius: radius.md }, wrapperAnimStyle]}>
+      <TouchableOpacity
+        style={[styles.setRowDeleteBg, { backgroundColor: colors.error }]}
+        onPress={handleDeleteConfirm}
+        activeOpacity={0.75}
+      >
+        <Trash2 size={16} color="#fff" />
+      </TouchableOpacity>
       <GestureDetector gesture={panGesture}>
         <Animated.View
           style={[
@@ -232,7 +231,7 @@ function SetRow({ set, onDelete, colors }: SetRowProps) {
           )}
         </Animated.View>
       </GestureDetector>
-    </View>
+    </Animated.View>
   )
 }
 
@@ -266,7 +265,7 @@ function ExerciseModal({ visible, onClose, onSelect, addedIds, colors }: Exercis
   useEffect(() => {
     if (visible) {
       setMounted(true)
-      slideValue.value = withSpring(0, spring.standard)
+      slideValue.value = withTiming(0, { duration: 320, easing: Easing.bezier(0.16, 1, 0.3, 1) })
       backdropOpacity.value = withTiming(1, { duration: 200 })
       fetchExercises()
     } else {
@@ -678,6 +677,7 @@ export default function SessionScreen() {
     elapsedSeconds,
     startWorkout,
     finishWorkout,
+    resetWorkout,
     addExercise,
     removeExercise,
     setCurrentIndex,
@@ -739,6 +739,21 @@ export default function SessionScreen() {
       tabsScrollRef.current.scrollTo({ x: currentIndex * 120, animated: true })
     }
   }, [currentIndex, exercises.length])
+
+  // ── Idle back animation ──
+  const idleTranslateX = useSharedValue(0)
+  const idleSlideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: idleTranslateX.value }],
+  }))
+
+  function handleIdleBack() {
+    const W = Dimensions.get('window').width
+    idleTranslateX.value = withTiming(
+      W,
+      { duration: 280, easing: Easing.bezier(0.16, 1, 0.3, 1) },
+      (finished) => { if (finished) runOnJS(router.replace)('/(tabs)/feed') },
+    )
+  }
 
   const currentExercise: WorkoutExercise | undefined = exercises[currentIndex]
   const draftSet: WorkoutSet | undefined = currentExercise?.sets.find(s => !s.validated)
@@ -814,11 +829,9 @@ export default function SessionScreen() {
     const events = buildPrEvents(prCharge, prSerie, draftWeight, draftReps)
     if (events.length > 0) {
       setPrFlash(events)
-      // PR: laisser le flash respirer avant timer
-      setTimeout(() => router.push('/workout/timer'), 2500)
+      setTimeout(() => router.push('/workout/timer'), 1500)
     } else {
-      // Pas de PR: timer immédiat dès validation
-      setTimeout(() => router.push('/workout/timer'), 250)
+      router.push('/workout/timer')
     }
   }
 
@@ -847,8 +860,15 @@ export default function SessionScreen() {
   // ── IDLE screen ──
   if (status === 'idle') {
     return (
-      <View style={[styles.flex, { backgroundColor: colors.background }]}>
+      <Animated.View style={[styles.flex, { backgroundColor: colors.background }, idleSlideStyle]}>
         <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+        <TouchableOpacity
+          style={[styles.idleBackBtn, { top: insets.top + spacing.s4 }]}
+          onPress={handleIdleBack}
+          activeOpacity={0.7}
+        >
+          <ChevronLeft size={24} color={colors.textSecondary} strokeWidth={2} />
+        </TouchableOpacity>
         <View style={[styles.idleContainer, { paddingBottom: insets.bottom, paddingTop: insets.top }]}>
           <Text style={[styles.idleTitle, { color: colors.textPrimary }]}>Orava</Text>
           <Text style={[styles.idleSubtitle, { color: colors.textSecondary }]}>
@@ -862,7 +882,7 @@ export default function SessionScreen() {
             <Text style={[styles.startButtonText, { color: colors.background }]}>DÉMARRER UNE SÉANCE</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </Animated.View>
     )
   }
 
@@ -874,7 +894,18 @@ export default function SessionScreen() {
       {/* Top safe area + header */}
       <View style={{ paddingTop: insets.top }}>
         <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-          <LogoOrava />
+          {exercises.length === 0 ? (
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => { resetWorkout(); router.replace('/(tabs)/feed') }}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <ChevronLeft size={28} color={colors.textPrimary} />
+            </TouchableOpacity>
+          ) : (
+            <LogoOrava />
+          )}
           <View style={styles.headerCenter}>
             <Text
               style={{
@@ -1088,6 +1119,15 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
 
   // ── Idle ──
+  idleBackBtn: {
+    position: 'absolute',
+    left: spacing.s4,
+    zIndex: 1,
+    width: touchTarget.comfort,
+    height: touchTarget.comfort,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   idleContainer: {
     flex: 1,
     alignItems: 'center',
@@ -1126,6 +1166,12 @@ const styles = StyleSheet.create({
   },
   headerCenter: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButton: {
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1234,14 +1280,18 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.s2,
   },
   setRowWrapper: {
-    height: touchTarget.comfort,
     overflow: 'hidden',
   },
   setRowDeleteBg: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'flex-end',
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 68,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingRight: spacing.s4,
+    borderTopRightRadius: radius.md,
+    borderBottomRightRadius: radius.md,
   },
   setRowContent: {
     flex: 1,

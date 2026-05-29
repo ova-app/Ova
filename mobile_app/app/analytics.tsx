@@ -7,6 +7,14 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native'
+import {
+  useSharedValue,
+  useAnimatedReaction,
+  runOnJS,
+  withTiming,
+  withDelay,
+  Easing,
+} from 'react-native-reanimated'
 import { useRouter } from 'expo-router'
 import { ChevronLeft, Dumbbell, TrendingUp, Zap } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
@@ -83,6 +91,46 @@ function deltaSign(pct: number): string {
   if (pct > 0) return `+${Math.round(pct)}%`
   if (pct < 0) return `${Math.round(pct)}%`
   return '—'
+}
+
+// ─── Animated counter ────────────────────────────────────────────────────────
+
+const easeOutCubic = Easing.bezier(0.215, 0.61, 0.355, 1)
+
+function AnimatedCounter({
+  target,
+  duration = 1200,
+  delay = 0,
+  style,
+  formatter = (v: number) => String(v),
+}: {
+  target: number
+  duration?: number
+  delay?: number
+  style?: object
+  formatter?: (v: number) => string
+}) {
+  const sv = useSharedValue(0)
+  const [displayValue, setDisplayValue] = useState(() => formatter(0))
+
+  const formatAndSet = useCallback((v: number) => {
+    setDisplayValue(formatter(Math.round(v)))
+  }, [formatter])
+
+  useEffect(() => {
+    sv.value = withDelay(delay, withTiming(target, { duration, easing: easeOutCubic }))
+  }, [target, delay, duration])
+
+  useAnimatedReaction(
+    () => Math.round(sv.value * 2),
+    (current, previous) => {
+      if (current !== previous) {
+        runOnJS(formatAndSet)(sv.value)
+      }
+    }
+  )
+
+  return <Text style={style}>{displayValue}</Text>
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -304,18 +352,25 @@ export default function AnalyticsScreen(): React.JSX.Element {
         {/* ── Métriques hero — séances + volume 90j ── */}
         <View style={s.heroCard}>
           <View style={s.heroCol}>
-            <Text style={s.heroValueAccent}>
-              {totalSeances}
-            </Text>
+            <AnimatedCounter
+              target={totalSeances}
+              duration={1400}
+              delay={0}
+              style={s.heroValueAccent}
+            />
             <Text style={s.heroLabel}>SÉANCES 90J</Text>
           </View>
 
           <View style={s.heroSep} />
 
           <View style={s.heroCol}>
-            <Text style={s.heroValuePrimary}>
-              {formatVolume(totalVolumeKg)}
-            </Text>
+            <AnimatedCounter
+              target={totalVolumeKg}
+              duration={1400}
+              delay={120}
+              style={s.heroValuePrimary}
+              formatter={formatVolume}
+            />
             <Text style={s.heroLabel}>KG TOTAL 90J</Text>
           </View>
         </View>
@@ -341,10 +396,16 @@ export default function AnalyticsScreen(): React.JSX.Element {
                     {deltaSign(volumeRolling.delta7vs30)} vs moy.
                   </Text>
                 </View>
-                <Text style={s.rollingValueAccent}>
-                  {formatVolume(volumeRolling.vol7j)}
+                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                  <AnimatedCounter
+                    target={volumeRolling.vol7j}
+                    duration={1200}
+                    delay={0}
+                    style={s.rollingValueAccent}
+                    formatter={formatVolume}
+                  />
                   <Text style={s.rollingUnit}> kg</Text>
-                </Text>
+                </View>
               </View>
 
               <View style={s.rowSep} />
@@ -352,10 +413,16 @@ export default function AnalyticsScreen(): React.JSX.Element {
               {/* Ligne 30j */}
               <View style={s.rollingRow}>
                 <Text style={s.rollingPeriod}>30J</Text>
-                <Text style={s.rollingValuePrimary}>
-                  {formatVolume(volumeRolling.vol30j)}
+                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                  <AnimatedCounter
+                    target={volumeRolling.vol30j}
+                    duration={1200}
+                    delay={80}
+                    style={s.rollingValuePrimary}
+                    formatter={formatVolume}
+                  />
                   <Text style={s.rollingUnit}> kg</Text>
-                </Text>
+                </View>
               </View>
 
               <View style={s.rowSep} />
@@ -363,10 +430,16 @@ export default function AnalyticsScreen(): React.JSX.Element {
               {/* Ligne 90j */}
               <View style={s.rollingRow}>
                 <Text style={s.rollingPeriod}>90J</Text>
-                <Text style={s.rollingValuePrimary}>
-                  {formatVolume(volumeRolling.vol90j)}
+                <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                  <AnimatedCounter
+                    target={volumeRolling.vol90j}
+                    duration={1200}
+                    delay={160}
+                    style={s.rollingValuePrimary}
+                    formatter={formatVolume}
+                  />
                   <Text style={s.rollingUnit}> kg</Text>
-                </Text>
+                </View>
               </View>
 
               {/* Barre visuelle 7j / 30j normalisée */}

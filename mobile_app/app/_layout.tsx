@@ -55,7 +55,10 @@ export default function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <ThemeProvider>
           <WorkoutProvider>
-            <Stack screenOptions={{ headerShown: false }} />
+            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0A0F' } }}>
+              <Stack.Screen name="workout/session" options={{ animation: 'none', gestureEnabled: false }} />
+              <Stack.Screen name="workout/timer" options={{ animation: 'none', gestureEnabled: false }} />
+            </Stack>
           </WorkoutProvider>
         </ThemeProvider>
       </GestureHandlerRootView>

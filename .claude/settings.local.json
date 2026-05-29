@@ -66,7 +66,8 @@
       "Bash(python)",
       "Bash(git restore *)",
       "Bash(python3)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(powershell -Command \"Select-String -Path 'app/**/*.tsx','app/*.tsx' -Pattern 'LogoOrava|OravaLogo|orava_logo|width: 48.*borderRadius: 24|width.*48.*borderRadius.*24' -Recurse | Select-Object Filename, LineNumber, Line\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\SofianeBESSILA\\orava\\mobile_app\\app\\workout"

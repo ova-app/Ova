@@ -6,7 +6,7 @@ import {
   StatusBar,
 } from 'react-native'
 import { useRouter } from 'expo-router'
-import Svg, { Path } from 'react-native-svg'
+import Svg, { Path, Circle } from 'react-native-svg'
 import Animated, {
   useSharedValue,
   withRepeat,
@@ -21,28 +21,16 @@ import { spacing, font } from '@/constants/theme'
 
 // ─── Logo Orava — cercle jaune + losange noir intérieur ──────────────────────
 
-function LogoOrava({ accentColor, bgColor }: { accentColor: string; bgColor: string }): React.JSX.Element {
+function LogoOrava({ accentColor }: { accentColor: string; bgColor: string }): React.JSX.Element {
   return (
-    <View
-      style={{
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: accentColor,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      {/* Losange intérieur noir */}
-      <View
-        style={{
-          width: 16,
-          height: 16,
-          backgroundColor: bgColor,
-          transform: [{ rotate: '45deg' }],
-        }}
-      />
-    </View>
+    <Svg width={72} height={72} viewBox="0 0 100 100">
+      <Circle cx="50" cy="50" r="44"   stroke={accentColor} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="35.5" stroke={accentColor} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="27"   stroke={accentColor} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="18.5" stroke={accentColor} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="10"   stroke={accentColor} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="3.5"  fill={accentColor} />
+    </Svg>
   )
 }
 

@@ -315,14 +315,20 @@ sessionSave()    → NotificationFeedbackType.Success
 
 ## Logo Orava — directives
 
-**Design validé (25/05/2026)** : bullseye 3 couches — cercle jaune extérieur + cercle noir intermédiaire + point jaune central. Source : `image-3.png` racine repo.
+**Design validé (28/05/2026)** : bullseye 6 couches — jaune(48) → noir(32) → jaune(24) → noir(14) → jaune(8) → point noir(4).
 
 Implémentation code (utilisée partout) :
 ```tsx
-// Cercle jaune 48px + cercle noir 22px + dot jaune 8px
+// Bullseye 6 couches : jaune(48) → noir(32) → jaune(24) → noir(14) → jaune(8) → point noir(4)
 <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-  <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' }}>
-    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent }} />
+  <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.background }} />
+        </View>
+      </View>
+    </View>
   </View>
 </View>
 ```

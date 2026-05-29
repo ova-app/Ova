@@ -9,6 +9,14 @@ import {
   SectionList,
   TouchableOpacity,
 } from 'react-native'
+import {
+  useSharedValue,
+  useAnimatedReaction,
+  runOnJS,
+  withTiming,
+  withDelay,
+  Easing,
+} from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Zap, Flame, Trophy, ChevronRight } from 'lucide-react-native'
@@ -248,6 +256,48 @@ function HistoryRowInProfile({ item, onPress, colors }: HistoryRowProps) {
   )
 }
 
+// ─── Animated counter ────────────────────────────────────────────────────────
+
+const easeOutCubic = Easing.bezier(0.215, 0.61, 0.355, 1)
+
+function AnimatedCounter({
+  target,
+  duration = 600,
+  delay = 0,
+  style,
+  formatter = (v: number) => String(v),
+}: {
+  target: number
+  duration?: number
+  delay?: number
+  style?: object
+  formatter?: (v: number) => string
+}) {
+  const sv = useSharedValue(0)
+  const [displayValue, setDisplayValue] = useState(() => formatter(0))
+
+  const formatAndSet = useCallback((v: number) => {
+    setDisplayValue(formatter(Math.round(v)))
+  }, [formatter])
+
+  useEffect(() => {
+    sv.value = withDelay(delay, withTiming(target, { duration, easing: easeOutCubic }))
+  }, [target, delay, duration])
+
+  // Déclenche à chaque 0.5 unité au lieu de chaque entier
+  // → mises à jour 2× plus fréquentes, mouvement perçu plus continu
+  useAnimatedReaction(
+    () => Math.round(sv.value * 2),
+    (current, previous) => {
+      if (current !== previous) {
+        runOnJS(formatAndSet)(sv.value)
+      }
+    }
+  )
+
+  return <Text style={style}>{displayValue}</Text>
+}
+
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export default function ProfileScreen(): React.JSX.Element {
@@ -261,7 +311,6 @@ export default function ProfileScreen(): React.JSX.Element {
   const [follows, setFollows] = useState<number>(0)
   const [sparklineData, setSparklineData] = useState<SparklineData[]>([])
   const [historySections, setHistorySections] = useState<HistorySection[]>([])
-  const [loading, setLoading] = useState<boolean>(true)
   const [deconnexionLoading, setDeconnexionLoading] = useState<boolean>(false)
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
@@ -273,33 +322,43 @@ export default function ProfileScreen(): React.JSX.Element {
       return
     }
 
-    // Profile data
-    const { data: profileData } = await supabase
-      .from('users')
-      .select('id, username, full_name, plan, avatar_url, created_at')
-      .eq('id', user.id)
-      .single()
-
-    if (profileData) {
-      setProfile(profileData as UserProfile)
-    }
-
-    // Séances + volume ce mois
+    const uid = user.id
     const debutMois = new Date()
     debutMois.setDate(1)
     debutMois.setHours(0, 0, 0, 0)
 
-    const { data: workoutsData } = await supabase
-      .from('workouts')
-      .select('id, total_volume_kg, started_at')
-      .eq('user_id', user.id)
-      .gte('started_at', debutMois.toISOString())
-      .order('started_at', { ascending: false })
+    // Toutes les queries indépendantes en parallèle
+    const [
+      profileRes,
+      workoutsMonthRes,
+      followerRes,
+      followingRes,
+      setsRes,
+      last8Res,
+      historyRes,
+    ] = await Promise.all([
+      supabase.from('users').select('id, username, full_name, plan, avatar_url, created_at').eq('id', uid).single(),
+      supabase.from('workouts').select('id, total_volume_kg, started_at').eq('user_id', uid).gte('started_at', debutMois.toISOString()).order('started_at', { ascending: false }),
+      supabase.from('follows').select('id', { count: 'exact' }).eq('following_id', uid),
+      supabase.from('follows').select('id', { count: 'exact' }).eq('follower_id', uid),
+      supabase.from('workout_sets').select(`weight_kg, pr_charge, workout_exercises!inner(exercise_id, exercises!inner(name_fr))`).eq('workout_exercises.workouts.user_id', uid).not('pr_charge', 'is', null).order('weight_kg', { ascending: false }).limit(10),
+      supabase.from('workouts').select('total_volume_kg, started_at').eq('user_id', uid).order('started_at', { ascending: false }).limit(8),
+      supabase.from('workouts').select(`id, title, started_at, duration_sec, total_volume_kg, pr_seance, workout_exercises(workout_sets(id))`).eq('user_id', uid).order('started_at', { ascending: false }).limit(50),
+    ])
 
+    // Profile
+    if (profileRes.data) setProfile(profileRes.data as UserProfile)
+
+    // Followers
+    setFollowers(followerRes.data?.length ?? 0)
+    setFollows(followingRes.data?.length ?? 0)
+
+    // Stats mois
+    const workoutsData = workoutsMonthRes.data
     const seances = workoutsData?.length ?? 0
     const volumeKg = workoutsData?.reduce((sum, w) => sum + (w.total_volume_kg ?? 0), 0) ?? 0
 
-    // Streak semaines
+    // Streak (dépend de workoutsData — query séparée inévitable)
     let streakSemaines = 0
     if (workoutsData && workoutsData.length > 0) {
       const { data: metricsData } = await supabase
@@ -307,7 +366,6 @@ export default function ProfileScreen(): React.JSX.Element {
         .select('data')
         .eq('workout_id', workoutsData[0].id)
         .single()
-
       if (metricsData?.data && typeof metricsData.data === 'object') {
         const d = metricsData.data as Record<string, unknown>
         streakSemaines = typeof d.streak_semaines === 'number' ? d.streak_semaines : 0
@@ -316,36 +374,8 @@ export default function ProfileScreen(): React.JSX.Element {
 
     setStats({ seances, volumeKg, streakSemaines })
 
-    // Followers / Follows counts
-    const { data: followerData } = await supabase
-      .from('follows')
-      .select('id', { count: 'exact' })
-      .eq('following_id', user.id)
-
-    const { data: followingData } = await supabase
-      .from('follows')
-      .select('id', { count: 'exact' })
-      .eq('follower_id', user.id)
-
-    setFollowers(followerData?.length ?? 0)
-    setFollows(followingData?.length ?? 0)
-
-    // Top 3 PRs charge
-    const { data: setsData } = await supabase
-      .from('workout_sets')
-      .select(`
-        weight_kg, pr_charge,
-        workout_exercises!inner(
-          exercise_id,
-          exercises!inner(name_fr)
-        )
-      `)
-      .eq('workout_exercises.workouts.user_id', user.id)
-      .not('pr_charge', 'is', null)
-      .order('weight_kg', { ascending: false })
-      .limit(10)
-
-    if (setsData) {
+    // PRs
+    if (setsRes.data) {
       type SetsRow = {
         weight_kg: number | null
         pr_charge: string | null
@@ -357,7 +387,7 @@ export default function ProfileScreen(): React.JSX.Element {
           exercises: { name_fr: string }[] | { name_fr: string }
         }
       }
-      const prs: TopPR[] = (setsData as SetsRow[])
+      const prs: TopPR[] = (setsRes.data as SetsRow[])
         .filter(s => s.pr_charge !== null)
         .slice(0, 3)
         .map(s => {
@@ -373,45 +403,19 @@ export default function ProfileScreen(): React.JSX.Element {
       setTopPRs(prs)
     }
 
-    // Sparkline : 8 dernières séances volumes
-    const { data: last8 } = await supabase
-      .from('workouts')
-      .select('total_volume_kg, started_at')
-      .eq('user_id', user.id)
-      .order('started_at', { ascending: false })
-      .limit(8)
-
-    if (last8) {
+    // Sparkline
+    if (last8Res.data) {
       setSparklineData(
-        last8
-          .reverse()
-          .map(w => ({
-            volume: w.total_volume_kg ?? 0,
-            date: new Date(w.started_at).toLocaleDateString('fr-FR', { day: 'numeric' }),
-          }))
+        [...last8Res.data].reverse().map(w => ({
+          volume: w.total_volume_kg ?? 0,
+          date: new Date(w.started_at).toLocaleDateString('fr-FR', { day: 'numeric' }),
+        }))
       )
     }
 
-    // Historique 50 dernières séances
-    const { data: historyData } = await supabase
-      .from('workouts')
-      .select(`
-        id,
-        title,
-        started_at,
-        duration_sec,
-        total_volume_kg,
-        pr_seance,
-        workout_exercises (
-          workout_sets ( id )
-        )
-      `)
-      .eq('user_id', user.id)
-      .order('started_at', { ascending: false })
-      .limit(50)
-
-    if (historyData) {
-      const rows: WorkoutRow[] = (historyData as Array<{
+    // Historique
+    if (historyRes.data) {
+      const rows: WorkoutRow[] = (historyRes.data as Array<{
         id: string
         title: string
         started_at: string
@@ -419,26 +423,18 @@ export default function ProfileScreen(): React.JSX.Element {
         total_volume_kg: number | null
         pr_seance: 'gold' | 'silver' | 'bronze' | null
         workout_exercises: Array<{ workout_sets: Array<{ id: string }> }>
-      }>).map(w => {
-        const totalSets = w.workout_exercises.reduce(
-          (acc, ex) => acc + ex.workout_sets.length,
-          0
-        )
-        return {
-          id: w.id,
-          title: w.title ?? '—',
-          started_at: w.started_at,
-          duration_sec: w.duration_sec,
-          total_volume_kg: w.total_volume_kg,
-          total_sets: totalSets,
-          pr_seance: w.pr_seance,
-        }
-      })
-
+      }>).map(w => ({
+        id: w.id,
+        title: w.title ?? '—',
+        started_at: w.started_at,
+        duration_sec: w.duration_sec,
+        total_volume_kg: w.total_volume_kg,
+        total_sets: w.workout_exercises.reduce((acc, ex) => acc + ex.workout_sets.length, 0),
+        pr_seance: w.pr_seance,
+      }))
       setHistorySections(groupByMonth(rows))
     }
 
-    setLoading(false)
   }, [router])
 
   useEffect(() => {
@@ -455,14 +451,6 @@ export default function ProfileScreen(): React.JSX.Element {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const s = buildStyles(colors)
-
-  if (loading) {
-    return (
-      <SafeAreaView style={[s.container, s.loader]} edges={['top']}>
-        <ActivityIndicator color={colors.accent} size="large" />
-      </SafeAreaView>
-    )
-  }
 
   const initiale = profile ? getInitiale(profile) : 'O'
   const displayName = profile ? getUsername(profile) : '@athlète'
@@ -502,18 +490,24 @@ export default function ProfileScreen(): React.JSX.Element {
             {/* Stats row */}
             <View style={s.statsCard}>
               <View style={s.statHeroRow}>
-                <Text style={s.statValueHero}>{formatVolume(stats.volumeKg)}</Text>
+                <AnimatedCounter
+                  target={stats.volumeKg}
+                  duration={1400}
+                  delay={0}
+                  style={s.statValueHero}
+                  formatter={formatVolume}
+                />
                 <Text style={[s.statLabel, s.statLabelAccent]}>KG CE MOIS</Text>
               </View>
               <View style={s.statSepH} />
               <View style={s.statSecondaryRow}>
                 <View style={s.statCol}>
-                  <Text style={s.statValueSide}>{stats.seances}</Text>
+                  <AnimatedCounter target={stats.seances} duration={1000} delay={120} style={s.statValueSide} />
                   <Text style={s.statLabel}>SÉANCES</Text>
                 </View>
                 <View style={s.statSep} />
                 <View style={s.statCol}>
-                  <Text style={s.statValueSide}>{stats.streakSemaines}</Text>
+                  <AnimatedCounter target={stats.streakSemaines} duration={1000} delay={120} style={s.statValueSide} />
                   <Text style={s.statLabel}>STREAK SEM.</Text>
                 </View>
               </View>
@@ -522,11 +516,11 @@ export default function ProfileScreen(): React.JSX.Element {
             {/* Followers */}
             <View style={s.followersRow}>
               <Pressable style={s.followerCol}>
-                <Text style={s.followerValue}>{followers}</Text>
+                <AnimatedCounter target={followers} duration={800} delay={240} style={s.followerValue} />
                 <Text style={s.followerLabel}>FOLLOWERS</Text>
               </Pressable>
               <Pressable style={s.followerCol}>
-                <Text style={s.followerValue}>{follows}</Text>
+                <AnimatedCounter target={follows} duration={800} delay={240} style={s.followerValue} />
                 <Text style={s.followerLabel}>FOLLOWS</Text>
               </Pressable>
             </View>

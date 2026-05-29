@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native'
 import { useRouter } from 'expo-router'
+import Svg, { Circle } from 'react-native-svg'
 import { AlertCircle } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
@@ -32,27 +33,16 @@ interface ErreurFormulaire {
 
 // ─── Logo Orava — bull's-eye cercle jaune ────────────────────────────────────
 
-function LogoOrava({ accent, bg }: { accent: string; bg: string }): React.JSX.Element {
+function LogoOrava({ accent }: { accent: string; bg: string }): React.JSX.Element {
   return (
-    <View
-      style={{
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: accent,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <View
-        style={{
-          width: 16,
-          height: 16,
-          backgroundColor: bg,
-          transform: [{ rotate: '45deg' }],
-        }}
-      />
-    </View>
+    <Svg width={48} height={48} viewBox="0 0 100 100">
+      <Circle cx="50" cy="50" r="44"   stroke={accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="35.5" stroke={accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="27"   stroke={accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="18.5" stroke={accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="10"   stroke={accent} strokeWidth="5" fill="none" />
+      <Circle cx="50" cy="50" r="3.5"  fill={accent} />
+    </Svg>
   )
 }
 

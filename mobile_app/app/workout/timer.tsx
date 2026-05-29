@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { SkipForward } from 'lucide-react-native'
 import Svg, { Circle } from 'react-native-svg'
-import AsyncStorage from '@react-native-async-storage/async-storage'
+import { storage } from '@/lib/storage'
 import Animated, {
   useSharedValue,
   withTiming,
@@ -49,11 +49,13 @@ export default function TimerScreen() {
   const router = useRouter()
   const { colors } = useTheme()
 
-  const [remaining, setRemaining] = useState<number>(90)
+  const DEFAULT_PRESET = PRESETS.find(p => p.value === (storage.getNumber('timer_default_preset') ?? 90))?.value ?? 90
+
+  const [remaining, setRemaining] = useState<number>(DEFAULT_PRESET)
   const [paused, setPaused] = useState<boolean>(false)
   const [finished, setFinished] = useState<boolean>(false)
 
-  const totalRef = useRef<number>(90)
+  const totalRef = useRef<number>(DEFAULT_PRESET)
   const startTimeRef = useRef<number>(Date.now())
   const pausedAtRef = useRef<number | null>(null)
   const pausedElapsedRef = useRef<number>(0)
@@ -106,14 +108,7 @@ export default function TimerScreen() {
   }, [clearTick, triggerFinish])
 
   useEffect(() => {
-    AsyncStorage.getItem('timer_default_preset').then(saved => {
-      const value = saved ? parseInt(saved, 10) : 90
-      const valid = PRESETS.find(p => p.value === value)?.value ?? 90
-      setRemaining(valid)
-      totalRef.current = valid
-      startTick(valid)
-    })
-
+    startTick(totalRef.current)
     return () => clearTick()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
