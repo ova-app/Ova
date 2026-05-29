@@ -150,11 +150,11 @@ function MyoIcon({ size = 80, bg = '#0A0A0F' }: { size?: number; bg?: string }) 
   )
 }
 
-// ─── Logo Orava (48px cercle + losange) ──────────────────────────────────────
+// ─── Logo Orava ───────────────────────────────────────────────────────────────
 
 function OravaLogo({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
   return (
-    <Svg width={48} height={48} viewBox="0 0 100 100">
+    <Svg width={40} height={40} viewBox="0 0 100 100">
       <Circle cx="50" cy="50" r="44"   stroke={colors.accent} strokeWidth="5" fill="none" />
       <Circle cx="50" cy="50" r="35.5" stroke={colors.accent} strokeWidth="5" fill="none" />
       <Circle cx="50" cy="50" r="27"   stroke={colors.accent} strokeWidth="5" fill="none" />
