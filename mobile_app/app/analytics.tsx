@@ -17,10 +17,12 @@ import {
 } from 'react-native-reanimated'
 import { useRouter } from 'expo-router'
 import { ChevronLeft, Dumbbell, TrendingUp, Zap } from 'lucide-react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, font } from '@/constants/theme'
 import { formatVolume } from '@/lib/utils'
+import type { Prediction } from '@/lib/predictor'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -142,6 +144,7 @@ export default function AnalyticsScreen(): React.JSX.Element {
   const [volumeRolling, setVolumeRolling] = useState<VolumeRolling | null>(null)
   const [muscleBars, setMuscleBars]       = useState<MuscleBar[]>([])
   const [recentPRs, setRecentPRs]         = useState<RecentPR[]>([])
+  const [predictions, setPredictions]     = useState<Prediction[]>([])
   const [totalSeances, setTotalSeances]   = useState<number>(0)
   const [totalVolumeKg, setTotalVolumeKg] = useState<number>(0)
   const [loading, setLoading]             = useState<boolean>(true)
@@ -303,6 +306,16 @@ export default function AnalyticsScreen(): React.JSX.Element {
 
       setRecentPRs(prs)
     }
+
+    // ── Prédictions PRs (cache local) ──
+    try {
+      const raw = await AsyncStorage.getItem('predictions_cache')
+      if (raw) {
+        const cached = JSON.parse(raw) as Prediction[]
+        // Garde uniquement les prédictions avec daysUntilPR dans les 120j
+        setPredictions(cached.filter(p => p.daysUntilPR > 0 && p.daysUntilPR <= 120))
+      }
+    } catch (_) {}
 
     setLoading(false)
   }, [router])
@@ -552,6 +565,52 @@ export default function AnalyticsScreen(): React.JSX.Element {
           >
             <Text style={s.armurerieBtnText}>Voir l'Armurerie →</Text>
           </Pressable>
+        </View>
+
+        {/* ── Prédictions PRs ── */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>PRÉDICTIONS PR</Text>
+
+          {predictions.length === 0 ? (
+            <View style={s.emptyCard}>
+              <TrendingUp size={20} color={colors.textTertiary} />
+              <Text style={s.emptyText}>
+                Les prédictions apparaissent après quelques séances sur un même exercice.
+              </Text>
+            </View>
+          ) : (
+            <View style={s.predictionsGrid}>
+              {predictions
+                .sort((a, b) => a.daysUntilPR - b.daysUntilPR)
+                .map((pred) => (
+                  <View key={pred.exerciseId} style={s.predCard}>
+                    <View style={[s.predAccentBar, { backgroundColor: colors.accent }]} />
+                    <View style={s.predContent}>
+                      <Text style={s.predExName} numberOfLines={1}>
+                        {pred.exerciseName.toUpperCase()}
+                      </Text>
+                      <View style={s.predValueRow}>
+                        <Text style={[s.predValue, { color: colors.accent }]}>
+                          {pred.predictedPR}
+                        </Text>
+                        <Text style={s.predUnit}> kg</Text>
+                      </View>
+                      <Text style={s.predDelta}>
+                        +{pred.delta} kg vs actuel
+                      </Text>
+                      <View style={s.predFooter}>
+                        <Text style={s.predDays}>
+                          {pred.daysUntilPR === 1 ? 'Demain' : `Dans ${pred.daysUntilPR}j`}
+                        </Text>
+                        <Text style={s.predConfidence}>
+                          {Math.round(pred.confidence * 100)}% confiance
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+            </View>
+          )}
         </View>
 
         <View style={s.bottomSpacer} />
@@ -866,6 +925,67 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     armurerieBtnText: {
       ...typography.body,
       color: colors.accent,
+    },
+
+    // ── Prédictions grid ──
+    predictionsGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.s3,
+    },
+    predCard: {
+      width: '47%',
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: radius.md,
+      overflow: 'hidden',
+    },
+    predAccentBar: {
+      height: 3,
+      width: '100%',
+    },
+    predContent: {
+      padding: spacing.s4,
+      gap: spacing.s1,
+    },
+    predExName: {
+      ...typography.caption,
+      fontFamily: font.bold,
+      color: colors.textSecondary,
+      marginBottom: spacing.s1,
+    },
+    predValueRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+    },
+    predValue: {
+      ...typography.title,
+      fontVariant: ['tabular-nums'] as const,
+    },
+    predUnit: {
+      ...typography.caption,
+      fontFamily: font.regular,
+      color: colors.textSecondary,
+    },
+    predDelta: {
+      ...typography.caption,
+      color: colors.success,
+      fontFamily: font.medium,
+      marginTop: spacing.s1,
+    },
+    predFooter: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: spacing.s2,
+    },
+    predDays: {
+      ...typography.caption,
+      fontFamily: font.bold,
+      color: colors.textPrimary,
+    },
+    predConfidence: {
+      ...typography.caption,
+      color: colors.textTertiary,
     },
 
     bottomSpacer: {

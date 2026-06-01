@@ -295,6 +295,23 @@ export default function SettingsScreen(): React.JSX.Element {
           />
         </View>
 
+        {/* GROUPE MYO */}
+        <Text style={s.groupLabel}>MYO</Text>
+        <View style={s.group}>
+          <Pressable
+            style={[s.row, s.rowPressable, { height: undefined, minHeight: 56, paddingVertical: spacing.s3 }]}
+            onPress={() => router.push('/myo-glossary')}
+            accessibilityRole="button"
+            accessibilityLabel="Guide des variables Myo"
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={s.rowLabel}>Guide des variables</Text>
+              <Text style={[s.rowSubtitle, { color: colors.textSecondary }]}>53 variables · 8 familles</Text>
+            </View>
+            <ChevronRight size={16} color={colors.textTertiary} strokeWidth={2} />
+          </Pressable>
+        </View>
+
         {/* GROUPE COMPTE */}
         <Text style={s.groupLabel}>COMPTE</Text>
         <View style={s.group}>
@@ -398,6 +415,10 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     rowLabel: {
       ...typography.body,
       color: colors.textPrimary,
+    },
+    rowSubtitle: {
+      ...typography.caption,
+      marginTop: 1,
     },
     rowRight: {
       flexDirection: 'row',

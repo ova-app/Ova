@@ -180,20 +180,20 @@ function parseHour(isoStr: string): number {
 
 // ─── Muscle dim helpers ───────────────────────────────────────────────────────
 
-interface EmRow {
-  exercise_id: string
-  muscle: string
-  fascicle: string | null
-  activation_pct: number
-}
-
 function resolveDim(muscle: string, fascicle: string | null): number {
   const map = FASCICLE_DIM[muscle]
   if (map) return fascicle ? (map[fascicle] ?? -1) : -1
   return MUSCLE_DIM[muscle] ?? -1
 }
 
-function computeMuscleDims(
+export interface EmRow {
+  exercise_id: string
+  muscle: string
+  fascicle: string | null
+  activation_pct: number
+}
+
+export function computeMuscleDims(
   setsByExercise: Record<string, Array<{ weight_kg: number; reps: number }>>,
   emRows: EmRow[],
 ): number[] {
@@ -300,6 +300,76 @@ async function fetchBaselines(userId: string, beforeIso: string): Promise<Baseli
 
 // ─── API publique ─────────────────────────────────────────────────────────────
 
+export interface LocalSessionMetrics {
+  volume_kg: number
+  densite: number
+  nb_series: number
+  nb_exercices: number
+  nb_pr: number
+  streak: number
+  frequence_hebdo: number
+  nb_seances_30j: number
+  duree_sec: number
+  temps_repos_moy_sec: number
+  ratio_actif: number
+  poids_max_kg: number
+  charge_relative: number
+  muscleDims?: number[]
+}
+
+// Calcul synchrone des sessionValues depuis les métriques locales (population baselines).
+// Utilisé pour le preview dans summary.tsx avant le save Supabase.
+export function computeSessionValues(m: LocalSessionMetrics): number[][] {
+  const zn = (v: number, k: keyof MyoRaw) =>
+    clampZ((v - POP_MEAN[k]) / (POP_STD[k] || 1))
+  const norm = (z: number) => (z + 3) / 6
+
+  return [
+    [zn(m.volume_kg, 'volume_kg'), zn(m.nb_series, 'nb_series'), 0, 0, 0, zn(m.densite, 'densite')].map(norm),
+    [zn(m.densite, 'densite'), zn(m.charge_relative, 'charge_relative'), 0, zn(m.poids_max_kg, 'poids_max_kg'), 0].map(norm),
+    [zn(m.nb_series, 'nb_series'), zn(m.nb_exercices, 'nb_exercices'), 0, 0, 0].map(norm),
+    [zn(m.temps_repos_moy_sec, 'temps_repos_moy_sec'), 0, zn(m.ratio_actif, 'ratio_actif'), 0, 0].map(norm),
+    [zn(m.nb_pr, 'nb_pr'), 0, 0, 0, 0].map(norm),
+    [zn(m.streak, 'streak'), zn(m.frequence_hebdo, 'frequence_hebdo'), zn(m.nb_seances_30j, 'nb_seances_30j'), 0, 0].map(norm),
+    (m.muscleDims ?? new Array(17).fill(0)).map((v: number, i: number) =>
+      v === 0 ? 0 : norm(clampZ((v - MUSCLE_POP_MEAN[i]) / (MUSCLE_POP_STD[i] || 1)))
+    ),
+    [zn(m.duree_sec, 'duree_sec'), 0, zn(m.ratio_actif, 'ratio_actif'), zn(m.densite, 'densite'), 0].map(norm),
+  ]
+}
+
+// Reconstruit sessionValues depuis une ligne myo_signatures (pour feed/[id].tsx et analytics)
+export function sessionValuesFromSignature(row: {
+  z_volume: number; z_intensite: number; z_structure: number
+  z_recovery: number; z_performance: number; z_regularite: number
+  z_extended: Record<string, unknown>
+}): number[][] {
+  const norm = (z: number) => (z + 3) / 6
+  const ze = row.z_extended ?? {}
+  const g = (k: string): number => {
+    const v = ze[k]
+    return typeof v === 'number' ? v : 0
+  }
+
+  const muscleDimsRaw = Array.isArray(ze['muscles_raw'])
+    ? (ze['muscles_raw'] as number[])
+    : new Array(17).fill(1)
+  const muscleDimsZ = Array.isArray(ze['muscles'])
+    ? (ze['muscles'] as number[])
+    : new Array(17).fill(0)
+
+  return [
+    [row.z_volume, g('nb_series'), 0, 0, 0, row.z_intensite].map(norm),
+    [row.z_intensite, g('charge_relative'), 0, g('poids_max_kg'), 0].map(norm),
+    [row.z_structure, g('nb_exercices'), g('nb_series_par_ex_moy'), 0, g('hhi_muscles')].map(norm),
+    [row.z_recovery, g('temps_repos_moy_sec'), g('std_temps_repos_par_ex'), g('ratio_actif'), 0].map(norm),
+    [row.z_performance, g('nb_exercices_avec_pr'), g('max_1rm_kg'), g('mean_evolution_1rm'), 0].map(norm),
+    [row.z_regularite, g('frequence_hebdo'), g('nb_seances_30j'), g('max_freq_muscle_7j'), 0].map(norm),
+    muscleDimsZ.map((z, i) => muscleDimsRaw[i] === 0 ? 0 : norm(z)),
+    [g('duree_sec'), g('temps_repos_total_sec'), g('ratio_actif'), row.z_intensite, g('slot_horaire_num')].map(norm),
+  ]
+}
+
 export interface SaveMyoParams {
   userId: string
   workoutId: string
@@ -352,13 +422,13 @@ export interface SaveMyoParams {
   setsByExercise: Record<string, Array<{ weight_kg: number; reps: number }>>
 }
 
-export async function saveMyoSignature(p: SaveMyoParams): Promise<void> {
+export async function saveMyoSignature(p: SaveMyoParams): Promise<number[][] | null> {
   const { data: existing } = await supabase
     .from('myo_signatures')
     .select('workout_id')
     .eq('workout_id', p.workoutId)
     .maybeSingle()
-  if (existing) return
+  if (existing) return null
 
   const volTotal = p.volume_total_kg
   const dominant = p.muscle_primaire_dominant
@@ -481,5 +551,21 @@ export async function saveMyoSignature(p: SaveMyoParams): Promise<void> {
     anomaly_detected: anomalyDims.length > 0,
     anomaly_message: anomalyDims.length > 0 ? `Extrême: ${anomalyDims.join(', ')}` : null,
   })
-  if (error) console.error('[MYO] insert error:', error.message, error.code)
+  if (error) { console.error('[MYO] insert error:', error.message, error.code); return null }
+
+  const norm = (z: number) => (z + 3) / 6
+  const muscleDimsZ = Array.isArray(z_extended['muscles'])
+    ? (z_extended['muscles'] as number[])
+    : new Array(17).fill(0)
+
+  return [
+    [z_volume, zAll.nb_series, 0, 0, 0, z_intensite].map(norm),
+    [z_intensite, zAll.charge_relative, 0, zAll.poids_max_kg, 0].map(norm),
+    [z_structure, zAll.nb_exercices, zAll.nb_series_par_ex_moy, 0, zAll.hhi_muscles].map(norm),
+    [z_recovery, zAll.temps_repos_moy_sec, zAll.std_temps_repos_par_ex, zAll.ratio_actif, 0].map(norm),
+    [z_performance, zAll.nb_exercices_avec_pr, zAll.max_1rm_kg, zAll.mean_evolution_1rm, 0].map(norm),
+    [z_regularite, zAll.frequence_hebdo, zAll.nb_seances_30j, zAll.max_freq_muscle_7j, 0].map(norm),
+    muscleDimsZ.map(norm),
+    [zAll.duree_sec, zAll.temps_repos_total_sec, zAll.ratio_actif, z_intensite, zAll.slot_horaire_num].map(norm),
+  ]
 }

@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
+  Image,
   ScrollView,
   StyleSheet,
   Switch,
@@ -18,22 +20,27 @@ import Animated, {
   useAnimatedReaction,
   runOnJS,
   Easing,
+  type SharedValue,
 } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { Dumbbell, Flame, Trophy, Zap } from 'lucide-react-native'
+import { Camera, Dumbbell, Flame, Image as ImageIcon, Trophy, Zap } from 'lucide-react-native'
 import * as ImagePicker from 'expo-image-picker'
 import { useTheme } from '@/context/ThemeContext'
-import { spacing, radius, typography, touchTarget, spring } from '@/constants/theme'
+import { spacing, radius, typography, touchTarget, spring, font } from '@/constants/theme'
 import { prBadgeRecipe, type PrType } from '@/constants/recipes'
 import { useWorkout, computePodium, WorkoutExercise, PrLevel } from '@/context/WorkoutContext'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { saveMyoSignature } from '@/lib/myo'
+import { saveMyoSignature, computeSessionValues, computeMuscleDims, type EmRow } from '@/lib/myo'
+
 import { insertLocalSet, insertLocalSession } from '@/lib/db'
+import { computePrediction } from '@/lib/predictor'
 import { storage } from '@/lib/storage'
 import { supabase } from '@/lib/supabase'
 
-// ─── PR Badge (unified) ──────────────────────────────────────────────────────
+const { width: SCREEN_W } = Dimensions.get('window')
+
+// ─── PR Icons ────────────────────────────────────────────────────────────────
 
 const PR_ICON: Record<PrType, React.ComponentType<{ size?: number; color?: string }>> = {
   charge:   Zap,
@@ -42,22 +49,149 @@ const PR_ICON: Record<PrType, React.ComponentType<{ size?: number; color?: strin
   seance:   Trophy,
 }
 
+const PR_LABEL: Record<PrType, string> = {
+  charge:   'PR CHARGE',
+  serie:    'PR SÉRIE',
+  exercice: 'PR EXERCICE',
+  seance:   'PR SÉANCE',
+}
+
+const PR_LEVEL_LABEL: Record<string, string> = {
+  gold:   'OR',
+  silver: 'ARGENT',
+  bronze: 'BRONZE',
+}
+
+// ─── PR Row (Figma style — dense pill) ───────────────────────────────────────
+
 function PrRow({
   level,
   type,
-  label,
+  value,
+  delay,
 }: {
   level: 'gold' | 'silver' | 'bronze'
   type: PrType
-  label: string
+  value: string
+  delay: number
 }) {
   const { colors } = useTheme()
-  const r = prBadgeRecipe(level, type, colors)
   const Icon = PR_ICON[type]
+  const tint = level === 'gold' ? colors.prGold : level === 'silver' ? colors.prSilver : colors.prBronze
+  const anim = useSharedValue(0)
+
+  useEffect(() => {
+    anim.value = withDelay(delay, withSpring(1, spring.bouncy))
+  }, [])
+
+  const animStyle = useAnimatedStyle(() => ({
+    opacity: anim.value,
+    transform: [{ translateY: (1 - anim.value) * 6 }],
+  }))
+
   return (
-    <View style={[styles.prRow, { backgroundColor: colors.backgroundSecondary }]}>
-      <Icon size={16} color={r.iconColor} />
-      <Text style={[styles.prRowLabel, { color: r.label.color }]}>{label}</Text>
+    <Animated.View style={[styles.prRow, { backgroundColor: colors.backgroundSecondary }, animStyle]}>
+      <Icon size={16} color={tint} />
+      <Text style={[styles.prRowLabel, { color: tint }]}>
+        {PR_LABEL[type]} · {value}
+      </Text>
+    </Animated.View>
+  )
+}
+
+// ─── Stat Pill ────────────────────────────────────────────────────────────────
+
+function StatPill({ label, value, colors }: { label: string; value: string; colors: ReturnType<typeof useTheme>['colors'] }) {
+  return (
+    <View style={[styles.statPill, { backgroundColor: colors.backgroundSecondary }]}>
+      <Text style={[styles.statPillValue, { color: colors.textPrimary }]} allowFontScaling={false}>
+        {value}
+      </Text>
+      <Text style={[styles.statPillLabel, { color: colors.textTertiary }]}>{label}</Text>
+    </View>
+  )
+}
+
+// ─── Muscle Legend ────────────────────────────────────────────────────────────
+
+function MuscleLegend({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
+  return (
+    <View style={styles.muscleLegend}>
+      <View style={styles.muscleLegendItem}>
+        <View style={[styles.muscleLegendDot, { backgroundColor: colors.accent }]} />
+        <Text style={[styles.muscleLegendLabel, { color: colors.textSecondary }]}>Primaire</Text>
+      </View>
+      <View style={styles.muscleLegendItem}>
+        <View style={[styles.muscleLegendDot, { backgroundColor: colors.textSecondary }]} />
+        <Text style={[styles.muscleLegendLabel, { color: colors.textSecondary }]}>Secondaire</Text>
+      </View>
+    </View>
+  )
+}
+
+// ─── Muscle Bar ───────────────────────────────────────────────────────────────
+
+function MuscleBar({
+  label,
+  pct,
+  isPrimary,
+  colors,
+  delay,
+}: {
+  label: string
+  pct: number
+  isPrimary: boolean
+  colors: ReturnType<typeof useTheme>['colors']
+  delay: number
+}) {
+  const barWidth = useSharedValue(0)
+
+  useEffect(() => {
+    barWidth.value = withDelay(delay, withTiming(pct, { duration: 600, easing: Easing.bezier(0.16, 1, 0.3, 1) }))
+  }, [])
+
+  const barStyle = useAnimatedStyle(() => ({
+    width: `${barWidth.value * 100}%` as `${number}%`,
+  }))
+
+  const barColor = isPrimary ? colors.accent : colors.textSecondary
+
+  return (
+    <View style={styles.muscleRow}>
+      <Text style={[styles.muscleLabel, { color: isPrimary ? colors.textPrimary : colors.textSecondary }]} numberOfLines={1}>
+        {label}
+      </Text>
+      <View style={styles.muscleBarTrack}>
+        <View style={[styles.muscleBarBg, { backgroundColor: `${barColor}18` }]}>
+          <Animated.View
+            style={[
+              styles.muscleBarFill,
+              { backgroundColor: barColor },
+              barStyle,
+            ]}
+          />
+        </View>
+      </View>
+      <Text
+        style={[
+          styles.musclePct,
+          { color: isPrimary ? colors.accent : colors.textTertiary },
+        ]}
+        allowFontScaling={false}
+      >
+        {Math.round(pct * 100)}%
+      </Text>
+    </View>
+  )
+}
+
+// ─── Section Header ───────────────────────────────────────────────────────────
+
+function SectionHeader({ label, colors }: { label: string; colors: ReturnType<typeof useTheme>['colors'] }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <View style={[styles.sectionDot, { backgroundColor: colors.accent }]} />
+      <Text style={[styles.sectionLabel, { color: colors.textTertiary }]}>{label}</Text>
     </View>
   )
 }
@@ -67,8 +201,8 @@ function PrRow({
 function formatDuration(sec: number): string {
   const h = Math.floor(sec / 3600)
   const m = Math.floor((sec % 3600) / 60)
-  if (h > 0) return `${h}H ${m}MIN`
-  return `${m}MIN`
+  if (h > 0) return `${h}h ${m}min`
+  return `${m}min`
 }
 
 function formatDate(date: Date | null): string {
@@ -97,19 +231,19 @@ function epley1RM(w: number, r: number): number {
   return r === 1 ? w : w * (1 + r / 30)
 }
 
+function formatRestTimeSummary(sec: number): string {
+  if (sec < 60) return `${sec}s`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
+}
+
 function muscleLabelFr(key: string): string {
   const map: Record<string, string> = {
-    pectoraux: 'Pectoraux',
-    dos: 'Dos',
-    epaules: 'Épaules',
-    biceps: 'Biceps',
-    triceps: 'Triceps',
-    quadriceps: 'Quadriceps',
-    ischio_jambiers: 'Ischio',
-    fessiers: 'Fessiers',
-    mollets: 'Mollets',
-    abdominaux: 'Abdominaux',
-    autre: 'Autre',
+    pectoraux: 'Pectoraux', dos: 'Dos', epaules: 'Épaules',
+    biceps: 'Biceps', triceps: 'Triceps', quadriceps: 'Quadriceps',
+    ischio_jambiers: 'Ischio', fessiers: 'Fessiers', mollets: 'Mollets',
+    abdominaux: 'Abdominaux', autre: 'Autre',
   }
   return map[key] ?? key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ')
 }
@@ -127,41 +261,81 @@ export default function SummaryScreen() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  const [sessionValues, setSessionValues] = useState<number[][]>(() => {
+    const sets = exercises.flatMap(ex =>
+      ex.sets.filter(s => s.validated && s.weight_kg > 0 && s.reps > 0)
+    )
+    const vol = sets.reduce((s, set) => s + set.weight_kg * set.reps, 0)
+    const pMax = sets.length ? Math.max(...sets.map(s => s.weight_kg)) : 0
+    const densite = elapsedSeconds > 0 ? (vol / elapsedSeconds) * 60 : 0
+    return computeSessionValues({
+      volume_kg: vol, densite, nb_series: sets.length,
+      nb_exercices: exercises.length,
+      nb_pr: sets.filter(s => s.pr_charge !== null || s.pr_serie !== null).length,
+      streak: 0, frequence_hebdo: 0, nb_seances_30j: 0, duree_sec: elapsedSeconds,
+      temps_repos_moy_sec: 120, ratio_actif: 0.5, poids_max_kg: pMax, charge_relative: 65,
+    })
+  })
+
+  // Enrichit la famille 6 (muscles) dès le mount sans attendre le save
+  useEffect(() => {
+    const exerciseIds = exercises.map(ex => ex.exercise_id).filter(Boolean)
+    if (!exerciseIds.length) return
+    void (async () => {
+      const { data } = await supabase
+        .from('exercise_muscles')
+        .select('exercise_id, muscle, fascicle, activation_pct')
+        .in('exercise_id', exerciseIds)
+        .in('role', ['primary', 'secondary'])
+      if (!data?.length) return
+      const setsByEx: Record<string, Array<{ weight_kg: number; reps: number }>> =
+        Object.fromEntries(exercises.map(ex => [
+          ex.exercise_id,
+          ex.sets.filter(s => s.validated && s.weight_kg > 0 && s.reps > 0).map(s => ({ weight_kg: s.weight_kg, reps: s.reps })),
+        ]))
+      const muscleDims = computeMuscleDims(setsByEx, data as EmRow[])
+      const sets = exercises.flatMap(ex =>
+        ex.sets.filter(s => s.validated && s.weight_kg > 0 && s.reps > 0)
+      )
+      const vol = sets.reduce((s, set) => s + set.weight_kg * set.reps, 0)
+      const pMax = sets.length ? Math.max(...sets.map(s => s.weight_kg)) : 0
+      const densite = elapsedSeconds > 0 ? (vol / elapsedSeconds) * 60 : 0
+      setSessionValues(computeSessionValues({
+        volume_kg: vol, densite, nb_series: sets.length,
+        nb_exercices: exercises.length,
+        nb_pr: sets.filter(s => s.pr_charge !== null || s.pr_serie !== null).length,
+        streak: 0, frequence_hebdo: 0, nb_seances_30j: 0, duree_sec: elapsedSeconds,
+        temps_repos_moy_sec: 120, ratio_actif: 0.5, poids_max_kg: pMax, charge_relative: 65,
+        muscleDims,
+      }))
+    })()
+  }, [])
+
+  // Reveal animations — sequential 80ms
   const anim0 = useSharedValue(0)
   const anim1 = useSharedValue(0)
   const anim2 = useSharedValue(0)
   const anim3 = useSharedValue(0)
   const anim4 = useSharedValue(0)
   const volumeAnimValue = useSharedValue(0)
-
-  const style0 = useAnimatedStyle(() => ({
-    opacity: anim0.value,
-    transform: [{ translateY: (1 - anim0.value) * 12 }],
-  }))
-  const style1 = useAnimatedStyle(() => ({
-    opacity: anim1.value,
-    transform: [{ translateY: (1 - anim1.value) * 12 }],
-  }))
-  const style2 = useAnimatedStyle(() => ({
-    opacity: anim2.value,
-    transform: [{ translateY: (1 - anim2.value) * 12 }],
-  }))
-  const style3 = useAnimatedStyle(() => ({
-    opacity: anim3.value,
-    transform: [{ translateY: (1 - anim3.value) * 12 }],
-  }))
-  const style4 = useAnimatedStyle(() => ({
-    opacity: anim4.value,
-    transform: [{ translateY: (1 - anim4.value) * 12 }],
-  }))
-
   const [displayVolume, setDisplayVolume] = useState(0)
+
+  const makeRevealStyle = (anim: SharedValue<number>) =>
+    useAnimatedStyle(() => ({
+      opacity: anim.value,
+      transform: [{ translateY: (1 - anim.value) * 16 }],
+    }))
+
+  const style0 = makeRevealStyle(anim0)
+  const style1 = makeRevealStyle(anim1)
+  const style2 = makeRevealStyle(anim2)
+  const style3 = makeRevealStyle(anim3)
+  const style4 = makeRevealStyle(anim4)
+
 
   useAnimatedReaction(
     () => volumeAnimValue.value,
-    (value) => {
-      runOnJS(setDisplayVolume)(Math.round(value))
-    }
+    (value) => { runOnJS(setDisplayVolume)(Math.round(value)) }
   )
 
   useEffect(() => {
@@ -171,27 +345,20 @@ export default function SummaryScreen() {
   }, [])
 
   useEffect(() => {
-    if (status !== 'done') {
-      router.replace('/workout/session')
-      return
-    }
+    if (status !== 'done') { router.replace('/workout/session'); return }
     setWorkoutName(generateWorkoutName(exercises, startedAt))
     anim0.value = withDelay(0,   withSpring(1, spring.standard))
     anim1.value = withDelay(80,  withSpring(1, spring.standard))
     anim2.value = withDelay(160, withSpring(1, spring.standard))
     anim3.value = withDelay(240, withSpring(1, spring.standard))
     anim4.value = withDelay(320, withSpring(1, spring.standard))
-    // Animation du volume : 800ms après Myo reveal + 500ms défilement
     volumeAnimValue.value = withDelay(
       800,
-      withTiming(totalVolume, {
-        duration: 500,
-        easing: Easing.bezier(0.16, 1, 0.3, 1), // easeOutExpo
-      })
+      withTiming(totalVolume, { duration: 500, easing: Easing.bezier(0.16, 1, 0.3, 1) })
     )
   }, [])
 
-  // ─── Métriques ───────────────────────────────────────────────────────────
+  // ─── Métriques ─────────────────────────────────────────────────────────────
 
   const validSets = exercises.flatMap(ex =>
     ex.sets.filter(s => s.validated && s.weight_kg > 0 && s.reps > 0)
@@ -199,37 +366,23 @@ export default function SummaryScreen() {
   const totalVolume = validSets.reduce((s, set) => s + set.weight_kg * set.reps, 0)
   const nbSeries = validSets.length
   const nbExercices = exercises.length
+  const poidsMaxSeance = validSets.length ? Math.max(...validSets.map(s => s.weight_kg)) : 0
 
-  // PRs détectés (charge + série uniquement — flash visuels en session)
   const prChargeDetected = validSets.filter(s => s.pr_charge !== null)
   const prSerieDetected = validSets.filter(s => s.pr_serie !== null)
   const hasPrs = prChargeDetected.length > 0 || prSerieDetected.length > 0
 
-  // PR charge : meilleur niveau détecté
   const prChargeLevels: PrLevel[] = prChargeDetected.map(s => s.pr_charge)
-  const bestPrCharge: PrLevel = prChargeLevels.includes('gold')
-    ? 'gold'
-    : prChargeLevels.includes('silver')
-    ? 'silver'
-    : prChargeLevels.includes('bronze')
-    ? 'bronze'
-    : null
+  const bestPrCharge: PrLevel = prChargeLevels.includes('gold') ? 'gold' :
+    prChargeLevels.includes('silver') ? 'silver' :
+    prChargeLevels.includes('bronze') ? 'bronze' : null
 
-  // PR série : meilleur niveau + meilleure valeur
-  const prSerieMax = prSerieDetected.reduce(
-    (best, s) => Math.max(best, Math.round(s.weight_kg * s.reps)),
-    0
-  )
+  const prSerieMax = prSerieDetected.reduce((best, s) => Math.max(best, Math.round(s.weight_kg * s.reps)), 0)
   const prSerieLevels: PrLevel[] = prSerieDetected.map(s => s.pr_serie)
-  const bestPrSerie: PrLevel = prSerieLevels.includes('gold')
-    ? 'gold'
-    : prSerieLevels.includes('silver')
-    ? 'silver'
-    : prSerieLevels.includes('bronze')
-    ? 'bronze'
-    : null
+  const bestPrSerie: PrLevel = prSerieLevels.includes('gold') ? 'gold' :
+    prSerieLevels.includes('silver') ? 'silver' :
+    prSerieLevels.includes('bronze') ? 'bronze' : null
 
-  // Barres musculaires — primary vs secondary depuis muscle_group (approx)
   const muscleVolumes = exercises.reduce<Record<string, number>>((acc, ex) => {
     const key = ex.muscle_group ?? 'autre'
     const vol = ex.sets
@@ -240,10 +393,9 @@ export default function SummaryScreen() {
   }, {})
   const maxVol = Math.max(...Object.values(muscleVolumes), 1)
   const muscleEntries = Object.entries(muscleVolumes).sort((a, b) => b[1] - a[1])
-  // Primary = top muscle, secondary = rest
   const primaryMuscle = muscleEntries[0]?.[0] ?? null
 
-  // ─── computeAndSave ───────────────────────────────────────────────────────
+  // ─── computeAndSave ─────────────────────────────────────────────────────────
 
   async function computeAndSave(): Promise<{ workoutId: string; prSeance: PrLevel }> {
     const { data: { user } } = await supabase.auth.getUser()
@@ -285,88 +437,55 @@ export default function SummaryScreen() {
     const startHour = startedAt ? startedAt.getHours() : 18
     const slotHoraire: 'matin' | 'apres_midi' | 'soir' | 'nuit' =
       startHour < 6 ? 'nuit' : startHour < 12 ? 'matin' : startHour < 18 ? 'apres_midi' : 'soir'
-
     const densiteKgParMin = durationSec > 0 ? (totalVolume / durationSec) * 60 : 0
 
-    // PR séance
     const { data: topWorkouts } = await supabase
-      .from('workouts')
-      .select('total_volume_kg')
-      .eq('user_id', user.id)
-      .not('total_volume_kg', 'is', null)
-      .order('total_volume_kg', { ascending: false })
-      .limit(3)
+      .from('workouts').select('total_volume_kg').eq('user_id', user.id)
+      .not('total_volume_kg', 'is', null).order('total_volume_kg', { ascending: false }).limit(3)
 
     const topVols: number[] = ((topWorkouts ?? []) as { total_volume_kg: number }[]).map(w => w.total_volume_kg ?? 0)
     const top3seance = { pr1: topVols[0] ?? 0, pr2: topVols[1] ?? null, pr3: topVols[2] ?? null }
     const prSeance = computePodium(totalVolume, top3seance)
 
     const prParExercice: Record<string, boolean> = {}
-    for (const ex of exercises) {
-      prParExercice[ex.exercise_id] = ex.sets.some(s => s.is_pr)
-    }
+    for (const ex of exercises) prParExercice[ex.exercise_id] = ex.sets.some(s => s.is_pr)
     const nbPrSeance = validSets.filter(s => s.is_pr).length
 
-    // Stats rolling best-effort
-    let streakSemaines = 0
-    let nbSeances30j = 0
-    let frequenceHebdo = 0
-    let volume7j = 0
+    let streakSemaines = 0, nbSeances30j = 0, frequenceHebdo = 0, volume7j = 0
     let tempsDerniere: number | null = null
     const evolutionRepos: number | null = null
     try {
       const since90 = new Date(Date.now() - 90 * 86400000).toISOString()
       const since30 = new Date(Date.now() - 30 * 86400000).toISOString()
-      const { data: recent } = await supabase
-        .from('workouts')
+      const { data: recent } = await supabase.from('workouts')
         .select('started_at, total_volume_kg, avg_rest_seconds')
-        .eq('user_id', user.id)
-        .gte('started_at', since90)
+        .eq('user_id', user.id).gte('started_at', since90)
         .order('started_at', { ascending: false })
       if (recent?.length) {
         nbSeances30j = (recent as { started_at: string }[]).filter(w => w.started_at >= since30).length
         frequenceHebdo = nbSeances30j / 4
         const last = (recent as { started_at: string }[])[0]
-        if (last?.started_at) {
-          tempsDerniere = Math.round((Date.now() - new Date(last.started_at).getTime()) / 1000)
-        }
-        const weeks = new Set(
-          (recent as { started_at: string }[]).map(w => {
-            const d = new Date(w.started_at)
-            return `${d.getFullYear()}-${Math.floor(
-              (d.getTime() - new Date(d.getFullYear(), 0, 1).getTime()) / 604800000
-            )}`
-          })
-        )
+        if (last?.started_at) tempsDerniere = Math.round((Date.now() - new Date(last.started_at).getTime()) / 1000)
+        const weeks = new Set((recent as { started_at: string }[]).map(w => {
+          const d = new Date(w.started_at)
+          return `${d.getFullYear()}-${Math.floor((d.getTime() - new Date(d.getFullYear(), 0, 1).getTime()) / 604800000)}`
+        }))
         streakSemaines = weeks.size
       }
     } catch (_) {}
 
     try {
       const since7 = new Date(Date.now() - 7 * 86400000).toISOString()
-      const { data: wIds7j } = await supabase
-        .from('workouts')
-        .select('id, total_volume_kg')
-        .eq('user_id', user.id)
-        .gte('started_at', since7)
+      const { data: wIds7j } = await supabase.from('workouts').select('id, total_volume_kg')
+        .eq('user_id', user.id).gte('started_at', since7)
       volume7j = ((wIds7j ?? []) as { total_volume_kg: number }[]).reduce((s, w) => s + (w.total_volume_kg ?? 0), 0)
     } catch (_) {}
 
-    let poidsCorps: number | null = null
-    let ageAns: number | null = null
+    let poidsCorps: number | null = null, ageAns: number | null = null
     try {
-      const { data: userProfile } = await supabase
-        .from('users')
-        .select('date_naissance')
-        .eq('id', user.id)
-        .single()
-      const { data: bodyM } = await supabase
-        .from('body_metrics')
-        .select('weight_kg')
-        .eq('user_id', user.id)
-        .order('measured_at', { ascending: false })
-        .limit(1)
-        .single()
+      const { data: userProfile } = await supabase.from('users').select('date_naissance').eq('id', user.id).single()
+      const { data: bodyM } = await supabase.from('body_metrics').select('weight_kg')
+        .eq('user_id', user.id).order('measured_at', { ascending: false }).limit(1).single()
       if (bodyM) poidsCorps = (bodyM as { weight_kg: number }).weight_kg
       if ((userProfile as { date_naissance?: string } | null)?.date_naissance) {
         const dob = new Date((userProfile as { date_naissance: string }).date_naissance)
@@ -380,45 +499,31 @@ export default function SummaryScreen() {
       chargeRelParEx[id] = poidsCorps ? (pm / (poidsCorps * 0.8)) * 100 : null
     }
 
-    const dominantMuscle =
-      exercises.length > 0
-        ? [...new Set(exercises.map(e => e.muscle_group).filter(Boolean))]
-            .sort(
-              (a, b) =>
-                (volumeParExercice[exercises.find(e => e.muscle_group === b)?.exercise_id ?? ''] ?? 0) -
-                (volumeParExercice[exercises.find(e => e.muscle_group === a)?.exercise_id ?? ''] ?? 0)
-            )[0] ?? null
-        : null
+    const dominantMuscle = exercises.length > 0
+      ? [...new Set(exercises.map(e => e.muscle_group).filter(Boolean))].sort(
+          (a, b) =>
+            (volumeParExercice[exercises.find(e => e.muscle_group === b)?.exercise_id ?? ''] ?? 0) -
+            (volumeParExercice[exercises.find(e => e.muscle_group === a)?.exercise_id ?? ''] ?? 0)
+        )[0] ?? null
+      : null
 
     const setsByExercise: Record<string, Array<{ weight_kg: number; reps: number }>> =
-      Object.fromEntries(
-        exercises.map(ex => [
-          ex.exercise_id,
-          ex.sets
-            .filter(s => s.validated && s.weight_kg > 0 && s.reps > 0)
-            .map(s => ({ weight_kg: s.weight_kg, reps: s.reps })),
-        ])
-      )
+      Object.fromEntries(exercises.map(ex => [
+        ex.exercise_id,
+        ex.sets.filter(s => s.validated && s.weight_kg > 0 && s.reps > 0).map(s => ({ weight_kg: s.weight_kg, reps: s.reps })),
+      ]))
 
-    // ── 1. Workout ───────────────────────────────────────────────────────────
     const workoutId = crypto.randomUUID()
     const startedAtIso = startedAt?.toISOString() ?? new Date().toISOString()
 
     const { error: wErr } = await supabase.from('workouts').insert({
-      id: workoutId,
-      user_id: user.id,
-      title: workoutName,
-      started_at: startedAtIso,
-      ended_at: new Date().toISOString(),
-      duration_sec: durationSec,
-      total_volume_kg: totalVolume,
-      is_public: isPublic,
-      poids_corps_kg: poidsCorps,
-      pr_seance: prSeance,
+      id: workoutId, user_id: user.id, title: workoutName,
+      started_at: startedAtIso, ended_at: new Date().toISOString(),
+      duration_sec: durationSec, total_volume_kg: totalVolume,
+      is_public: isPublic, poids_corps_kg: poidsCorps, pr_seance: prSeance,
     })
     if (wErr) throw new Error(wErr.message)
 
-    // ── Photo upload best-effort ─────────────────────────────────────────────
     if (photoUri) {
       try {
         const response = await fetch(photoUri)
@@ -426,204 +531,144 @@ export default function SummaryScreen() {
         const arrayBuffer = await blob.arrayBuffer()
         const uint8 = new Uint8Array(arrayBuffer)
         const { data: uploadData } = await supabase.storage
-          .from('workout-photos')
-          .upload(`${user.id}/${workoutId}.jpg`, uint8, { contentType: 'image/jpeg', upsert: true })
+          .from('workout-photos').upload(`${user.id}/${workoutId}.jpg`, uint8, { contentType: 'image/jpeg', upsert: true })
         if (uploadData) {
-          const { data: publicUrl } = supabase.storage
-            .from('workout-photos')
-            .getPublicUrl(`${user.id}/${workoutId}.jpg`)
-          if (publicUrl?.publicUrl) {
-            await supabase
-              .from('workouts')
-              .update({ photo_url: publicUrl.publicUrl })
-              .eq('id', workoutId)
-          }
+          const { data: publicUrl } = supabase.storage.from('workout-photos').getPublicUrl(`${user.id}/${workoutId}.jpg`)
+          if (publicUrl?.publicUrl) await supabase.from('workouts').update({ photo_url: publicUrl.publicUrl }).eq('id', workoutId)
         }
       } catch (_) {}
     }
 
-    // ── 2. workout_exercises + workout_sets ──────────────────────────────────
     for (let ei = 0; ei < exercises.length; ei++) {
       const ex = exercises[ei]
-      const validatedSets = ex.sets.filter(s => s.validated && s.weight_kg > 0 && s.reps > 0)
+      const validatedSets = ex.sets.filter(s => s.validated && s.reps > 0)
       if (validatedSets.length === 0) continue
-
       const exVolume = volumeParExercice[ex.exercise_id] ?? 0
       const prExercice = computePodium(exVolume, ex.pr_top3_exercice)
-
       const weId = crypto.randomUUID()
       const { error: weErr } = await supabase.from('workout_exercises').insert({
-        id: weId,
-        workout_id: workoutId,
-        exercise_id: ex.exercise_id,
-        order_index: ei,
-        pr_exercice: prExercice,
+        id: weId, workout_id: workoutId, exercise_id: ex.exercise_id, order_index: ei, pr_exercice: prExercice,
       })
       if (weErr) throw new Error(weErr.message)
-
-      const setsInsert = validatedSets.map((s, si) => ({
-        id: crypto.randomUUID(),
-        workout_exercise_id: weId,
-        set_type: 'working' as const,
-        set_number: s.set_number,
-        reps: s.reps,
-        weight_kg: s.weight_kg,
-        rest_seconds: s.rest_seconds,
-        is_pr: s.is_pr,
-        pr_charge: s.pr_charge,
-        pr_serie: s.pr_serie,
-        logged_at: s.validated_at
-          ? new Date(s.validated_at).toISOString()
-          : new Date().toISOString(),
+      const setsInsert = validatedSets.map((s) => ({
+        id: crypto.randomUUID(), workout_exercise_id: weId, set_type: 'working' as const,
+        set_number: s.set_number, reps: s.reps, weight_kg: s.weight_kg, rest_seconds: s.rest_seconds,
+        is_pr: s.is_pr, pr_charge: s.pr_charge, pr_serie: s.pr_serie,
+        logged_at: s.validated_at ? new Date(s.validated_at).toISOString() : new Date().toISOString(),
       }))
       const { error: wsErr } = await supabase.from('workout_sets').insert(setsInsert)
       if (wsErr) throw new Error(wsErr.message)
-
       for (const s of validatedSets) {
         await insertLocalSet({
           id: `${workoutId}-${ex.exercise_id}-${s.set_number}`,
-          exercise_id: ex.exercise_id,
-          weight_kg: s.weight_kg,
-          reps: s.reps,
-          session_id: workoutId,
-          logged_at: s.validated_at ?? Date.now(),
+          exercise_id: ex.exercise_id, weight_kg: s.weight_kg, reps: s.reps,
+          session_id: workoutId, logged_at: s.validated_at ?? Date.now(),
         })
       }
     }
 
     await insertLocalSession({ id: workoutId, total_volume_kg: totalVolume, logged_at: Date.now() })
 
-    // ── 3. workout_metrics best-effort ───────────────────────────────────────
     try {
       const metricsData = {
-        volume_total_kg: totalVolume,
-        duree_totale_seance: durationSec,
-        nb_exercices: nbExercices,
-        nb_series_total: nbSeries,
-        poids_max_seance_kg: poidsMax,
-        volume_max_serie_kg: volumeMaxSerie,
-        volume_par_exercice_kg: volumeParExercice,
-        nb_series_par_exercice: nbSeriesParEx,
-        poids_max_par_exercice_kg: poidsMaxParEx,
-        estimated_1rm_par_exercice_kg: estimated1rmParEx,
-        pr_par_exercice: prParExercice,
-        temps_repos_total_sec: tempsReposTotal,
-        temps_repos_moyen_seance_sec: tempsReposMoyen,
-        temps_actif_sec: tempsActif,
-        ratio_actif_repos: ratioActif,
-        densite_kg_par_min: densiteKgParMin,
-        slot_horaire: slotHoraire,
-        heure_debut: startedAtIso,
-        poids_corps_kg: poidsCorps,
-        age_ans: ageAns,
-        nb_pr_seance: nbPrSeance,
-        streak_semaines_actives: streakSemaines,
-        nb_seances_30_derniers_jours: nbSeances30j,
-        frequence_hebdo_moyenne: frequenceHebdo,
-        volume_7_derniers_jours_kg: volume7j,
-        temps_depuis_derniere_seance_sec: tempsDerniere,
-        charge_relative_seance: chargeRelSeance,
-        charge_relative_par_exercice: chargeRelParEx,
-        temps_repos_moyen_par_exercice_sec: tempsReposMoyParEx,
-        muscle_primaire_dominant: dominantMuscle,
-        volume_max_serie_par_exercice_kg: volumeMaxSerieParEx,
-        muscles_sollicites: [],
+        volume_total_kg: totalVolume, duree_totale_seance: durationSec,
+        nb_exercices: nbExercices, nb_series_total: nbSeries,
+        poids_max_seance_kg: poidsMax, volume_max_serie_kg: volumeMaxSerie,
+        volume_par_exercice_kg: volumeParExercice, nb_series_par_exercice: nbSeriesParEx,
+        poids_max_par_exercice_kg: poidsMaxParEx, estimated_1rm_par_exercice_kg: estimated1rmParEx,
+        pr_par_exercice: prParExercice, temps_repos_total_sec: tempsReposTotal,
+        temps_repos_moyen_seance_sec: tempsReposMoyen, temps_actif_sec: tempsActif,
+        ratio_actif_repos: ratioActif, densite_kg_par_min: densiteKgParMin, slot_horaire: slotHoraire,
+        heure_debut: startedAtIso, poids_corps_kg: poidsCorps, age_ans: ageAns,
+        nb_pr_seance: nbPrSeance, streak_semaines_actives: streakSemaines,
+        nb_seances_30_derniers_jours: nbSeances30j, frequence_hebdo_moyenne: frequenceHebdo,
+        volume_7_derniers_jours_kg: volume7j, temps_depuis_derniere_seance_sec: tempsDerniere,
+        charge_relative_seance: chargeRelSeance, charge_relative_par_exercice: chargeRelParEx,
+        temps_repos_moyen_par_exercice_sec: tempsReposMoyParEx, muscle_primaire_dominant: dominantMuscle,
+        volume_max_serie_par_exercice_kg: volumeMaxSerieParEx, muscles_sollicites: [],
       }
       await supabase.from('workout_metrics').insert({
-        workout_id: workoutId,
-        data: metricsData,
-        computed_at: new Date().toISOString(),
+        workout_id: workoutId, data: metricsData, computed_at: new Date().toISOString(),
       })
     } catch (_) {}
 
-    // ── 4. Myo signature best-effort ─────────────────────────────────────────
     try {
-      await saveMyoSignature({
-        userId: user.id,
-        workoutId,
-        startedAtIso,
-        volume_total_kg: totalVolume,
-        densite_kg_par_min: densiteKgParMin,
-        nb_series_total: nbSeries,
-        score_recuperation_estime: null,
-        nb_pr_seance: nbPrSeance,
-        streak_semaines_actives: streakSemaines,
-        volume_max_serie_kg: volumeMaxSerie,
-        poids_max_seance_kg: poidsMax,
-        charge_relative_seance: chargeRelSeance,
-        nb_exercices: nbExercices,
-        nb_series_par_exercise_moy: nbExercices > 0 ? nbSeries / nbExercices : 0,
-        duree_totale_seance: durationSec,
-        temps_repos_total_sec: tempsReposTotal,
-        temps_repos_moyen_seance_sec: tempsReposMoyen,
-        temps_actif_sec: tempsActif,
-        ratio_actif_repos: ratioActif,
-        heure_debut: startedAtIso,
-        slot_horaire: slotHoraire,
-        muscle_primaire_dominant: dominantMuscle,
-        poids_corps_kg: poidsCorps,
-        age_ans: ageAns,
-        temps_depuis_derniere_seance_sec: tempsDerniere,
-        volume_7_derniers_jours_kg: volume7j,
-        evolution_repos_moyen_seance_sec: evolutionRepos,
-        nb_seances_30_derniers_jours: nbSeances30j,
-        frequence_hebdo_moyenne: frequenceHebdo,
-        volume_par_exercice_kg: volumeParExercice,
-        volume_max_serie_par_exercice_kg: volumeMaxSerieParEx,
-        poids_max_par_exercice_kg: poidsMaxParEx,
-        charge_relative_par_exercice: chargeRelParEx,
-        nb_series_par_exercice: nbSeriesParEx,
-        temps_repos_moyen_par_exercice_sec: tempsReposMoyParEx,
-        estimated_1rm_par_exercice_kg: estimated1rmParEx,
-        pr_par_exercice: prParExercice,
-        volume_par_muscle_kg: {},
-        evolution_volume_par_exercice: {},
-        evolution_1rm_par_exercice: {},
-        volume_par_muscle_30j_kg: {},
-        volume_par_muscle_90j_kg: {},
-        frequence_sollicitation_par_muscle_7j: {},
-        muscles_sollicites: [],
-        setsByExercise,
+      const sv = await saveMyoSignature({
+        userId: user.id, workoutId, startedAtIso, volume_total_kg: totalVolume,
+        densite_kg_par_min: densiteKgParMin, nb_series_total: nbSeries,
+        score_recuperation_estime: null, nb_pr_seance: nbPrSeance,
+        streak_semaines_actives: streakSemaines, volume_max_serie_kg: volumeMaxSerie,
+        poids_max_seance_kg: poidsMax, charge_relative_seance: chargeRelSeance,
+        nb_exercices: nbExercices, nb_series_par_exercise_moy: nbExercices > 0 ? nbSeries / nbExercices : 0,
+        duree_totale_seance: durationSec, temps_repos_total_sec: tempsReposTotal,
+        temps_repos_moyen_seance_sec: tempsReposMoyen, temps_actif_sec: tempsActif,
+        ratio_actif_repos: ratioActif, heure_debut: startedAtIso, slot_horaire: slotHoraire,
+        muscle_primaire_dominant: dominantMuscle, poids_corps_kg: poidsCorps, age_ans: ageAns,
+        temps_depuis_derniere_seance_sec: tempsDerniere, volume_7_derniers_jours_kg: volume7j,
+        evolution_repos_moyen_seance_sec: evolutionRepos, nb_seances_30_derniers_jours: nbSeances30j,
+        frequence_hebdo_moyenne: frequenceHebdo, volume_par_exercice_kg: volumeParExercice,
+        volume_max_serie_par_exercice_kg: volumeMaxSerieParEx, poids_max_par_exercice_kg: poidsMaxParEx,
+        charge_relative_par_exercice: chargeRelParEx, nb_series_par_exercice: nbSeriesParEx,
+        temps_repos_moyen_par_exercice_sec: tempsReposMoyParEx, estimated_1rm_par_exercice_kg: estimated1rmParEx,
+        pr_par_exercice: prParExercice, volume_par_muscle_kg: {}, evolution_volume_par_exercice: {},
+        evolution_1rm_par_exercice: {}, volume_par_muscle_30j_kg: {}, volume_par_muscle_90j_kg: {},
+        frequence_sollicitation_par_muscle_7j: {}, muscles_sollicites: [], setsByExercise,
       })
+      if (sv) setSessionValues(sv)
     } catch (_) {}
 
     return { workoutId, prSeance }
   }
 
-  // ─── Handlers ────────────────────────────────────────────────────────────
+  // ─── Handlers ────────────────────────────────────────────────────────────────
 
   async function handleSave() {
     setSaving(true)
     setSaveError(null)
     try {
       await computeAndSave()
+      // Fire-and-forget — cache les prédictions en arrière-plan après save SQLite
+      void (async () => {
+        try {
+          const preds = await Promise.all(
+            exercises
+              .filter(ex => ex.sets.some(s => s.validated && s.weight_kg > 0))
+              .map(ex => computePrediction(ex.exercise_id, ex.name))
+          )
+          const valid = preds.filter((p): p is NonNullable<typeof p> => p !== null)
+          if (valid.length > 0) {
+            const existing = await AsyncStorage.getItem('predictions_cache')
+            const prev: typeof valid = existing ? JSON.parse(existing) : []
+            // Écrase les entrées du même exercice, garde les autres
+            const merged = [
+              ...prev.filter(p => !valid.some(v => v.exerciseId === p.exerciseId)),
+              ...valid,
+            ]
+            await AsyncStorage.setItem('predictions_cache', JSON.stringify(merged))
+          }
+        } catch (_) {}
+      })()
       storage.delete('workout_session_draft')
       resetWorkout()
       router.replace('/(tabs)/feed')
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Erreur inconnue'
-      setSaveError(msg)
+      setSaveError(err instanceof Error ? err.message : 'Erreur inconnue')
       setSaving(false)
     }
   }
 
   function handleCancel() {
-    Alert.alert(
-      'Annuler ?',
-      'La séance sera perdue.',
-      [
-        { text: 'Non', style: 'cancel' },
-        {
-          text: 'Oui, annuler',
-          style: 'destructive',
-          onPress: () => {
-            storage.delete('workout_session_draft')
-            resetWorkout()
-            router.replace('/(tabs)/feed')
-          },
+    Alert.alert('Annuler ?', 'La séance sera perdue.', [
+      { text: 'Non', style: 'cancel' },
+      {
+        text: 'Oui, annuler', style: 'destructive',
+        onPress: () => {
+          storage.delete('workout_session_draft')
+          resetWorkout()
+          router.replace('/(tabs)/feed')
         },
-      ]
-    )
+      },
+    ])
   }
 
   async function handlePickPhoto() {
@@ -631,16 +676,12 @@ export default function SummaryScreen() {
     if (!permission.granted) return
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
+      allowsEditing: true, aspect: [4, 3], quality: 0.8,
     })
-    if (!result.canceled && result.assets[0]) {
-      setPhotoUri(result.assets[0].uri)
-    }
+    if (!result.canceled && result.assets[0]) setPhotoUri(result.assets[0].uri)
   }
 
-  // ─── Rendu ────────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
@@ -650,9 +691,10 @@ export default function SummaryScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Header: date + titre ── */}
+
+        {/* ── Header ── */}
         <Animated.View style={style0}>
-          <Text style={[styles.dateCaption, { color: colors.textSecondary }]}>
+          <Text style={[styles.dateCaption, { color: colors.textTertiary }]}>
             {formatDate(startedAt)}
           </Text>
           <Text style={[styles.workoutTitle, { color: colors.textPrimary }]} numberOfLines={2}>
@@ -660,56 +702,55 @@ export default function SummaryScreen() {
           </Text>
         </Animated.View>
 
-        {/* ── Volume total ── */}
-        <Animated.View style={[styles.section, style1]}>
-          <Text style={[styles.sectionLabel, { color: colors.textTertiary }]}>VOLUME TOTAL</Text>
+        {/* ── Volume hero ── */}
+        <Animated.View style={[styles.heroBlock, style1]}>
+          <Text style={[styles.heroLabel, { color: colors.textTertiary }]}>VOLUME TOTAL</Text>
           <View style={styles.heroRow}>
-            <Text style={[styles.heroValue, { color: colors.accent, fontVariant: ['tabular-nums'] }]} allowFontScaling={false}>
+            <Text
+              style={[styles.heroValue, { color: colors.accent }]}
+              allowFontScaling={false}
+            >
               {displayVolume.toLocaleString('fr-FR')}
             </Text>
-            <Text style={[styles.heroUnit, { color: colors.accent }]}> kg</Text>
+            <Text style={[styles.heroUnit, { color: colors.accent }]}>kg</Text>
           </View>
-          {/* Chips: durée · sets · exercices */}
-          <View style={styles.chipsRow}>
-            <View style={[styles.chip, { backgroundColor: colors.backgroundSecondary }]}>
-              <Text style={[styles.chipText, { color: colors.textSecondary }]} allowFontScaling={false}>
-                {formatDuration(elapsedSeconds)}
-              </Text>
-            </View>
-            <View style={[styles.chip, { backgroundColor: colors.backgroundSecondary }]}>
-              <Text style={[styles.chipText, { color: colors.textSecondary }]} allowFontScaling={false}>
-                {nbSeries} SETS
-              </Text>
-            </View>
-            <View style={[styles.chip, { backgroundColor: colors.backgroundSecondary }]}>
-              <Text style={[styles.chipText, { color: colors.textSecondary }]} allowFontScaling={false}>
-                {nbExercices} EXERCICE{nbExercices > 1 ? 'S' : ''}
-              </Text>
-            </View>
+
+          {/* Stats row: 3 pills */}
+          <View style={styles.statsRow}>
+            <StatPill label="DURÉE" value={formatDuration(elapsedSeconds)} colors={colors} />
+            <StatPill label="SETS" value={String(nbSeries)} colors={colors} />
+            <StatPill label="EXOS" value={String(nbExercices)} colors={colors} />
+            {poidsMaxSeance > 0 && (
+              <StatPill label="MAX" value={`${poidsMaxSeance}kg`} colors={colors} />
+            )}
           </View>
         </Animated.View>
 
-        {/* ── PRs détectés ── */}
+        {/* ── Séparateur ── */}
+        <View style={[styles.divider, { backgroundColor: colors.separator }]} />
+
+        {/* ── PRs ── */}
         {hasPrs && (
           <Animated.View style={[styles.section, style2]}>
-            <Text style={[styles.sectionLabel, { color: colors.textTertiary }]}>PRs DÉTECTÉS</Text>
-            <View style={styles.prRowsWrap}>
+            <SectionHeader label="PRs DÉTECTÉS" colors={colors} />
+            <View style={styles.prList}>
               {bestPrCharge !== null && (
                 <PrRow
                   level={bestPrCharge}
                   type="charge"
-                  label={
-                    prChargeDetected.length > 0
-                      ? `Charge · +${Math.round(prChargeDetected.reduce((m, s) => Math.max(m, s.weight_kg), 0))} kg`
-                      : 'Charge'
+                  value={prChargeDetected.length > 0
+                    ? `+${Math.round(prChargeDetected.reduce((m, s) => Math.max(m, s.weight_kg), 0))} kg`
+                    : '—'
                   }
+                  delay={80}
                 />
               )}
               {bestPrSerie !== null && prSerieMax > 0 && (
                 <PrRow
                   level={bestPrSerie}
                   type="serie"
-                  label={`Série · ${prSerieMax} pts`}
+                  value={`${prSerieMax} pts`}
+                  delay={160}
                 />
               )}
             </View>
@@ -719,54 +760,132 @@ export default function SummaryScreen() {
         {/* ── Groupes musculaires ── */}
         {muscleEntries.length > 0 && (
           <Animated.View style={[styles.section, style3]}>
-            <Text style={[styles.sectionLabel, { color: colors.textTertiary }]}>GROUPES MUSCULAIRES</Text>
-            {/* Légende */}
-            <View style={styles.legendRow}>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: colors.accent }]} />
-                <Text style={[styles.legendText, { color: colors.textSecondary }]}>Primaire</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: colors.textTertiary }]} />
-                <Text style={[styles.legendText, { color: colors.textSecondary }]}>Secondaire</Text>
-              </View>
+            <View style={styles.muscleSectionHeader}>
+              <SectionHeader label="GROUPES MUSCULAIRES" colors={colors} />
+              <MuscleLegend colors={colors} />
             </View>
-            {/* Barres */}
-            {muscleEntries.map(([muscle, vol]) => {
-              const pct = vol / maxVol
-              const isPrimary = muscle === primaryMuscle
-              const barColor = isPrimary ? colors.accent : colors.textSecondary
+            {muscleEntries.map(([muscle, vol], idx) => (
+              <MuscleBar
+                key={muscle}
+                label={muscleLabelFr(muscle)}
+                pct={vol / maxVol}
+                isPrimary={muscle === primaryMuscle}
+                colors={colors}
+                delay={idx * 60}
+              />
+            ))}
+          </Animated.View>
+        )}
+
+        {/* ── Récap exercices ── */}
+        {exercises.length > 0 && (
+          <Animated.View style={[styles.section, style4]}>
+            <SectionHeader label="RÉCAP SÉANCE" colors={colors} />
+            {exercises.map((ex, exIdx) => {
+              const exSets = ex.sets.filter(s => s.validated && s.reps > 0)
+              if (exSets.length === 0) return null
+              const maxW = Math.max(...exSets.map(s => s.weight_kg), 0)
+              const exVol = exSets.reduce((sum, s) => sum + s.weight_kg * s.reps, 0)
               return (
-                <View key={muscle} style={styles.muscleRow}>
-                  <Text style={[styles.muscleLabel, { color: colors.textSecondary }]} numberOfLines={1}>
-                    {muscleLabelFr(muscle)}
-                  </Text>
-                  <View style={[styles.muscleBarBg, { backgroundColor: colors.backgroundTertiary }]}>
-                    <View
-                      style={[
-                        styles.muscleBarFill,
-                        { width: `${Math.round(pct * 100)}%` as `${number}%`, backgroundColor: barColor },
-                      ]}
-                    />
+                <View key={ex.exercise_id} style={[styles.recapCard, { backgroundColor: colors.backgroundSecondary }]}>
+                  <View style={styles.recapExHeader}>
+                    <View style={[styles.recapIdx, { backgroundColor: colors.backgroundTertiary }]}>
+                      <Text style={[styles.recapIdxText, { color: colors.textTertiary }]}>
+                        {String(exIdx + 1).padStart(2, '0')}
+                      </Text>
+                    </View>
+                    <View style={styles.recapExInfo}>
+                      <Text style={[styles.recapExName, { color: colors.textPrimary }]} numberOfLines={1}>
+                        {ex.name}
+                      </Text>
+                      <Text style={[styles.recapExMeta, { color: colors.textTertiary }]}>
+                        {exSets.length} set{exSets.length > 1 ? 's' : ''}
+                        {maxW > 0 ? ` · ${maxW} kg max` : ''}
+                        {exVol > 0 ? ` · ${Math.round(exVol)} kg vol.` : ''}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={[styles.musclePct, { color: colors.textSecondary }]} allowFontScaling={false}>
-                    {Math.round(pct * 100)}%
-                  </Text>
+                  <View style={styles.recapSetsList}>
+                    <View style={styles.recapSetHeader}>
+                      <Text style={[styles.recapSetHeaderCell, { color: colors.textTertiary, width: 28 }]}>#</Text>
+                      <Text style={[styles.recapSetHeaderCell, { color: colors.textTertiary, flex: 1 }]}>POIDS</Text>
+                      <Text style={[styles.recapSetHeaderCell, { color: colors.textTertiary, width: 52, textAlign: 'right' }]}>REPS</Text>
+                      <Text style={[styles.recapSetHeaderCell, { color: colors.textTertiary, width: 28, textAlign: 'center' }]}>PR</Text>
+                    </View>
+                    {exSets.map((s, si) => {
+                      const prLevel = s.pr_charge ?? s.pr_serie
+                      const prColor = prLevel === 'gold' ? colors.prGold : prLevel === 'silver' ? colors.prSilver : colors.prBronze
+                      return (
+                        <View
+                          key={s.set_number}
+                          style={[
+                            styles.recapSetRow,
+                            si < exSets.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.separator },
+                            prLevel != null && { backgroundColor: `${prColor}10` },
+                          ]}
+                        >
+                          <Text style={[styles.recapSetNum, { color: colors.textSecondary }]}>{s.set_number}</Text>
+                          <Text style={[styles.recapSetWeight, { color: colors.textPrimary, flex: 1 }]}>
+                            {s.weight_kg > 0 ? `${s.weight_kg} kg` : 'Poids corps'}
+                          </Text>
+                          <Text style={[styles.recapSetReps, { color: colors.textPrimary }]}>{s.reps}</Text>
+                          <View style={styles.recapSetPr}>
+                            {prLevel != null && <View style={[styles.recapPrDot, { backgroundColor: prColor }]} />}
+                          </View>
+                        </View>
+                      )
+                    })}
+                  </View>
                 </View>
               )
             })}
           </Animated.View>
         )}
 
+        {/* ── Photo ── */}
+        <Animated.View style={[styles.section, style4]}>
+          <SectionHeader label="PHOTO" colors={colors} />
+          <TouchableOpacity
+            style={[
+              styles.photoButton,
+              { borderColor: colors.border, backgroundColor: colors.backgroundSecondary },
+              photoUri ? styles.photoButtonFilled : null,
+            ]}
+            onPress={handlePickPhoto}
+            activeOpacity={0.8}
+          >
+            {photoUri ? (
+              <Image source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" />
+            ) : (
+              <View style={styles.photoPlaceholder}>
+                <View style={[styles.photoIconWrap, { backgroundColor: colors.backgroundTertiary }]}>
+                  <Camera size={22} color={colors.textSecondary} />
+                </View>
+                <Text style={[styles.photoPlaceholderText, { color: colors.textSecondary }]}>
+                  Ajouter une photo
+                </Text>
+                <Text style={[styles.photoPlaceholderSub, { color: colors.textTertiary }]}>
+                  Optionnel · Galerie
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
+
         {/* ── Partager ── */}
         <Animated.View style={[styles.section, style4]}>
           <View style={[styles.shareRow, { backgroundColor: colors.backgroundSecondary }]}>
-            <Text style={[styles.shareLabel, { color: colors.textPrimary }]}>Partager</Text>
+            <View style={styles.shareLeft}>
+              <Text style={[styles.shareLabel, { color: colors.textPrimary }]}>Partager</Text>
+              <Text style={[styles.shareSub, { color: colors.textTertiary }]}>
+                {isPublic ? 'Visible dans le feed' : 'Séance privée'}
+              </Text>
+            </View>
             <Switch
               value={isPublic}
               onValueChange={setIsPublic}
               trackColor={{ false: colors.switchBackground, true: colors.accent }}
-              thumbColor={colors.textPrimary}
+              thumbColor={isPublic ? colors.background : colors.textPrimary}
               ios_backgroundColor={colors.switchBackground}
             />
           </View>
@@ -774,12 +893,12 @@ export default function SummaryScreen() {
 
         {/* ── Erreur ── */}
         {saveError && (
-          <View style={[styles.errorBox, { backgroundColor: `${colors.error}20`, borderColor: `${colors.error}40` }]}>
+          <View style={[styles.errorBox, { backgroundColor: `${colors.error}18`, borderColor: `${colors.error}35` }]}>
             <Text style={[styles.errorText, { color: colors.error }]}>{saveError}</Text>
           </View>
         )}
 
-        {/* ── Bouton sauvegarder ── */}
+        {/* ── Footer ── */}
         <View style={styles.footer}>
           <TouchableOpacity
             style={[styles.saveButton, { backgroundColor: colors.accent }, saving && styles.saveButtonDisabled]}
@@ -793,16 +912,16 @@ export default function SummaryScreen() {
               <Text style={[styles.saveButtonText, { color: colors.background }]}>SAUVEGARDER</Text>
             )}
           </TouchableOpacity>
-
           <TouchableOpacity
             style={styles.cancelButton}
             onPress={handleCancel}
             disabled={saving}
             activeOpacity={0.7}
           >
-            <Text style={[styles.cancelButtonText, { color: colors.error }]}>ANNULER</Text>
+            <Text style={[styles.cancelButtonText, { color: colors.textTertiary }]}>ANNULER LA SÉANCE</Text>
           </TouchableOpacity>
         </View>
+
       </ScrollView>
     </SafeAreaView>
   )
@@ -811,108 +930,159 @@ export default function SummaryScreen() {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
-  scroll: {
-    flex: 1,
-  },
+  root: { flex: 1 },
+  scroll: { flex: 1 },
   scrollContent: {
     paddingHorizontal: spacing.s4,
     paddingTop: spacing.s6,
     paddingBottom: spacing.s12,
   },
+
   // Header
   dateCaption: {
     ...typography.caption,
     textTransform: 'uppercase',
-    letterSpacing: 1.2,
+    letterSpacing: 1.5,
     marginBottom: spacing.s2,
   },
   workoutTitle: {
-    ...typography.title,
+    fontSize: 28,
+    fontFamily: font.extraBold,
+    letterSpacing: -0.5,
+    lineHeight: 34,
     marginBottom: spacing.s1,
   },
-  // Sections
-  section: {
-    marginTop: spacing.s6,
+
+  // Volume hero block
+  heroBlock: {
+    marginTop: spacing.s5,
   },
-  sectionLabel: {
+  heroLabel: {
     ...typography.caption,
     textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    marginBottom: spacing.s3,
+    letterSpacing: 1.5,
+    marginBottom: spacing.s2,
   },
-  // Volume hero
   heroRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
+    gap: spacing.s2,
     marginBottom: spacing.s4,
   },
   heroValue: {
-    ...typography.hero,
+    fontSize: 64,
+    fontFamily: font.black,
+    letterSpacing: -2,
+    lineHeight: 68,
     fontVariant: ['tabular-nums'],
   },
   heroUnit: {
-    fontSize: 28,
-    fontFamily: typography.hero.fontFamily,
+    fontSize: 32,
+    fontFamily: font.bold,
     letterSpacing: -0.5,
-    lineHeight: 60,
-    marginBottom: 4,
+    lineHeight: 68,
+    paddingBottom: 6,
   },
-  // Chips durée/sets/exercices
-  chipsRow: {
+
+  // Stats row
+  statsRow: {
     flexDirection: 'row',
     gap: spacing.s2,
     flexWrap: 'wrap',
   },
-  chip: {
+  statPill: {
     paddingHorizontal: spacing.s3,
     paddingVertical: spacing.s2,
     borderRadius: radius.sm,
+    alignItems: 'center',
+    minWidth: 60,
   },
-  chipText: {
-    ...typography.caption,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+  statPillValue: {
+    fontSize: 15,
+    fontFamily: font.bold,
+    letterSpacing: -0.3,
     fontVariant: ['tabular-nums'],
   },
-  // PR rows (Figma : backgroundSecondary, height 52, icon + texte)
-  prRowsWrap: {
+  statPillLabel: {
+    fontSize: 10,
+    fontFamily: font.medium,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginTop: 1,
+  },
+
+  // Divider
+  divider: {
+    height: 1,
+    marginVertical: spacing.s6,
+  },
+
+  // Sections
+  section: {
+    marginTop: spacing.s6,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.s2,
+    marginBottom: spacing.s3,
+  },
+  sectionDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
+  sectionLabel: {
+    ...typography.caption,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+  },
+
+  // PR rows (Figma style)
+  prList: {
     gap: spacing.s2,
   },
   prRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 52,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.s4,
     gap: spacing.s3,
+    paddingHorizontal: spacing.s4,
+    paddingVertical: spacing.s4,
+    borderRadius: radius.lg,
+    minHeight: 52,
   },
   prRowLabel: {
-    ...typography.caption,
-    textTransform: 'uppercase',
-    fontFamily: 'Barlow_700Bold',
-    letterSpacing: 0.8,
+    fontSize: 14,
+    fontFamily: font.bold,
+    letterSpacing: 0.2,
   },
-  // Muscle bars
-  legendRow: {
+
+  // Muscle section
+  muscleSectionHeader: {
     flexDirection: 'row',
-    gap: spacing.s4,
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: spacing.s3,
   },
-  legendItem: {
+  muscleLegend: {
+    flexDirection: 'row',
+    gap: spacing.s3,
+    alignItems: 'center',
+  },
+  muscleLegendItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.s1,
   },
-  legendDot: {
+  muscleLegendDot: {
     width: 8,
     height: 8,
-    borderRadius: radius.full,
+    borderRadius: 4,
   },
-  legendText: {
-    ...typography.caption,
+  muscleLegendLabel: {
+    fontSize: 11,
+    fontFamily: font.medium,
+    letterSpacing: 0.3,
   },
   muscleRow: {
     flexDirection: 'row',
@@ -921,41 +1091,184 @@ const styles = StyleSheet.create({
     marginBottom: spacing.s3,
   },
   muscleLabel: {
-    fontSize: 14,
-    fontFamily: typography.body.fontFamily,
-    width: 88,
+    fontSize: 13,
+    fontFamily: font.medium,
+    width: 84,
+  },
+  muscleBarTrack: {
+    flex: 1,
   },
   muscleBarBg: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
+    height: 6,
+    borderRadius: 3,
     overflow: 'hidden',
   },
   muscleBarFill: {
     height: '100%',
-    borderRadius: 2,
+    borderRadius: 3,
   },
   musclePct: {
-    ...typography.caption,
+    fontSize: 12,
+    fontFamily: font.bold,
     width: 36,
     textAlign: 'right',
     fontVariant: ['tabular-nums'],
+    letterSpacing: 0.3,
   },
-  // Partager
+
+  // Récap exercices
+  recapCard: {
+    borderRadius: radius.md,
+    marginBottom: spacing.s3,
+    overflow: 'hidden',
+  },
+  recapExHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.s3,
+    paddingVertical: spacing.s3,
+    gap: spacing.s3,
+  },
+  recapIdx: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  recapIdxText: {
+    fontSize: 11,
+    fontFamily: font.bold,
+    fontVariant: ['tabular-nums'],
+  },
+  recapExInfo: {
+    flex: 1,
+  },
+  recapExName: {
+    fontSize: 14,
+    fontFamily: font.bold,
+    letterSpacing: -0.2,
+    lineHeight: 18,
+  },
+  recapExMeta: {
+    fontSize: 11,
+    fontFamily: font.regular,
+    marginTop: 1,
+  },
+  recapSetsList: {
+    paddingHorizontal: spacing.s3,
+    paddingBottom: spacing.s3,
+  },
+  recapSetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: spacing.s2,
+    gap: spacing.s2,
+  },
+  recapSetHeaderCell: {
+    fontSize: 9,
+    fontFamily: font.bold,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  recapSetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+    gap: spacing.s2,
+  },
+  recapSetNum: {
+    fontSize: 12,
+    fontFamily: font.mono,
+    fontVariant: ['tabular-nums'],
+    width: 28,
+  },
+  recapSetWeight: {
+    fontSize: 13,
+    fontFamily: font.bold,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -0.2,
+  },
+  recapSetReps: {
+    fontSize: 13,
+    fontFamily: font.bold,
+    fontVariant: ['tabular-nums'],
+    width: 52,
+    textAlign: 'right',
+    letterSpacing: -0.2,
+  },
+  recapSetPr: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recapPrDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+
+  // Photo
+  photoButton: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    minHeight: 100,
+    justifyContent: 'center',
+  },
+  photoButtonFilled: {
+    borderStyle: 'solid',
+    borderWidth: 0,
+  },
+  photoPreview: {
+    width: '100%',
+    height: 180,
+  },
+  photoPlaceholder: {
+    alignItems: 'center',
+    paddingVertical: spacing.s5,
+    gap: spacing.s2,
+  },
+  photoIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.s1,
+  },
+  photoPlaceholderText: {
+    fontSize: 14,
+    fontFamily: font.medium,
+  },
+  photoPlaceholderSub: {
+    ...typography.caption,
+  },
+
+  // Share row
   shareRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.s4,
-    paddingVertical: spacing.s3,
-    borderRadius: radius.md,
+    paddingVertical: spacing.s4,
+    borderRadius: radius.lg,
     minHeight: touchTarget.comfort,
   },
-  shareLabel: {
-    ...typography.body,
-    fontWeight: '600',
+  shareLeft: {
+    gap: 2,
   },
-  // Erreur
+  shareLabel: {
+    fontSize: 15,
+    fontFamily: font.bold,
+  },
+  shareSub: {
+    ...typography.caption,
+  },
+
+  // Error
   errorBox: {
     marginTop: spacing.s4,
     borderRadius: radius.md,
@@ -965,33 +1278,38 @@ const styles = StyleSheet.create({
   errorText: {
     ...typography.caption,
   },
+
   // Footer
   footer: {
     marginTop: spacing.s8,
+    gap: spacing.s1,
   },
   saveButton: {
     height: touchTarget.hero,
     borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing.s2,
   },
-  saveButtonDisabled: {
+saveButtonDisabled: {
     opacity: 0.6,
   },
   saveButtonText: {
-    ...typography.subtitle,
-    fontWeight: '900',
-    letterSpacing: 1.5,
+    fontSize: 16,
+    fontFamily: font.black,
+    letterSpacing: 2,
     textTransform: 'uppercase',
   },
   cancelButton: {
     height: touchTarget.min,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: spacing.s3,
   },
   cancelButtonText: {
-    ...typography.body,
-    fontWeight: '600',
+    fontSize: 12,
+    fontFamily: font.medium,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
 })

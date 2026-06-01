@@ -67,8 +67,19 @@ interface FeedWorkout {
     username: string | null
     user_id: string
   } | null
-  pr_count: number
-  pr_best_level: 'gold' | 'silver' | 'bronze' | null
+  prs: WorkoutPRSummary
+}
+
+type PRLevel = 'gold' | 'silver' | 'bronze'
+
+interface WorkoutPRSummary {
+  // meilleur niveau par type (null = aucun PR de ce type)
+  charge: PRLevel | null
+  serie: PRLevel | null
+  exercice: PRLevel | null
+  seance: PRLevel | null
+  // total de PRs individuels (sets + exercices)
+  total: number
 }
 
 interface LikeUser {
@@ -228,53 +239,67 @@ function prBadgeColor(level: 'gold' | 'silver' | 'bronze'): string {
   return map[level]
 }
 
-// ─── PR Icons Strip ──────────────────────────────────────────────────────────
+// ─── PR Pill ─────────────────────────────────────────────────────────────────
+// Pill compacte : count en gras + icônes colorées par type présent
 
-function PRIconsStrip({ prCount, prBestLevel, prSeance }: {
-  prCount: number
-  prBestLevel: 'gold' | 'silver' | 'bronze' | null
-  prSeance: 'gold' | 'silver' | 'bronze' | null
-}) {
-  const { colors } = useTheme()
-  if (prCount === 0 && !prSeance) return null
+// Icône exercice = Dumbbell (lucide), couleur violet fixe, pas de niveau
+const PR_ICON_DEFS = [
+  { key: 'seance'  as const, Icon: Trophy, colorFn: (l: PRLevel) => prBadgeColor(l) },
+  { key: 'charge'  as const, Icon: Zap,    colorFn: (l: PRLevel) => prBadgeColor(l) },
+  { key: 'serie'   as const, Icon: Flame,  colorFn: (l: PRLevel) => prBadgeColor(l) },
+  { key: 'exercice'as const, Icon: Trophy, colorFn: (_: PRLevel) => '#9B59B6'        },
+]
 
-  const level = prBestLevel ?? prSeance
-  const color = level ? prBadgeColor(level) : colors.textSecondary
+function PRPill({ prs }: { prs: WorkoutPRSummary }) {
+  if (!prs.charge && !prs.serie && !prs.exercice && !prs.seance) return null
 
-  // Icône principale selon niveau PR
-  const MainIcon = prSeance ? Trophy : prCount > 0 ? Zap : null
-  if (!MainIcon) return null
+  // Couleur dominante = meilleur niveau parmi les PRs présents
+  const PR_RANK: Record<PRLevel, number> = { gold: 3, silver: 2, bronze: 1 }
+  const levels = [prs.charge, prs.serie, prs.seance].filter(Boolean) as PRLevel[]
+  const topLevel = levels.sort((a, b) => PR_RANK[b] - PR_RANK[a])[0] ?? 'bronze'
+  const dominantColor = prBadgeColor(topLevel)
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.s1 }}>
-      {/* Icône principale */}
-      <MainIcon size={14} color={color} fill={color} />
+    <View style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: dominantColor + '18',
+      borderWidth: 1,
+      borderColor: dominantColor + '55',
+      borderRadius: 20,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    }}>
+      {/* Count total */}
+      <Text style={{
+        fontSize: 13,
+        fontFamily: 'Barlow_700Bold',
+        color: dominantColor,
+        fontVariant: ['tabular-nums'],
+        letterSpacing: -0.3,
+      }}>
+        {prs.total} PR{prs.total > 1 ? 's' : ''}
+      </Text>
 
-      {/* Badge count si multiple PRs */}
-      {prCount > 1 && (
-        <View style={{
-          backgroundColor: color,
-          borderRadius: 8,
-          paddingHorizontal: 5,
-          paddingVertical: 1,
-          minWidth: 16,
-          alignItems: 'center',
-        }}>
-          <Text style={{
-            fontSize: 10,
-            fontFamily: 'Barlow_700Bold',
-            color: colors.background,
-            fontVariant: ['tabular-nums'],
-          }}>
-            {prCount}
-          </Text>
-        </View>
-      )}
+      {/* Séparateur */}
+      <View style={{ width: 1, height: 12, backgroundColor: dominantColor + '44' }} />
 
-      {/* Double icône si PR séance EN PLUS des PRs individuels */}
-      {prSeance && prCount > 0 && (
-        <Zap size={12} color={prBadgeColor(prSeance)} fill={prBadgeColor(prSeance)} />
-      )}
+      {/* Icônes par type présent */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        {PR_ICON_DEFS.map(({ key, Icon, colorFn }) => {
+          const level = prs[key]
+          if (!level) return null
+          return (
+            <Icon
+              key={key}
+              size={13}
+              color={colorFn(level as PRLevel)}
+              fill={colorFn(level as PRLevel)}
+            />
+          )
+        })}
+      </View>
     </View>
   )
 }
@@ -852,7 +877,7 @@ function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemPro
     setCommentsModalVisible(true)
   }
 
-  const hasPR = item.pr_count > 0 || !!item.pr_seance
+  const hasPR = !!(item.prs.charge || item.prs.serie || item.prs.exercice || item.prs.seance)
 
   return (
     <>
@@ -865,7 +890,7 @@ function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemPro
         onPress={() => onNavigateDetail(item.id)}
         style={[styles.feedItem, { backgroundColor: colors.backgroundSecondary, marginBottom: 0 }]}
       >
-        {/* Row 1 — Avatar + Meta */}
+        {/* Row 1 — Avatar + Meta + PR Pill en haut-droit */}
         <View style={styles.row1}>
           <View style={[styles.avatarMed, { backgroundColor: bgColor }]}>
             <Text style={[styles.avatarInitials, { color: colors.textPrimary }]}>{initials}</Text>
@@ -881,13 +906,7 @@ function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemPro
               {timeAgo(item.started_at)}
             </Text>
           </View>
-          {hasPR && (
-            <PRIconsStrip
-              prCount={item.pr_count}
-              prBestLevel={item.pr_best_level}
-              prSeance={item.pr_seance}
-            />
-          )}
+          {hasPR && <PRPill prs={item.prs} />}
         </View>
 
         {/* Row 2 — Titre */}
@@ -898,7 +917,7 @@ function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemPro
           {item.title}
         </Text>
 
-        {/* Row 3 — Lieu */}
+        {/* Row 4 — Lieu */}
         {item.location_city && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.s2, marginTop: spacing.s3 }}>
             <MapPin size={16} color={colors.textSecondary} />
@@ -1606,8 +1625,7 @@ export default function FeedScreen() {
 
     const workoutIds = (data as unknown as RawWorkout[]).map(w => w.id)
 
-    // Counts likes + comments par workout + premier commentaire + PRs exercices
-    const [likesRes, commentsRes, userLikesRes, firstCommentsRes, prExercicesRes] = await Promise.all([
+    const [likesRes, commentsRes, userLikesRes, firstCommentsRes, prExercicesRes, prSetsRes] = await Promise.all([
       supabase.from('likes').select('workout_id').in('workout_id', workoutIds),
       supabase.from('comments').select('workout_id').in('workout_id', workoutIds),
       supabase.from('likes').select('workout_id').eq('user_id', uid).in('workout_id', workoutIds),
@@ -1621,19 +1639,46 @@ export default function FeedScreen() {
         .select('workout_id, pr_exercice')
         .in('workout_id', workoutIds)
         .not('pr_exercice', 'is', null),
+      supabase
+        .from('workout_sets')
+        .select('workout_exercise_id, pr_charge, pr_serie, workout_exercises!inner(workout_id)')
+        .in('workout_exercises.workout_id', workoutIds)
+        .or('pr_charge.not.is.null,pr_serie.not.is.null'),
     ])
 
-    // PR counts + meilleur niveau par workout (exercices avec PR)
-    type PRLevel = 'gold' | 'silver' | 'bronze'
+    // Agrégation PRs par workout
     const PR_RANK: Record<PRLevel, number> = { gold: 3, silver: 2, bronze: 1 }
-    const prCountMap = new Map<string, number>()
-    const prBestLevelMap = new Map<string, PRLevel>()
-    for (const r of (prExercicesRes.data ?? []) as unknown as Array<{ workout_id: string; pr_exercice: PRLevel }>) {
-      prCountMap.set(r.workout_id, (prCountMap.get(r.workout_id) ?? 0) + 1)
-      const current = prBestLevelMap.get(r.workout_id)
-      if (!current || PR_RANK[r.pr_exercice] > PR_RANK[current]) {
-        prBestLevelMap.set(r.workout_id, r.pr_exercice)
+
+    type PrMap = Map<string, PRLevel>
+    const exChargeMap: PrMap = new Map()
+    const exSerieMap: PrMap = new Map()
+    const exExerciceMap: PrMap = new Map()
+
+    // Sets : pr_charge + pr_serie (groupés par workout via JOIN)
+    type RawPRSet = {
+      pr_charge: PRLevel | null
+      pr_serie: PRLevel | null
+      workout_exercises: Array<{ workout_id: string }> | { workout_id: string } | null
+    }
+    for (const r of (prSetsRes.data ?? []) as unknown as RawPRSet[]) {
+      const we = Array.isArray(r.workout_exercises) ? r.workout_exercises[0] : r.workout_exercises
+      const wid = we?.workout_id
+      if (!wid) continue
+      if (r.pr_charge) {
+        const cur = exChargeMap.get(wid)
+        if (!cur || PR_RANK[r.pr_charge] > PR_RANK[cur]) exChargeMap.set(wid, r.pr_charge)
       }
+      if (r.pr_serie) {
+        const cur = exSerieMap.get(wid)
+        if (!cur || PR_RANK[r.pr_serie] > PR_RANK[cur]) exSerieMap.set(wid, r.pr_serie)
+      }
+    }
+
+    // Exercices : pr_exercice
+    type RawPREx = { workout_id: string; pr_exercice: PRLevel }
+    for (const r of (prExercicesRes.data ?? []) as unknown as RawPREx[]) {
+      const cur = exExerciceMap.get(r.workout_id)
+      if (!cur || PR_RANK[r.pr_exercice] > PR_RANK[cur]) exExerciceMap.set(r.workout_id, r.pr_exercice)
     }
 
     const likesCount = new Map<string, number>()
@@ -1668,23 +1713,29 @@ export default function FeedScreen() {
       }
     }
 
-    const mapped: FeedWorkout[] = (data as unknown as RawWorkout[]).map(w => ({
-      id: w.id,
-      title: w.title ?? '—',
-      total_volume_kg: w.total_volume_kg,
-      started_at: w.started_at,
-      ended_at: w.ended_at,
-      pr_seance: w.pr_seance,
-      location_city: w.location_city,
-      gym_id: w.gym_id,
-      user: w.user?.[0] ?? { id: '', username: null, full_name: null },
-      likes_count: likesCount.get(w.id) ?? 0,
-      comments_count: commentsCount.get(w.id) ?? 0,
-      user_has_liked: likedSet.has(w.id),
-      first_comment: firstCommentMap.get(w.id) ?? null,
-      pr_count: prCountMap.get(w.id) ?? 0,
-      pr_best_level: prBestLevelMap.get(w.id) ?? null,
-    }))
+    const mapped: FeedWorkout[] = (data as unknown as RawWorkout[]).map(w => {
+      const charge = exChargeMap.get(w.id) ?? null
+      const serie = exSerieMap.get(w.id) ?? null
+      const exercice = exExerciceMap.get(w.id) ?? null
+      const seance = w.pr_seance ?? null
+      const total = (charge ? 1 : 0) + (serie ? 1 : 0) + (exercice ? 1 : 0) + (seance ? 1 : 0)
+      return {
+        id: w.id,
+        title: w.title ?? '—',
+        total_volume_kg: w.total_volume_kg,
+        started_at: w.started_at,
+        ended_at: w.ended_at,
+        pr_seance: seance,
+        location_city: w.location_city,
+        gym_id: w.gym_id,
+        user: w.user?.[0] ?? { id: '', username: null, full_name: null },
+        likes_count: likesCount.get(w.id) ?? 0,
+        comments_count: commentsCount.get(w.id) ?? 0,
+        user_has_liked: likedSet.has(w.id),
+        first_comment: firstCommentMap.get(w.id) ?? null,
+        prs: { charge, serie, exercice, seance, total },
+      }
+    })
 
     setWorkouts(mapped)
     computeKPIs(mapped)

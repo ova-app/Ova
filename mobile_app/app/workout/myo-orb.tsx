@@ -15,6 +15,9 @@ import {
 } from 'react-native'
 import { GLView, ExpoWebGLRenderingContext } from 'expo-gl'
 import * as THREE from 'three'
+import Svg, { Path, Text as SvgText } from 'react-native-svg'
+import Animated, { useSharedValue, withTiming, withSpring, withDelay, Easing, useAnimatedStyle, SharedValue } from 'react-native-reanimated'
+import { X } from 'lucide-react-native'
 
 // ─── Props ─────────────────────────────────────────────────────────────────
 interface Props {
@@ -23,6 +26,16 @@ interface Props {
   sessionValues?: number[][]
   averageValues?: number[][]
   size?: number
+  /** Contrôle externe : index famille sélectionnée (0-7) ou null */
+  selectedFamily?: number | null
+  /** Callback quand l'utilisateur tape sur l'orb pour changer la sélection */
+  onFamilySelect?: (fi: number | null) => void
+  /** Couleur de fond du canvas GL (hex, default '#0A0A0F') */
+  bgColor?: string
+  /** Afficher le badge score arc en coin haut-droit (default true) */
+  showScore?: boolean
+  /** Afficher les étiquettes de famille flottantes (default true) */
+  showLabels?: boolean
 }
 
 // ─── Config géométrique ────────────────────────────────────────────────────
@@ -49,7 +62,7 @@ const DIM_NAMES = [
   ['Repos moy.', 'Var. repos', 'Complétion', 'Qualité repos', 'Récup. est.'],
   ['Nb PRs', 'Amp. PRs', 'Force rel.', 'Prog. 1RM', 'Constance perf.'],
   ['Fréquence', 'Streak', 'Var. séances', 'Planning', 'Régularité'],
-  ['Push', 'Pull', 'Jambes', 'Gainage', 'Équilibre'],
+  ['Pec clav.', 'Pec sternal', 'Delt ant.', 'Delt médial', 'Delt post.', 'Grand dorsal', 'Trapèze', 'Grand rond', 'Rhomboïdes', 'Érecteurs', 'Biceps', 'Triceps', 'Quadriceps', 'Ischio', 'Fessiers', 'Mollets', 'Core'],
   ['Durée', 'Tempo', 'Densité', 'Efficacité', 'Timing'],
 ]
 
@@ -58,15 +71,22 @@ const SECTOR_COLORS_HEX = [
   '#fac775', '#22c55e', '#ec4899', '#3b82f6',
 ]
 
+export { FAMILY_NAMES, SECTOR_COLORS_HEX, MOCK_SESSION }
+
 const SECTOR_COLORS: readonly number[] = [
   0xf97316, 0xef4444, 0x8b5cf6, 0x06b6d4,
   0xfac775, 0x22c55e, 0xec4899, 0x3b82f6,
 ]
 
 // ─── Mapping 41 dimensions ─────────────────────────────────────────────────
-const N_DIMS_PER_FAM = [6, 5, 5, 5, 5, 5, 5, 5] as const
+const N_DIMS_PER_FAM = [6, 5, 5, 5, 5, 5, 17, 5] as const
 
-// ─── Mock data ─────────────────────────────────────────────────────────────
+const EMPTY_SESSION: number[][] = [
+  [0,0,0,0,0,0], [0,0,0,0,0], [0,0,0,0,0], [0,0,0,0,0],
+  [0,0,0,0,0], [0,0,0,0,0], new Array(17).fill(0), [0,0,0,0,0],
+]
+
+// ─── Mock data (référence design uniquement — ne pas utiliser en prod) ──────
 const MOCK_SESSION: number[][] = [
   [0.92, 0.78, 0.85, 0.71, 0.88, 0.65],
   [0.70, 0.82, 0.61, 0.75, 0.68],
@@ -74,7 +94,7 @@ const MOCK_SESSION: number[][] = [
   [0.45, 0.52, 0.38, 0.61, 0.49],
   [0.88, 0.94, 0.77, 0.82, 0.91],
   [0.60, 0.55, 0.68, 0.52, 0.63],
-  [0.75, 0.82, 0.68, 0.71, 0.79],
+  [0.72, 0.65, 0.40, 0.58, 0.30, 0.55, 0.48, 0.20, 0.25, 0.35, 0.70, 0.60, 0.45, 0.38, 0.52, 0.42, 0.35],
   [0.42, 0.38, 0.51, 0.46, 0.35],
 ]
 
@@ -85,7 +105,7 @@ const MOCK_AVERAGE: number[][] = [
   [0.58, 0.62, 0.48, 0.55, 0.52],
   [0.72, 0.78, 0.65, 0.70, 0.75],
   [0.48, 0.52, 0.55, 0.45, 0.50],
-  [0.62, 0.68, 0.58, 0.61, 0.65],
+  [0.60, 0.55, 0.35, 0.48, 0.28, 0.48, 0.40, 0.18, 0.22, 0.30, 0.58, 0.50, 0.40, 0.32, 0.45, 0.38, 0.30],
   [0.45, 0.42, 0.48, 0.50, 0.38],
 ]
 
@@ -171,6 +191,136 @@ function getC(theta: number): [number, number, number] {
     (((h0 >>  8) & 0xff) * (1 - t) + ((h1 >>  8) & 0xff) * t) / 255,
     (( h0        & 0xff) * (1 - t) + ( h1        & 0xff) * t) / 255,
   ]
+}
+
+// ─── Helper SVG arc ────────────────────────────────────────────────────────
+function arcPath(cx: number, cy: number, r: number, startDeg: number, sweepDeg: number): string {
+  if (sweepDeg <= 0) return ''
+  const toRad = (d: number) => d * Math.PI / 180
+  const x1 = cx + r * Math.cos(toRad(startDeg))
+  const y1 = cy + r * Math.sin(toRad(startDeg))
+  const endDeg = startDeg + sweepDeg
+  const x2 = cx + r * Math.cos(toRad(endDeg))
+  const y2 = cy + r * Math.sin(toRad(endDeg))
+  const large = sweepDeg > 180 ? 1 : 0
+  return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`
+}
+
+// ─── Score arc dégradé — SVG multi-segments simulant un dégradé angulaire ──
+function ScoreArcGradient({
+  score,
+  size = 120,
+  strokeWidth = 9,
+}: {
+  score: number
+  size?: number
+  strokeWidth?: number
+}) {
+  const cx = size / 2
+  const cy = size / 2
+  const r  = (size - strokeWidth * 2) / 2
+
+  // Arc 240° centré en bas : de 150° à 390°
+  const START_DEG = 150
+  const TOTAL_DEG = 240
+  const filled    = (score / 100) * TOTAL_DEG
+
+  // Track (gris)
+  const trackPath = arcPath(cx, cy, r, START_DEG, TOTAL_DEG)
+
+  // Dégradé simulé : N segments colorés le long de l'arc rempli
+  const N_SEG = 48
+  const segDeg = filled / N_SEG
+  const segments: { path: string; color: string }[] = []
+
+  if (filled > 0.5) {
+    for (let i = 0; i < N_SEG; i++) {
+      const t      = i / N_SEG
+      const sStart = START_DEG + i * segDeg
+      const sLen   = segDeg * 1.05
+      const path   = arcPath(cx, cy, r, sStart, sLen)
+      if (!path) continue
+
+      // Interpolation couleur sur les 8 familles (arc-en-ciel)
+      const colorIdx = t * (SECTOR_COLORS_HEX.length - 1)
+      const lo = Math.floor(colorIdx)
+      const hi = Math.min(lo + 1, SECTOR_COLORS_HEX.length - 1)
+      const ft = colorIdx - lo
+
+      const parse = (hex: string) => [
+        parseInt(hex.slice(1, 3), 16),
+        parseInt(hex.slice(3, 5), 16),
+        parseInt(hex.slice(5, 7), 16),
+      ]
+      const c0 = parse(SECTOR_COLORS_HEX[lo])
+      const c1 = parse(SECTOR_COLORS_HEX[hi])
+      const r8 = Math.round(c0[0] * (1 - ft) + c1[0] * ft)
+      const g8 = Math.round(c0[1] * (1 - ft) + c1[1] * ft)
+      const b8 = Math.round(c0[2] * (1 - ft) + c1[2] * ft)
+      const color = `rgb(${r8},${g8},${b8})`
+
+      segments.push({ path, color })
+    }
+  }
+
+  // Couleur du score text = dernier segment (couleur "bout de l'arc")
+  const endT    = (score / 100)
+  const endIdx  = endT * (SECTOR_COLORS_HEX.length - 1)
+  const endLo   = Math.floor(endIdx)
+  const endHi   = Math.min(endLo + 1, SECTOR_COLORS_HEX.length - 1)
+  const endFt   = endIdx - endLo
+  const parse   = (hex: string) => [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)]
+  const ec0     = parse(SECTOR_COLORS_HEX[endLo])
+  const ec1     = parse(SECTOR_COLORS_HEX[endHi])
+  const scoreTextColor = score === 0
+    ? '#4A4A5A'
+    : `rgb(${Math.round(ec0[0]*(1-endFt)+ec1[0]*endFt)},${Math.round(ec0[1]*(1-endFt)+ec1[1]*endFt)},${Math.round(ec0[2]*(1-endFt)+ec1[2]*endFt)})`
+
+  return (
+    <Svg width={size} height={size * 0.72} viewBox={`0 0 ${size} ${size}`} pointerEvents="none">
+      {/* Track */}
+      <Path
+        d={trackPath}
+        stroke="rgba(255,255,255,0.09)"
+        strokeWidth={strokeWidth}
+        fill="none"
+        strokeLinecap="round"
+      />
+      {/* Segments dégradés */}
+      {segments.map((seg, i) => (
+        <Path
+          key={i}
+          d={seg.path}
+          stroke={seg.color}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeLinecap="butt"
+        />
+      ))}
+      {/* Valeur score */}
+      <SvgText
+        x={cx}
+        y={cy + 6}
+        textAnchor="middle"
+        fill={scoreTextColor}
+        fontSize={size * 0.22}
+        fontWeight="900"
+      >
+        {String(score)}
+      </SvgText>
+      <SvgText
+        x={cx}
+        y={cy + size * 0.22}
+        textAnchor="middle"
+        fill="rgba(255,255,255,0.28)"
+        fontSize={size * 0.085}
+        fontWeight="700"
+        letterSpacing={1.2}
+      >
+        SCORE
+      </SvgText>
+    </Svg>
+  )
 }
 
 // ─── Géométries ────────────────────────────────────────────────────────────
@@ -351,32 +501,83 @@ interface LabelPos {
 
 // ─── Composant ─────────────────────────────────────────────────────────────
 export default function MyoOrb({
-  sessionValues = MOCK_SESSION,
+  sessionValues = EMPTY_SESSION,
   averageValues = MOCK_AVERAGE,
   size,
+  selectedFamily: externalSelectedFamily,
+  onFamilySelect,
+  bgColor,
+  showScore = true,
+  showLabels = true,
 }: Props) {
   const { width } = Dimensions.get('window')
   const S = size ?? width - 32
 
   // ─── State ───────────────────────────────────────────────────────────────
-  const [selectedFamily, setSelectedFamily] = useState<number | null>(null)
+  const isControlled = externalSelectedFamily !== undefined
+  const [internalSelectedFamily, setInternalSelectedFamily] = useState<number | null>(null)
+  const selectedFamily = isControlled ? (externalSelectedFamily ?? null) : internalSelectedFamily
   const [labelScreenPos, setLabelScreenPos] = useState<LabelPos[]>(
     Array.from({ length: N_SECTORS }, () => ({ x: 0, y: 0, visible: false })),
   )
 
+  // ─── bgColor ref ─────────────────────────────────────────────────────────
+  const bgColorRef = useRef(bgColor ?? '#0A0A0F')
+  useEffect(() => { bgColorRef.current = bgColor ?? '#0A0A0F' }, [bgColor])
+
+  // ─── Fade-in entrée ──────────────────────────────────────────────────────
+  const mountOpacity = useSharedValue(0)
+  const mountAnim = useAnimatedStyle(() => ({ opacity: mountOpacity.value }))
+  useEffect(() => {
+    mountOpacity.value = withTiming(1, { duration: 700, easing: Easing.bezier(0.16, 1, 0.3, 1) })
+  }, [])
+
+  // ─── Animation panneau détail + barres ───────────────────────────────────
+  const panelTranslateY = useSharedValue(10)
+  const panelOpacity    = useSharedValue(0)
+  const barProgress     = useSharedValue(0)
+  const panelAnim       = useAnimatedStyle(() => ({
+    opacity:   panelOpacity.value,
+    transform: [{ translateY: panelTranslateY.value }],
+  }))
+  useEffect(() => {
+    if (selectedFamily === null) return
+    panelTranslateY.value = 10
+    panelOpacity.value    = 0
+    barProgress.value     = 0
+    panelTranslateY.value = withSpring(0, { damping: 18, stiffness: 300 })
+    panelOpacity.value    = withTiming(1, { duration: 200, easing: Easing.bezier(0.16, 1, 0.3, 1) })
+    barProgress.value     = withDelay(80, withTiming(1, { duration: 480, easing: Easing.bezier(0.16, 1, 0.3, 1) }))
+  }, [selectedFamily])
+
   // ─── Refs partagés GL ↔ React ────────────────────────────────────────────
-  const rafRef          = useRef<number | null>(null)
-  const cameraRef       = useRef<THREE.PerspectiveCamera | null>(null)
-  const sceneRef        = useRef<THREE.Scene | null>(null)
-  const sceneRotYRef    = useRef(0)
-  const targetRotYRef   = useRef(0)
-  const autoRotateRef   = useRef(true)
-  const selectedRef     = useRef<number | null>(null)
-  const svRef           = useRef(sessionValues)
-  const avRef           = useRef(averageValues)
-  const sessionMatsRef  = useRef<THREE.LineBasicMaterial[]>([])
-  const avgMatRef       = useRef<THREE.LineBasicMaterial | null>(null)
-  const hitboxMeshesRef = useRef<THREE.Mesh[]>([])
+  const rafRef              = useRef<number | null>(null)
+  const cameraRef           = useRef<THREE.PerspectiveCamera | null>(null)
+  const sceneRef            = useRef<THREE.Scene | null>(null)
+  const sceneRotYRef        = useRef(0)
+  const targetRotYRef       = useRef(0)
+  const autoRotateRef       = useRef(true)
+  const selectedRef         = useRef<number | null>(null)
+  const svRef               = useRef(sessionValues)
+  const avRef               = useRef(averageValues)
+  const sessionMatsRef      = useRef<THREE.LineBasicMaterial[]>([])
+  const avgMatRef           = useRef<THREE.LineBasicMaterial | null>(null)
+  const hitboxMeshesRef     = useRef<THREE.Mesh[]>([])
+  const autoRotateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ─── Score global — pondéré 1/8 par famille (évite que MUSCLES/17 dims écrase tout)
+  const globalScore = useMemo(() => {
+    let famSum = 0
+    let famCount = 0
+    for (const fam of sessionValues) {
+      if (fam.length === 0) continue
+      const famAvg = fam.reduce((s, v) => s + v, 0) / fam.length
+      famSum += famAvg
+      famCount++
+    }
+    return famCount > 0 ? Math.round((famSum / famCount) * 100) : 0
+  }, [sessionValues])
+  const scoreColor = globalScore >= 66 ? '#FAC775' : globalScore >= 33 ? '#D85A30' : '#8E8E93'
 
   // ─── Positions 3D des étiquettes — dessus du pic de chaque secteur ───────
   const labelPositions3D = useMemo((): THREE.Vector3[] => {
@@ -398,55 +599,73 @@ export default function MyoOrb({
     })
   }, [sessionValues])
 
-  // ─── Mise à jour positions 2D des labels (15 fps) ────────────────────────
+  // ─── Mise à jour positions 2D des labels (15 fps, délai 800ms) ───────────
   useEffect(() => {
-    // Alloués une fois, réutilisés à chaque tick
     const euler  = new THREE.Euler()
     const tmpW   = new THREE.Vector3()
     const tmpV   = new THREE.Vector3()
 
-    const id = setInterval(() => {
-      const cam = cameraRef.current
-      if (!cam) return
-      euler.set(0, sceneRotYRef.current, 0)
+    let intervalId: ReturnType<typeof setInterval> | null = null
+    const timeoutId = setTimeout(() => {
+      intervalId = setInterval(() => {
+        const cam = cameraRef.current
+        if (!cam) return
+        euler.set(0, sceneRotYRef.current, 0)
 
-      const positions: LabelPos[] = labelPositions3D.map(p => {
-        tmpW.copy(p).applyEuler(euler)
-        // Vérifier que le point est devant la caméra (camera-space z < 0)
-        tmpV.copy(tmpW).applyMatrix4(cam.matrixWorldInverse)
-        if (tmpV.z > -0.1) return { x: 0, y: 0, visible: false }
-        // Projection NDC
-        tmpW.project(cam)
-        if (Math.abs(tmpW.x) > 1.35 || Math.abs(tmpW.y) > 1.35) {
-          return { x: 0, y: 0, visible: false }
-        }
-        return {
-          x: ((tmpW.x + 1) / 2) * S - 34,
-          y: ((-tmpW.y + 1) / 2) * S - 10,
-          visible: true,
-        }
-      })
+        const positions: LabelPos[] = labelPositions3D.map(p => {
+          tmpW.copy(p).applyEuler(euler)
+          tmpV.copy(tmpW).applyMatrix4(cam.matrixWorldInverse)
+          if (tmpV.z > -0.1) return { x: 0, y: 0, visible: false }
+          tmpW.project(cam)
+          if (Math.abs(tmpW.x) > 1.35 || Math.abs(tmpW.y) > 1.35) {
+            return { x: 0, y: 0, visible: false }
+          }
+          return {
+            x: ((tmpW.x + 1) / 2) * S - 34,
+            y: ((-tmpW.y + 1) / 2) * S - 10,
+            visible: true,
+          }
+        })
 
-      setLabelScreenPos(positions)
-    }, 67)
+        setLabelScreenPos(positions)
+      }, 67)
+    }, 800)
 
-    return () => clearInterval(id)
+    return () => {
+      clearTimeout(timeoutId)
+      if (intervalId !== null) clearInterval(intervalId)
+    }
   }, [labelPositions3D, S])
+
+  // ─── Helpers select/deselect ─────────────────────────────────────────────
+  const selectFamily = useCallback((fi: number | null) => {
+    if (!isControlled) setInternalSelectedFamily(fi)
+    onFamilySelect?.(fi)
+    selectedRef.current = fi
+    if (autoRotateTimeoutRef.current) clearTimeout(autoRotateTimeoutRef.current)
+    if (fi === null) {
+      autoRotateTimeoutRef.current = setTimeout(() => {
+        autoRotateRef.current = true
+      }, 3000)
+    } else {
+      autoRotateRef.current = false
+      const sA = fi * SECTOR_ANG + SECTOR_ANG / 2
+      targetRotYRef.current = sA - Math.PI / 2
+    }
+  }, [isControlled, onFamilySelect])
 
   // ─── Fermeture panneau ───────────────────────────────────────────────────
   const handleClose = useCallback(() => {
-    setSelectedFamily(null)
-    selectedRef.current = null
-    autoRotateRef.current = true
-  }, [])
+    selectFamily(null)
+  }, [selectFamily])
 
   // ─── Raycasting sur hitboxes invisibles ──────────────────────────────────
   const panResponder = useMemo(
     () => PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderRelease: evt => {
-        const cam     = cameraRef.current
-        const scene   = sceneRef.current
+        const cam      = cameraRef.current
+        const scene    = sceneRef.current
         const hitboxes = hitboxMeshesRef.current
         if (!cam || !scene || hitboxes.length === 0) return
 
@@ -454,7 +673,6 @@ export default function MyoOrb({
         const ndcX = (locationX - S / 2) / (S / 2)
         const ndcY = -((locationY - S / 2) / (S / 2))
 
-        // Force la mise à jour des matrices monde (hitboxes tournent avec la scène)
         scene.updateMatrixWorld(true)
 
         const raycaster = new THREE.Raycaster()
@@ -462,33 +680,38 @@ export default function MyoOrb({
         const intersects = raycaster.intersectObjects(hitboxes, false)
 
         if (intersects.length === 0) {
-          setSelectedFamily(null)
-          selectedRef.current = null
-          autoRotateRef.current = true
+          selectFamily(null)
           return
         }
 
         const fi = intersects[0].object.userData.sectorIndex as number
-
-        if (selectedRef.current === fi) {
-          setSelectedFamily(null)
-          selectedRef.current = null
-          autoRotateRef.current = true
-        } else {
-          setSelectedFamily(fi)
-          selectedRef.current = fi
-          autoRotateRef.current = false
-          const sA = fi * SECTOR_ANG + SECTOR_ANG / 2
-          targetRotYRef.current = sA - Math.PI / 2
-        }
+        selectFamily(selectedRef.current === fi ? null : fi)
       },
     }),
-    [S],
+    [S, selectFamily],
   )
+
+  // ─── Sync selectedRef quand prop externe change ──────────────────────────
+  useEffect(() => {
+    if (!isControlled) return
+    const fi = externalSelectedFamily ?? null
+    selectedRef.current = fi
+    if (autoRotateTimeoutRef.current) clearTimeout(autoRotateTimeoutRef.current)
+    if (fi === null) {
+      autoRotateTimeoutRef.current = setTimeout(() => {
+        autoRotateRef.current = true
+      }, 3000)
+    } else {
+      autoRotateRef.current = false
+      const sA = fi * SECTOR_ANG + SECTOR_ANG / 2
+      targetRotYRef.current = sA - Math.PI / 2
+    }
+  }, [isControlled, externalSelectedFamily])
 
   // ─── Cleanup RAF ─────────────────────────────────────────────────────────
   useEffect(() => () => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+    if (autoRotateTimeoutRef.current) clearTimeout(autoRotateTimeoutRef.current)
   }, [])
 
   // ─── GL context ──────────────────────────────────────────────────────────
@@ -509,7 +732,8 @@ export default function MyoOrb({
     })
     renderer.setSize(W, H, false)
     renderer.setPixelRatio(1)
-    renderer.setClearColor(0x080808, 1)
+    const bg = parseInt(bgColorRef.current.replace('#', ''), 16)
+    renderer.setClearColor(bg, 1)
 
     const scene  = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 100)
@@ -520,7 +744,6 @@ export default function MyoOrb({
     cameraRef.current = camera
     sceneRef.current  = scene
 
-    // 8 LineSegments session — un par secteur, matériau indépendant
     const mats: THREE.LineBasicMaterial[] = []
     for (let fi = 0; fi < N_SECTORS; fi++) {
       const mat = new THREE.LineBasicMaterial({ vertexColors: true })
@@ -532,7 +755,6 @@ export default function MyoOrb({
     }
     sessionMatsRef.current = mats
 
-    // Terrain historique — un seul bloc, teinté bleu
     const avgMat = new THREE.LineBasicMaterial({ color: 0x4e7d9e })
     avgMatRef.current = avgMat
     scene.add(new THREE.LineSegments(makeTopoGeo(avRef.current, H_BOT, -1, false), avgMat))
@@ -542,7 +764,6 @@ export default function MyoOrb({
       new THREE.LineBasicMaterial({ color: 0x606060 }),
     ))
 
-    // 8 hitboxes invisibles — pie-slices Y=0, tournent avec la scène
     const hitboxes: THREE.Mesh[] = []
     for (let fi = 0; fi < N_SECTORS; fi++) {
       const hb = makeSectorHitbox(fi)
@@ -569,14 +790,13 @@ export default function MyoOrb({
       sceneRotYRef.current = scene.rotation.y
       camera.updateMatrixWorld()
 
-      // Highlighting — recompile les matériaux uniquement si la sélection change
       const sel = selectedRef.current
       if (sel !== prevSel) {
         prevSel = sel
         for (let fi = 0; fi < N_SECTORS; fi++) {
           const mat    = mats[fi]
           const dimmed = sel !== null && fi !== sel
-          mat.opacity     = dimmed ? 0.13 : 1.0
+          mat.opacity     = dimmed ? 0.28 : 1.0
           mat.transparent = dimmed
           mat.needsUpdate = true
         }
@@ -592,45 +812,63 @@ export default function MyoOrb({
   }, [])
 
   // ─── Render ──────────────────────────────────────────────────────────────
-  const accentHex = selectedFamily !== null ? SECTOR_COLORS_HEX[selectedFamily] : '#ffffff'
+  const accentHex = selectedFamily !== null ? SECTOR_COLORS_HEX[selectedFamily] : '#F0F0F5'
+  const familyScore = useMemo(() => {
+    if (selectedFamily === null) return 0
+    const fam = sessionValues[selectedFamily] ?? []
+    return fam.length > 0 ? fam.reduce((s, v) => s + v, 0) / fam.length : 0
+  }, [selectedFamily, sessionValues])
 
   return (
-    <View style={[styles.wrap, { width: S, height: S }]}>
-      {/* Canvas 3D */}
-      <GLView style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
+    <Animated.View style={[{ width: S }, mountAnim]}>
 
-      {/* Étiquettes flottantes — non interactives */}
-      <View style={StyleSheet.absoluteFill} pointerEvents="none">
-        {labelScreenPos.map((pos, i) => (
-          <Text
-            key={i}
-            style={[
-              styles.label,
-              {
-                left     : pos.x,
-                top      : pos.y,
-                opacity  : pos.visible
-                  ? (selectedFamily !== null && selectedFamily !== i ? 0.28 : 1)
-                  : 0,
-                color    : selectedFamily === i
-                  ? SECTOR_COLORS_HEX[i]
-                  : 'rgba(255,255,255,0.52)',
-                transform: [{ scale: selectedFamily === i ? 1.18 : 1 }],
-              },
-            ]}
-          >
-            {FAMILY_NAMES[i]}
-          </Text>
-        ))}
+      {/* ── Orb 3D (S×S, clippé) ── */}
+      <View style={{ width: S, height: S }}>
+        {/* Canvas GL + labels + touch */}
+        <View style={[styles.orbContainer, { width: S, height: S }]}>
+          <GLView style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
+
+          {/* Étiquettes flottantes */}
+          {showLabels && <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {labelScreenPos.map((pos, i) => (
+              <Text
+                key={i}
+                style={[
+                  styles.label,
+                  {
+                    left: pos.x,
+                    top: pos.y,
+                    opacity: pos.visible
+                      ? (selectedFamily !== null && selectedFamily !== i ? 0.28 : 1)
+                      : 0,
+                    color: selectedFamily === i
+                      ? SECTOR_COLORS_HEX[i]
+                      : 'rgba(255,255,255,0.52)',
+                    transform: [{ scale: selectedFamily === i ? 1.18 : 1 }],
+                  },
+                ]}
+              >
+                {FAMILY_NAMES[i]}
+              </Text>
+            ))}
+          </View>}
+
+          {/* Couche tactile */}
+          <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers} />
+        </View>
       </View>
 
-      {/* Couche tactile — par-dessus tout, capture les taps */}
-      <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers} />
+      {/* ── Score arc dégradé centré sous l'orb ── */}
+      {showScore && (
+        <View style={styles.scoreArcRow}>
+          <ScoreArcGradient score={globalScore} size={100} strokeWidth={8} />
+        </View>
+      )}
 
-      {/* Panneau détail — par-dessus la couche tactile, absorbe ses propres taps */}
+      {/* ── Panneau détail — SOUS l'orb, flux normal ── */}
       {selectedFamily !== null && (
-        <View
-          style={styles.detailPanel}
+        <Animated.View
+          style={[styles.detailPanel, panelAnim]}
           onStartShouldSetResponder={() => true}
         >
           <View style={[styles.detailAccentBar, { backgroundColor: accentHex }]} />
@@ -638,60 +876,63 @@ export default function MyoOrb({
             <Text style={[styles.detailTitle, { color: accentHex }]}>
               {FAMILY_NAMES[selectedFamily]}
             </Text>
+            <View style={styles.familyScoreRow}>
+              <View style={styles.familyScoreBarBg}>
+                <AnimatedBarFill val={familyScore} color={accentHex} progress={barProgress} />
+              </View>
+              <Text style={[styles.familyScoreVal, { color: accentHex }]}>
+                {Math.round(familyScore * 100)}
+              </Text>
+            </View>
             <TouchableOpacity
               onPress={handleClose}
               style={styles.closeBtn}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              <Text style={styles.closeBtnText}>×</Text>
+              <X size={16} color="rgba(255,255,255,0.55)" />
             </TouchableOpacity>
           </View>
           {DIM_NAMES[selectedFamily].map((name, i) => {
             const val = sessionValues[selectedFamily]?.[i] ?? 0
+            if (val < 0.05) return null
             return (
               <View key={i} style={styles.dimRow}>
                 <Text style={styles.dimName}>{name}</Text>
                 <View style={styles.dimBarBg}>
-                  <View
-                    style={[
-                      styles.dimBarFill,
-                      { width: `${Math.round(val * 100)}%`, backgroundColor: accentHex },
-                    ]}
-                  />
+                  <AnimatedBarFill val={val} color={accentHex} progress={barProgress} />
                 </View>
                 <Text style={styles.dimVal}>{Math.round(val * 100)}</Text>
               </View>
             )
           })}
-        </View>
+        </Animated.View>
       )}
-    </View>
+    </Animated.View>
   )
 }
 
 const styles = StyleSheet.create({
-  wrap: {
+  orbContainer: {
     borderRadius   : 16,
     overflow       : 'hidden',
-    backgroundColor: '#080808',
+  },
+  scoreArcRow: {
+    alignItems    : 'center',
+    marginTop     : -16,
   },
   label: {
     position     : 'absolute',
-    fontSize     : 9,
+    fontSize     : 11,
     fontWeight   : '700',
     letterSpacing: 1.2,
   },
   detailPanel: {
-    position       : 'absolute',
-    bottom         : 12,
-    left           : 12,
-    right          : 12,
-    backgroundColor: 'rgba(8,8,8,0.90)',
-    borderRadius   : 12,
-    borderWidth    : 1,
-    borderColor    : 'rgba(255,255,255,0.09)',
-    padding        : 14,
-    paddingTop     : 16,
+    marginHorizontal: 8,
+    marginTop       : 6,
+    backgroundColor : 'rgba(8,8,8,0.90)',
+    borderRadius    : 12,
+    padding         : 14,
+    paddingTop      : 16,
   },
   detailAccentBar: {
     position    : 'absolute',
@@ -705,13 +946,34 @@ const styles = StyleSheet.create({
   detailHeader: {
     flexDirection : 'row',
     alignItems    : 'center',
-    justifyContent: 'space-between',
     marginBottom  : 10,
+    gap           : 10,
   },
   detailTitle: {
     fontSize     : 12,
     fontWeight   : '700',
     letterSpacing: 1.6,
+    minWidth     : 80,
+  },
+  familyScoreRow: {
+    flex         : 1,
+    flexDirection: 'row',
+    alignItems   : 'center',
+    gap          : 6,
+  },
+  familyScoreBarBg: {
+    flex            : 1,
+    height          : 4,
+    backgroundColor : 'rgba(255,255,255,0.09)',
+    borderRadius    : 2,
+    overflow        : 'hidden',
+  },
+  familyScoreVal: {
+    fontSize    : 12,
+    fontWeight  : '700',
+    letterSpacing: 0.2,
+    minWidth    : 24,
+    textAlign   : 'right',
   },
   closeBtn: {
     width          : 24,
@@ -720,12 +982,6 @@ const styles = StyleSheet.create({
     justifyContent : 'center',
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderRadius   : 12,
-  },
-  closeBtnText: {
-    color     : 'rgba(255,255,255,0.55)',
-    fontSize  : 16,
-    lineHeight: 18,
-    fontWeight: '300',
   },
   dimRow: {
     flexDirection : 'row',
@@ -757,3 +1013,17 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
 })
+
+// ─── Animated bar fill (uses styles, defined after StyleSheet) ─────────────
+function AnimatedBarFill({ val, color, progress }: {
+  val     : number
+  color   : string
+  progress: SharedValue<number>
+}) {
+  const style = useAnimatedStyle(() => ({
+    width: `${Math.round(val * 100 * progress.value)}%` as `${number}%`,
+  }))
+  return (
+    <Animated.View style={[styles.dimBarFill, { backgroundColor: color }, style]} />
+  )
+}

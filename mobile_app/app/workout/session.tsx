@@ -148,7 +148,7 @@ interface SetRowProps {
 function SetRow({ set, onDelete, colors }: SetRowProps) {
   const translateX = useSharedValue(0)
   const baseOffset = useSharedValue(0)
-  const rowHeight = useSharedValue(touchTarget.comfort)
+  const rowHeight = useSharedValue<number>(touchTarget.comfort)
   const rowOpacity = useSharedValue(1)
   const THRESHOLD = 56
   const DELETE_REVEAL = 68
