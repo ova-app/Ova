@@ -67,7 +67,7 @@ Podium pr_charge (poids) par exercice. 1 card par exercice.
 
 ---
 
-## Mode Fantôme v1.0 (`app/workout/ghost.ts`) — Phase 1
+## Mode Fantôme v1.0 (`lib/ghost.ts`) — Phase 1
 
 **Règle UX N°7** : le Fantôme ne s'impose jamais. Présence silencieuse, non cliquable pendant la séance.
 

@@ -140,7 +140,7 @@ Lire le PNG du composant avant d'écrire son code inline dans le screen.
 | `17.png` | `app/edit-profile.tsx` | Standard | ✅ Implémenté |
 | `14.png` | `app/index.tsx` | Zen | ✅ Implémenté |
 | `8.png` | `app/auth/login.tsx` + `register.tsx` | Standard | ✅ Implémenté |
-| — | `app/prs.tsx` | Standard | ⏳ À faire |
+| — | `app/prs.tsx` | Standard | ✅ Implémenté |
 | — | `app/onboarding/` | Zen | ✅ Implémenté (Phase 1) |
 | — | `app/feed/[id].tsx` | Riche | ✅ Créé (25/05) — Myo 80% + photos + recap + comments |
 | — | `app/chat.tsx` | Zen | ✅ Placeholder (Phase 2 design à faire) |

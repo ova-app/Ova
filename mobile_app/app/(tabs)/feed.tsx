@@ -35,7 +35,7 @@ const AnimatedPath = Animated.createAnimatedComponent(Path)
 const RNAnimatedSvgPath = RNAnimated.createAnimatedComponent(Path)
 const AnimatedRect = Animated.createAnimatedComponent(Rect)
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Heart, MessageCircle, RefreshCw, MapPin, X } from 'lucide-react-native'
+import { Heart, MessageCircle, RefreshCw, MapPin, X, Zap, Flame, Trophy } from 'lucide-react-native'
 import { useTheme } from '@/context/ThemeContext'
 import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/core'
@@ -67,6 +67,8 @@ interface FeedWorkout {
     username: string | null
     user_id: string
   } | null
+  pr_count: number
+  pr_best_level: 'gold' | 'silver' | 'bronze' | null
 }
 
 interface LikeUser {
@@ -224,6 +226,57 @@ function prBadgeColor(level: 'gold' | 'silver' | 'bronze'): string {
     bronze: '#CD7F32',
   }
   return map[level]
+}
+
+// ─── PR Icons Strip ──────────────────────────────────────────────────────────
+
+function PRIconsStrip({ prCount, prBestLevel, prSeance }: {
+  prCount: number
+  prBestLevel: 'gold' | 'silver' | 'bronze' | null
+  prSeance: 'gold' | 'silver' | 'bronze' | null
+}) {
+  const { colors } = useTheme()
+  if (prCount === 0 && !prSeance) return null
+
+  const level = prBestLevel ?? prSeance
+  const color = level ? prBadgeColor(level) : colors.textSecondary
+
+  // Icône principale selon niveau PR
+  const MainIcon = prSeance ? Trophy : prCount > 0 ? Zap : null
+  if (!MainIcon) return null
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.s1 }}>
+      {/* Icône principale */}
+      <MainIcon size={14} color={color} fill={color} />
+
+      {/* Badge count si multiple PRs */}
+      {prCount > 1 && (
+        <View style={{
+          backgroundColor: color,
+          borderRadius: 8,
+          paddingHorizontal: 5,
+          paddingVertical: 1,
+          minWidth: 16,
+          alignItems: 'center',
+        }}>
+          <Text style={{
+            fontSize: 10,
+            fontFamily: 'Barlow_700Bold',
+            color: colors.background,
+            fontVariant: ['tabular-nums'],
+          }}>
+            {prCount}
+          </Text>
+        </View>
+      )}
+
+      {/* Double icône si PR séance EN PLUS des PRs individuels */}
+      {prSeance && prCount > 0 && (
+        <Zap size={12} color={prBadgeColor(prSeance)} fill={prBadgeColor(prSeance)} />
+      )}
+    </View>
+  )
 }
 
 // ─── Skeleton card ────────────────────────────────────────────────────────────
@@ -799,18 +852,7 @@ function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemPro
     setCommentsModalVisible(true)
   }
 
-  const prBadgeContent = item.pr_seance ? (
-    <View
-      style={[
-        styles.prBadge,
-        { backgroundColor: prBadgeColor(item.pr_seance) },
-      ]}
-    >
-      <Text style={[typography.caption, { color: colors.background, fontFamily: 'Barlow_700Bold' }]}>
-        {item.pr_seance.toUpperCase()}
-      </Text>
-    </View>
-  ) : null
+  const hasPR = item.pr_count > 0 || !!item.pr_seance
 
   return (
     <>
@@ -839,7 +881,13 @@ function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemPro
               {timeAgo(item.started_at)}
             </Text>
           </View>
-          {prBadgeContent}
+          {hasPR && (
+            <PRIconsStrip
+              prCount={item.pr_count}
+              prBestLevel={item.pr_best_level}
+              prSeance={item.pr_seance}
+            />
+          )}
         </View>
 
         {/* Row 2 — Titre */}
@@ -1558,8 +1606,8 @@ export default function FeedScreen() {
 
     const workoutIds = (data as unknown as RawWorkout[]).map(w => w.id)
 
-    // Counts likes + comments par workout + premier commentaire
-    const [likesRes, commentsRes, userLikesRes, firstCommentsRes] = await Promise.all([
+    // Counts likes + comments par workout + premier commentaire + PRs exercices
+    const [likesRes, commentsRes, userLikesRes, firstCommentsRes, prExercicesRes] = await Promise.all([
       supabase.from('likes').select('workout_id').in('workout_id', workoutIds),
       supabase.from('comments').select('workout_id').in('workout_id', workoutIds),
       supabase.from('likes').select('workout_id').eq('user_id', uid).in('workout_id', workoutIds),
@@ -1568,7 +1616,25 @@ export default function FeedScreen() {
         .select('workout_id, content, user_id, users:user_id(username, full_name)')
         .in('workout_id', workoutIds)
         .order('created_at', { ascending: true }),
+      supabase
+        .from('workout_exercises')
+        .select('workout_id, pr_exercice')
+        .in('workout_id', workoutIds)
+        .not('pr_exercice', 'is', null),
     ])
+
+    // PR counts + meilleur niveau par workout (exercices avec PR)
+    type PRLevel = 'gold' | 'silver' | 'bronze'
+    const PR_RANK: Record<PRLevel, number> = { gold: 3, silver: 2, bronze: 1 }
+    const prCountMap = new Map<string, number>()
+    const prBestLevelMap = new Map<string, PRLevel>()
+    for (const r of (prExercicesRes.data ?? []) as unknown as Array<{ workout_id: string; pr_exercice: PRLevel }>) {
+      prCountMap.set(r.workout_id, (prCountMap.get(r.workout_id) ?? 0) + 1)
+      const current = prBestLevelMap.get(r.workout_id)
+      if (!current || PR_RANK[r.pr_exercice] > PR_RANK[current]) {
+        prBestLevelMap.set(r.workout_id, r.pr_exercice)
+      }
+    }
 
     const likesCount = new Map<string, number>()
     const commentsCount = new Map<string, number>()
@@ -1616,6 +1682,8 @@ export default function FeedScreen() {
       comments_count: commentsCount.get(w.id) ?? 0,
       user_has_liked: likedSet.has(w.id),
       first_comment: firstCommentMap.get(w.id) ?? null,
+      pr_count: prCountMap.get(w.id) ?? 0,
+      pr_best_level: prBestLevelMap.get(w.id) ?? null,
     }))
 
     setWorkouts(mapped)

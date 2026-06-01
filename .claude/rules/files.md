@@ -66,7 +66,7 @@ lib/
 ├── supabase.ts              — client Supabase (SecureStore chunks 1800b)
 ├── myo.ts                   — calcul signature Myo 41 dims, saveMyoSignature()
 ├── db.ts                    — SQLite local : initDB(), insertLocalSet(), insertLocalSession()
-├── storage.ts               — MMKV instance unique (id: 'orava-workout')
+├── storage.ts               — AsyncStorage + cache mémoire in-process (API type MMKV)
 ├── analytics.ts             — PostHog EU + Events const (22 événements taxonomie)
 └── utils.ts                 — formatVolume(n) → "12 450" (espace milliers)
 
@@ -81,14 +81,18 @@ __tests__/                   — tests unitaires Jest (logique pure uniquement, 
 ├── formatVolume.test.ts     — 16 tests formatage milliers
 ├── workoutState.test.ts     — 10 tests fonctions pures WorkoutContext
 ├── supabase.test.ts         — 11 tests avec mock Supabase
-└── myoDims.test.ts          — 39 tests FASCICLE_DIM, MUSCLE_DIM, computeMuscleDims
+├── myoDims.test.ts          — 39 tests FASCICLE_DIM, MUSCLE_DIM, computeMuscleDims
+├── db.test.ts               — 15 tests SQLite local_sets / local_sessions
+├── ghost.test.ts            — 11 tests getGhostReference (cutoff, volume tri)
+├── prsBuildPodium.test.ts   — 19 tests buildPodium prs.tsx
+└── sessionUx.test.ts        — 10 tests ExerciseModal grouping + ghost path
 ```
 
 ## Fichiers à créer (v4)
 
 | Fichier | Phase | Description | Statut |
 |---|---|---|---|
-| `app/workout/ghost.ts` | Phase 1 | `getGhostReference(exerciseId, limitDays)` → SQLite | ✅ Créé |
+| `lib/ghost.ts` | Phase 1 | `getGhostReference(exerciseId, limitDays)` → SQLite | ✅ Créé |
 | `app/workout/wheel-picker-modal.tsx` | Phase 1 | Modal full-screen 3 roues (poids/reps/RPE) | ✅ Créé |
 | `app/chat.tsx` | Phase 1 | Placeholder chatbot accessible via logo Orava | ✅ Créé |
 | `app/feed/[id].tsx` | Phase 1 | Détail activité feed (Myo + photos + recap + comments) | ✅ Créé |

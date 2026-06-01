@@ -39,15 +39,14 @@ npx expo install rive-react-native expo-notifications expo-av --legacy-peer-deps
 - Trigger `on_auth_user_created` → crée `public.users` automatiquement
 - **Aucune migration effectuée** — tout changement DB = signaler avant de coder
 
-## MMKV — config (Phase 0)
-```typescript
-// mobile_app/lib/storage.ts
-import { MMKV } from 'react-native-mmkv'
-export const storage = new MMKV({ id: 'orava-workout' })
-```
-WorkoutContext utilise MMKV pour snapshot temps réel de la séance en cours.
+## Storage — config réelle (Phase 0)
+`react-native-mmkv` est installé mais **non utilisé** — `lib/storage.ts` implémente un cache mémoire (`Map`) + AsyncStorage comme backend de persistance, avec une API compatible MMKV (`set`, `getString`, `getNumber`, `delete`).
+La fonction `hydrateStorage()` doit être appelée au démarrage de l'app pour recharger le cache depuis AsyncStorage.
+WorkoutContext utilise `storage` pour snapshot temps réel de la séance en cours.
 Pattern : sérialiser l'état en JSON, clé `workout_session_draft`.
 Réhydrater au mount si `status !== 'idle'` dans le store.
+
+⚠️ Ne pas remplacer par `new MMKV({id})` sans valider la configuration native EAS Build.
 
 ## SQLite — schéma local (Phase 0)
 Fichier : `mobile_app/lib/db.ts`

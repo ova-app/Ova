@@ -43,12 +43,14 @@ React Native 0.81.5 + Expo 54 + Expo Router 6 · Supabase JS 2.x · Three.js 0.1
 **Phase 0 installée (19/05/2026) :**
 `react-native-mmkv` · `expo-sqlite` · `react-native-reanimated` · `react-native-worklets` · `posthog-react-native` · `babel-preset-expo`
 
+**Phase 1 installée (25/05/2026) :**
+`expo-haptics ~15.0.8`
+
 **Tooling installé :** ESLint 8 + Prettier + Husky (pre-commit lint-staged) · EAS Build configuré · CI/CD `.github/workflows/eas-build.yml`
 
 ## Stack v4 à installer (phases suivantes)
 | Package | Rôle | Phase |
 |---|---|---|
-| `expo-haptics` | Taptic Engine iOS + vibration Android | Phase 1 |
 | `@shopify/react-native-skia` | Charts 2D + ADN Athlétique | Phase 2 |
 | `react-native-purchases` | RevenueCat abonnements Pro/Coach | Phase 2 |
 | `rive-react-native` | Animations Podium PR (.riv) | Phase 2 |
@@ -60,7 +62,7 @@ React Native 0.81.5 + Expo 54 + Expo Router 6 · Supabase JS 2.x · Three.js 0.1
 ## Règles impératives
 1. **Design System avant tout code UI** — aucun pixel sans maquette Figma validée
 2. **Spline avant Three.js** — valider le visuel Myo dans Spline avant d'écrire du code 3D
-3. **Zéro réseau pendant séance active** — WorkoutContext = RAM + MMKV. Sync Supabase post-save.
+3. **Zéro réseau pendant séance active** — WorkoutContext = RAM + `storage` (AsyncStorage+cache). Sync Supabase post-save.
 4. **Rien persisté Supabase avant save** dans `summary.tsx`
 5. **`is_public` DEFAULT false** — toggle démarre à `false`
 6. **SQLite avant Supabase** — données locales vérifiées avant tout appel réseau
@@ -82,7 +84,7 @@ React Native 0.81.5 + Expo 54 + Expo Router 6 · Supabase JS 2.x · Three.js 0.1
 | Session, timer, PRs, WheelPicker | `rules/workout.md` |
 | Mode Fantôme, Moteur Prédictif, ADN Athlétique | `rules/workout.md` |
 | Bug logique existante (WorkoutContext, myo.ts) | `rules/files.md` + rule du domaine |
-| Config Expo, MMKV, SQLite, deps | `rules/stack.md` |
+| Config Expo, storage, SQLite, deps | `rules/stack.md` |
 | Three.js / expo-gl / Myo 3D | `rules/stack.md` + `rules/workout.md` |
 | Myo 41 dims, familles, sources données | `rules/myo.md` |
 | RevenueCat, PostHog, paywall | `rules/stack.md` |
