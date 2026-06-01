@@ -11,7 +11,8 @@
     "prepare": "husky",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "generate-logo": "node scripts/generate-logo-assets.js"
   },
   "jest": {
     "preset": "jest-expo",
@@ -84,6 +85,7 @@
     "jest-expo": "^56.0.4",
     "lint-staged": "^15.0.0",
     "prettier": "^3.0.0",
+    "sharp": "^0.34.5",
     "ts-node": "^10.9.2",
     "typescript": "~5.9.2"
   },

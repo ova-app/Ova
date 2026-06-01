@@ -9,9 +9,9 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Image,
 } from 'react-native'
 import { useRouter } from 'expo-router'
+import Svg, { Circle } from 'react-native-svg'
 import { AlertCircle } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
@@ -37,11 +37,11 @@ interface ErreurFormulaire {
 
 function LogoOrava(): React.JSX.Element {
   return (
-    <Image
-      source={require('../../assets/orava_logo.png')}
-      style={{ width: 48, height: 48 }}
-      resizeMode="contain"
-    />
+    <Svg width={48} height={48} viewBox="0 0 100 100">
+      <Circle cx="50" cy="50" r="42" stroke="#FFDD00" strokeWidth="6" fill="none" />
+      <Circle cx="50" cy="50" r="28" stroke="#FFDD00" strokeWidth="6" fill="none" />
+      <Circle cx="50" cy="50" r="6" fill="#FFDD00" />
+    </Svg>
   )
 }
 

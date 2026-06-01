@@ -182,11 +182,11 @@ function MyoIcon({ size = 80, bg = '#0A0A0F' }: { size?: number; bg?: string }) 
 
 function OravaLogo() {
   return (
-    <Image
-      source={require('../../assets/orava_logo.png')}
-      style={{ width: 40, height: 40 }}
-      resizeMode="contain"
-    />
+    <Svg width={40} height={40} viewBox="0 0 100 100">
+      <Circle cx="50" cy="50" r="42" stroke="#FFDD00" strokeWidth="6" fill="none" />
+      <Circle cx="50" cy="50" r="28" stroke="#FFDD00" strokeWidth="6" fill="none" />
+      <Circle cx="50" cy="50" r="6" fill="#FFDD00" />
+    </Svg>
   )
 }
 

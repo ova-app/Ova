@@ -23,16 +23,19 @@ interface RulerPickerProps {
 const ITEM_H = 44
 const VISIBLE = 5
 const PICKER_H = ITEM_H * VISIBLE  // 220
-const PAD = PICKER_H / 2           // 110
 
-// item i is centered when scrollY = ITEM_H/2 + i * ITEM_H
-// (derived: paddingTop=110, item_center_in_content = 110 + i*44 + 22 = 132+i*44
-//  visible_center = scrollY+110 → scrollY = 22 + i*44 = ITEM_H/2 + i*ITEM_H)
+// With SNAP_PAD as paddingTop/Bottom:
+//   item i center in content = SNAP_PAD + i*ITEM_H + ITEM_H/2
+//   visible center at scrollY = scrollY + PICKER_H/2
+//   centered when: scrollY = i * ITEM_H  (exact multiple → snapToInterval aligns)
+const SNAP_PAD = PICKER_H / 2 - ITEM_H / 2  // 88
 
 export default function RulerPicker({
   value, min, max, step, unit, onChange, colors,
 }: RulerPickerProps) {
   const ref = useRef<ScrollView>(null)
+  // prevent double-fire between onScrollEndDrag + onMomentumScrollEnd
+  const handlingRef = useRef(false)
 
   const items = useMemo(() => {
     const arr: number[] = []
@@ -42,36 +45,40 @@ export default function RulerPicker({
     return arr
   }, [min, max, step])
 
-  const indexOfValue = useCallback((v: number) => {
+  const indexOfValue = useCallback((v: number): number => {
     const i = items.findIndex(item => Math.abs(item - v) < step / 2)
     return i === -1 ? 0 : i
   }, [items, step])
 
+  // Scroll to initial position on mount only — avoids interrupting user mid-scroll
   useEffect(() => {
     const i = indexOfValue(value)
-    ref.current?.scrollTo({ y: ITEM_H / 2 + i * ITEM_H, animated: false })
-  }, [value, indexOfValue])
+    // short delay ensures ScrollView is laid out before scrollTo
+    const t = setTimeout(() => {
+      ref.current?.scrollTo({ y: i * ITEM_H, animated: false })
+    }, 50)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items])  // items is stable — runs once after mount
 
   const onScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (handlingRef.current) return
+    handlingRef.current = true
+    setTimeout(() => { handlingRef.current = false }, 100)
+
     const offsetY = e.nativeEvent.contentOffset.y
-    const i = Math.max(0, Math.min(
-      Math.round((offsetY - ITEM_H / 2) / ITEM_H),
-      items.length - 1
-    ))
+    const i = Math.max(0, Math.min(Math.round(offsetY / ITEM_H), items.length - 1))
     const newVal = items[i]
-    if (newVal !== undefined) {
-      const snapY = ITEM_H / 2 + i * ITEM_H
-      ref.current?.scrollTo({ y: snapY, animated: true })
-      if (newVal !== value) onChange(newVal)
-    }
+    // NO scrollTo here — snapToInterval handles native snapping, scrollTo would loop
+    if (newVal !== undefined && newVal !== value) onChange(newVal)
   }, [items, onChange, value])
 
   return (
     <View style={styles.wrap}>
       <ScrollView
         ref={ref}
-        style={{ height: PICKER_H, flex: 1 }}
-        contentContainerStyle={{ paddingVertical: PAD }}
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         snapToInterval={ITEM_H}
         decelerationRate="fast"
@@ -88,6 +95,7 @@ export default function RulerPicker({
         ))}
       </ScrollView>
 
+      {/* selection highlight — absolutely positioned over the scroll area */}
       <View
         pointerEvents="none"
         style={[
@@ -116,6 +124,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
+  scroll: {
+    height: PICKER_H,
+    flex: 1,
+  },
+  content: {
+    paddingTop: SNAP_PAD,
+    paddingBottom: SNAP_PAD,
+  },
   item: {
     height: ITEM_H,
     justifyContent: 'center',
@@ -126,11 +142,12 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontVariant: ['tabular-nums'],
   },
+  // cursor sits at the visual center of the ScrollView
   cursor: {
     position: 'absolute',
     left: spacing.s4,
     right: 104,
-    top: PICKER_H / 2 - ITEM_H / 2,
+    top: SNAP_PAD,  // = PICKER_H/2 - ITEM_H/2, center of visible area
     height: ITEM_H,
     borderWidth: 1.5,
     borderRadius: 8,

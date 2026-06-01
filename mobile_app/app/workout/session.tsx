@@ -10,7 +10,6 @@ import {
   View,
   Dimensions,
   StatusBar,
-  Image,
 } from 'react-native'
 import Animated, {
   useSharedValue,
@@ -26,6 +25,7 @@ import { useRouter } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Haptics from 'expo-haptics'
 import { Plus, Trash2, X, Search, Zap, Flame, Trophy, Dumbbell, Check, ChevronLeft } from 'lucide-react-native'
+import Svg, { Circle } from 'react-native-svg'
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, touchTarget, spring } from '@/constants/theme'
 import {
@@ -125,11 +125,11 @@ function normalizeNFD(s: string): string {
 
 function LogoOrava() {
   return (
-    <Image
-      source={require('../../assets/orava_logo.png')}
-      style={{ width: 48, height: 48 }}
-      resizeMode="contain"
-    />
+    <Svg width={48} height={48} viewBox="0 0 100 100">
+      <Circle cx="50" cy="50" r="42" stroke="#FFDD00" strokeWidth="6" fill="none" />
+      <Circle cx="50" cy="50" r="28" stroke="#FFDD00" strokeWidth="6" fill="none" />
+      <Circle cx="50" cy="50" r="6" fill="#FFDD00" />
+    </Svg>
   )
 }
 
