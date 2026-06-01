@@ -24,7 +24,7 @@ import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, font, duration } from '@/constants/theme'
 import { prBadgeRecipe, type PrType } from '@/constants/recipes'
-import MyoChart, { FAMILY_NAMES, SECTOR_COLORS_HEX } from '@/app/workout/myo-chart'
+import MyoChart, { FAMILY_NAMES, FAMILY_NAMES_SHORT, SECTOR_COLORS_HEX } from '@/app/workout/myo-chart'
 import MyoGlossaryScreen from '@/app/myo-glossary'
 import { sessionValuesFromSignature } from '@/lib/myo'
 import { Zap, Flame, Dumbbell, Trophy } from 'lucide-react-native'
@@ -455,6 +455,7 @@ const chipBaseStyle = {
   borderWidth      : 1,
   alignItems       : 'center' as const,
   justifyContent   : 'center' as const,
+  flexShrink       : 1 as const,
 }
 const chipLabelBase = {
   fontSize     : 9,
@@ -1233,8 +1234,8 @@ export default function FeedDetailScreen(): React.JSX.Element {
               onFamilySelect={(fi) => setSelectedFamily(fi)}
             />
           </ScrollView>
-          <View style={[s.familySelector, { paddingHorizontal: spacing.s4, paddingBottom: spacing.s3 }]}>
-            {FAMILY_NAMES.map((name, idx) => (
+          <View style={[s.familySelector, { paddingHorizontal: spacing.s4, paddingBottom: spacing.s3, alignSelf: 'stretch' }]}>
+            {FAMILY_NAMES_SHORT.map((name, idx) => (
               <FamilyChip
                 key={idx}
                 name={name}
@@ -1246,18 +1247,6 @@ export default function FeedDetailScreen(): React.JSX.Element {
               />
             ))}
           </View>
-          {/* Score global hero */}
-          <View style={[s.myoFsGlobalScoreBlock, { paddingBottom: insets.bottom + spacing.s2 }]}>
-            <View style={s.myoFsGlobalScoreRow}>
-              <View style={s.myoFsScoreDivider} />
-              <View style={s.myoFsScoreCenter}>
-                <GradientScoreText score={globalScore} />
-                <Text style={[s.myoFsScoreGlobalLabel, { color: colors.textTertiary }]}>SCORE GLOBAL</Text>
-              </View>
-              <View style={s.myoFsScoreDivider} />
-            </View>
-          </View>
-
           {/* ── Glossaire — overlay animé dans le même container ── */}
           <Animated.View
             style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.background }, glossaryAnimStyle]}
@@ -1514,32 +1503,6 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     scoreBarFill: {
       height: 6,
       borderRadius: 3,
-    },
-    myoFsGlobalScoreBlock: {
-      paddingHorizontal: spacing.s4,
-      gap: spacing.s4,
-    },
-    myoFsGlobalScoreRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: spacing.s4,
-    },
-    myoFsScoreCenter: {
-      alignItems: 'center',
-      gap: 2,
-    },
-    myoFsScoreDivider: {
-      flex: 1,
-      height: 1,
-      backgroundColor: 'rgba(255,255,255,0.07)',
-    },
-    myoFsScoreGlobalLabel: {
-      fontSize: 9,
-      fontFamily: font.bold,
-      letterSpacing: 1.8,
-      textTransform: 'uppercase',
-      marginTop: -4,
     },
     myoFsScoreRow: {
       flexDirection: 'row',

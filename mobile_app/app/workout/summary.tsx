@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -71,11 +71,17 @@ function PrRow({
   type,
   value,
   delay,
+  exerciseName,
+  setNumber,
+  onPress,
 }: {
   level: 'gold' | 'silver' | 'bronze'
   type: PrType
   value: string
   delay: number
+  exerciseName: string
+  setNumber?: number
+  onPress?: () => void
 }) {
   const { colors } = useTheme()
   const Icon = PR_ICON[type]
@@ -92,22 +98,36 @@ function PrRow({
   }))
 
   return (
-    <Animated.View style={[styles.prRow, { backgroundColor: colors.backgroundSecondary }, animStyle]}>
-      {/* Barre accent gauche flush */}
-      <View style={[styles.prRowAccentBar, { backgroundColor: tint }]} />
-      {/* Icône cerclée */}
-      <View style={[styles.prRowIconWrap, { backgroundColor: `${tint}1A` }]}>
-        <Icon size={15} color={tint} />
-      </View>
-      {/* Contenu */}
-      <View style={styles.prRowContent}>
-        <Text style={[styles.prRowTypeLabel, { color: tint }]}>{PR_LABEL[type]}</Text>
-        <Text style={[styles.prRowValueText, { color: colors.textPrimary }]}>{value}</Text>
-      </View>
-      {/* Badge niveau */}
-      <View style={[styles.prLevelPill, { borderColor: `${tint}45`, backgroundColor: `${tint}12` }]}>
-        <Text style={[styles.prLevelPillText, { color: tint }]}>{PR_LEVEL_LABEL[level]}</Text>
-      </View>
+    <Animated.View style={animStyle}>
+      <TouchableOpacity
+        style={[styles.prRow, { backgroundColor: colors.backgroundSecondary }]}
+        onPress={onPress}
+        activeOpacity={onPress ? 0.75 : 1}
+      >
+        {/* Barre accent gauche flush */}
+        <View style={[styles.prRowAccentBar, { backgroundColor: tint }]} />
+        {/* Icône cerclée */}
+        <View style={[styles.prRowIconWrap, { backgroundColor: `${tint}1A` }]}>
+          <Icon size={15} color={tint} />
+        </View>
+        {/* Contenu */}
+        <View style={styles.prRowContent}>
+          <Text style={[styles.prRowTypeLabel, { color: tint }]}>{PR_LABEL[type]}</Text>
+          <Text style={[styles.prRowValueText, { color: colors.textPrimary }]}>{value}</Text>
+          <Text style={[styles.prRowSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+            {exerciseName}{setNumber != null ? ` · Série ${setNumber}` : ''}
+          </Text>
+        </View>
+        {/* Badge niveau + chevron */}
+        <View style={styles.prRowRight}>
+          <View style={[styles.prLevelPill, { borderColor: `${tint}45`, backgroundColor: `${tint}12` }]}>
+            <Text style={[styles.prLevelPillText, { color: tint }]}>{PR_LEVEL_LABEL[level]}</Text>
+          </View>
+          {onPress && (
+            <Text style={[styles.prRowChevron, { color: colors.textTertiary }]}>›</Text>
+          )}
+        </View>
+      </TouchableOpacity>
     </Animated.View>
   )
 }
@@ -445,6 +465,16 @@ export default function SummaryScreen() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [histVolumes, setHistVolumes] = useState<number[]>([])
+
+  const scrollViewRef = useRef<ScrollView>(null)
+  const recapSectionY = useRef(0)
+  const recapCardRelY = useRef<Record<string, number>>({})
+
+  const scrollToExercise = useCallback((exerciseId: string) => {
+    const rel = recapCardRelY.current[exerciseId]
+    if (rel == null) return
+    scrollViewRef.current?.scrollTo({ y: Math.max(0, recapSectionY.current + rel - 16), animated: true })
+  }, [])
 
   const [sessionValues, setSessionValues] = useState<number[][]>(() => {
     const sets = exercises.flatMap(ex =>
@@ -893,6 +923,7 @@ export default function SummaryScreen() {
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <ScrollView
+        ref={scrollViewRef}
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -948,25 +979,35 @@ export default function SummaryScreen() {
             <View style={styles.prList}>
               {bestPrCharge !== null && (() => {
                 const best = prChargeDetected.reduce((b, s) => s.weight_kg > (b?.weight_kg ?? 0) ? s : b, null as typeof prChargeDetected[0] | null)
-                return best ? (
+                if (!best) return null
+                const exForCharge = exercises.find(ex => ex.sets.some(s => s === best))
+                return (
                   <PrRow
                     level={bestPrCharge}
                     type="charge"
                     value={`${best.weight_kg} kg`}
                     delay={80}
+                    exerciseName={exForCharge?.name ?? ''}
+                    setNumber={best.set_number}
+                    onPress={exForCharge ? () => scrollToExercise(exForCharge.exercise_id) : undefined}
                   />
-                ) : null
+                )
               })()}
               {bestPrSerie !== null && (() => {
                 const best = prSerieDetected.reduce((b, s) => (s.weight_kg * s.reps) > ((b?.weight_kg ?? 0) * (b?.reps ?? 0)) ? s : b, null as typeof prSerieDetected[0] | null)
-                return best ? (
+                if (!best) return null
+                const exForSerie = exercises.find(ex => ex.sets.some(s => s === best))
+                return (
                   <PrRow
                     level={bestPrSerie}
                     type="serie"
                     value={`${best.weight_kg} kg × ${best.reps}`}
                     delay={160}
+                    exerciseName={exForSerie?.name ?? ''}
+                    setNumber={best.set_number}
+                    onPress={exForSerie ? () => scrollToExercise(exForSerie.exercise_id) : undefined}
                   />
-                ) : null
+                )
               })()}
             </View>
           </Animated.View>
@@ -994,7 +1035,10 @@ export default function SummaryScreen() {
 
         {/* ── Récap exercices ── */}
         {exercises.length > 0 && (
-          <Animated.View style={[styles.section, style4]}>
+          <Animated.View
+            style={[styles.section, style4]}
+            onLayout={(e) => { recapSectionY.current = e.nativeEvent.layout.y }}
+          >
             <SectionHeader label="RÉCAP SÉANCE" colors={colors} />
             {exercises.map((ex, exIdx) => {
               const exSets = ex.sets.filter(s => s.validated && s.reps > 0)
@@ -1002,7 +1046,11 @@ export default function SummaryScreen() {
               const maxW = Math.max(...exSets.map(s => s.weight_kg), 0)
               const exVol = exSets.reduce((sum, s) => sum + s.weight_kg * s.reps, 0)
               return (
-                <View key={ex.exercise_id} style={[styles.recapCard, { backgroundColor: colors.backgroundSecondary }]}>
+                <View
+                  key={ex.exercise_id}
+                  style={[styles.recapCard, { backgroundColor: colors.backgroundSecondary }]}
+                  onLayout={(e) => { recapCardRelY.current[ex.exercise_id] = e.nativeEvent.layout.y }}
+                >
                   <View style={styles.recapExHeader}>
                     <View style={[styles.recapIdx, { backgroundColor: colors.backgroundTertiary }]}>
                       <Text style={[styles.recapIdxText, { color: colors.textTertiary }]}>
@@ -1299,6 +1347,23 @@ const styles = StyleSheet.create({
     fontFamily: font.black,
     letterSpacing: -0.5,
     fontVariant: ['tabular-nums'],
+  },
+  prRowSubtitle: {
+    fontSize: 11,
+    fontFamily: font.regular,
+    marginTop: 2,
+    letterSpacing: 0.1,
+  },
+  prRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.s1,
+  },
+  prRowChevron: {
+    fontSize: 20,
+    lineHeight: 22,
+    fontFamily: font.bold,
+    marginLeft: 2,
   },
   prLevelPill: {
     paddingHorizontal: spacing.s2,

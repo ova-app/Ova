@@ -71,7 +71,13 @@
       "PowerShell(Remove-Item \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\\\\app\\\\workout\\\\_myo_impl_a.tsx\" -Force -Confirm:$false)",
       "PowerShell(Remove-Item \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\\\\app\\\\workout\\\\_myo_impl_b.tsx\" -Force -Confirm:$false)",
       "Bash(python -c \"from PIL import Image; img = Image.open\\('design/system/orava_logo_vf.png'\\); print\\(img.size, img.mode\\)\")",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Phase 2 pkgs:'\\); [print\\(' ',k,v\\) for k,v in d.get\\('dependencies',{}\\).items\\(\\) if k in ['@shopify/react-native-skia','react-native-purchases','rive-react-native','expo-notifications','expo-av','lib/predictor']]\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Phase 2 pkgs:'\\); [print\\(' ',k,v\\) for k,v in d.get\\('dependencies',{}\\).items\\(\\) if k in ['@shopify/react-native-skia','react-native-purchases','rive-react-native','expo-notifications','expo-av','lib/predictor']]\")",
+      "Bash(python3 -c \"from PIL import Image; img = Image.open\\('design/system/orava_logo_vf.png'\\); print\\(img.size, img.mode\\)\")",
+      "PowerShell(python --version)",
+      "PowerShell(magick --version 2>$null)",
+      "PowerShell(python -c \"from PIL import Image; img = Image.open\\('c:/Users/SofianeBESSILA/orava/design/system/orava_logo_vf.png'\\); print\\(img.size, img.mode\\)\")",
+      "PowerShell(pip install Pillow -q)",
+      "PowerShell(cd \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\" && npx tsc --noEmit 2>&1 | Where-Object { $_ -match \"myo-chart\" })"
     ],
     "additionalDirectories": [
       "c:\\Users\\SofianeBESSILA\\orava\\mobile_app\\app\\workout"

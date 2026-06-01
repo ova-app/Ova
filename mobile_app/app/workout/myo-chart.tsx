@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Dimensions,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -18,11 +17,8 @@ import {
   Circle,
 } from '@shopify/react-native-skia'
 import Animated, {
-  Easing,
-  SharedValue,
   useAnimatedStyle,
   useSharedValue,
-  withDelay,
   withSpring,
   withTiming,
 } from 'react-native-reanimated'
@@ -39,7 +35,7 @@ export const FAMILY_NAMES = [
   'PERF', 'RÉGULARITÉ', 'MUSCLES', 'TEMPS',
 ]
 
-const FAMILY_NAMES_SHORT = [
+export const FAMILY_NAMES_SHORT = [
   'VOL.', 'INT.', 'STRUCT.', 'RÉCUP',
   'PERF', 'RÉGUL.', 'MUSCL.', 'TEMPS',
 ]
@@ -128,9 +124,9 @@ function sectorCenter(fi: number, score: number, maxR: number): { ax: number; ay
 // ─── Paths Skia ───────────────────────────────────────────────────────────────
 const N_ARC = 48
 
-function makeSectorPath(fi: number, score: number, cx: number, cy: number, maxR: number) {
-  const startRad = (fi / N_FAM) * TWO_PI - Math.PI / 2 + GAP
-  const endRad   = ((fi + 1) / N_FAM) * TWO_PI - Math.PI / 2 - GAP
+function makeSectorPath(fi: number, score: number, cx: number, cy: number, maxR: number, nFam = N_FAM) {
+  const startRad = (fi / nFam) * TWO_PI - Math.PI / 2 + GAP
+  const endRad   = ((fi + 1) / nFam) * TWO_PI - Math.PI / 2 - GAP
   const r        = Math.max(score * maxR, 2)
   const path     = Skia.Path.Make()
   path.moveTo(cx, cy)
@@ -142,24 +138,6 @@ function makeSectorPath(fi: number, score: number, cx: number, cy: number, maxR:
   return path
 }
 
-// Anneau-couche pour une dimension (arc plein entre innerR et r)
-function makeDimArc(fi: number, score: number, cx: number, cy: number, maxR: number, innerR: number) {
-  const startRad = (fi / N_FAM) * TWO_PI - Math.PI / 2 + GAP * 1.8
-  const endRad   = ((fi + 1) / N_FAM) * TWO_PI - Math.PI / 2 - GAP * 1.8
-  const r        = Math.max(score * maxR, 2)
-  const path     = Skia.Path.Make()
-  path.moveTo(cx + r * Math.cos(startRad), cy + r * Math.sin(startRad))
-  for (let i = 1; i <= 16; i++) {
-    const a = startRad + (i / 16) * (endRad - startRad)
-    path.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a))
-  }
-  for (let i = 16; i >= 0; i--) {
-    const a = startRad + (i / 16) * (endRad - startRad)
-    path.lineTo(cx + innerR * Math.cos(a), cy + innerR * Math.sin(a))
-  }
-  path.close()
-  return path
-}
 
 function makeGridRing(cx: number, cy: number, r: number) {
   const path = Skia.Path.Make()
@@ -167,9 +145,9 @@ function makeGridRing(cx: number, cy: number, r: number) {
   return path
 }
 
-function makeSectorArc(fi: number, cx: number, cy: number, r: number) {
-  const startRad = (fi / N_FAM) * TWO_PI - Math.PI / 2 + GAP * 0.4
-  const endRad   = ((fi + 1) / N_FAM) * TWO_PI - Math.PI / 2 - GAP * 0.4
+function makeSectorArc(fi: number, cx: number, cy: number, r: number, nFam = N_FAM) {
+  const startRad = (fi / nFam) * TWO_PI - Math.PI / 2 + GAP * 0.4
+  const endRad   = ((fi + 1) / nFam) * TWO_PI - Math.PI / 2 - GAP * 0.4
   const path     = Skia.Path.Make()
   path.moveTo(cx + r * Math.cos(startRad), cy + r * Math.sin(startRad))
   for (let i = 1; i <= 16; i++) {
@@ -180,12 +158,13 @@ function makeSectorArc(fi: number, cx: number, cy: number, r: number) {
 }
 
 function makeAvgPath(scores: number[], cx: number, cy: number, maxR: number) {
+  const N    = scores.length
   const path = Skia.Path.Make()
   let first  = true
-  for (let fi = 0; fi < N_FAM; fi++) {
+  for (let fi = 0; fi < N; fi++) {
     const r        = scores[fi] * maxR
-    const startRad = (fi / N_FAM) * TWO_PI - Math.PI / 2 + GAP
-    const endRad   = ((fi + 1) / N_FAM) * TWO_PI - Math.PI / 2 - GAP
+    const startRad = (fi / N) * TWO_PI - Math.PI / 2 + GAP
+    const endRad   = ((fi + 1) / N) * TWO_PI - Math.PI / 2 - GAP
     for (let i = 0; i <= N_ARC; i++) {
       const a = startRad + (i / N_ARC) * (endRad - startRad)
       const x = cx + r * Math.cos(a)
@@ -198,8 +177,8 @@ function makeAvgPath(scores: number[], cx: number, cy: number, maxR: number) {
   return path
 }
 
-function makeDivider(fi: number, cx: number, cy: number, maxR: number) {
-  const a    = (fi / N_FAM) * TWO_PI - Math.PI / 2
+function makeDivider(fi: number, cx: number, cy: number, maxR: number, nFam = N_FAM) {
+  const a    = (fi / nFam) * TWO_PI - Math.PI / 2
   const path = Skia.Path.Make()
   path.moveTo(cx + 4 * Math.cos(a), cy + 4 * Math.sin(a))
   path.lineTo(cx + maxR * 1.04 * Math.cos(a), cy + maxR * 1.04 * Math.sin(a))
@@ -222,7 +201,10 @@ function buildArcPath(cx: number, cy: number, r: number, startDeg: number, sweep
   return p
 }
 
-function ScoreArc({ score, size = 108, sw = 6 }: { score: number; size?: number; sw?: number }) {
+// ─── Changement 1 : ScoreArc contextuel ──────────────────────────────────────
+function ScoreArc({ score, size = 108, sw = 6, color = '#FFDD00', label }: {
+  score: number; size?: number; sw?: number; color?: string; label?: string
+}) {
   const cx     = size / 2
   const cy     = size / 2
   const r      = (size - sw * 3) / 2
@@ -235,10 +217,15 @@ function ScoreArc({ score, size = 108, sw = 6 }: { score: number; size?: number;
   const gStart = vec(cx + r * Math.cos(toRad(START)), cy + r * Math.sin(toRad(START)))
   const gEnd   = vec(cx + r * Math.cos(toRad(START + TOTAL)), cy + r * Math.sin(toRad(START + TOTAL)))
 
+  // Gradient dynamique depuis la couleur fournie
+  const [cr, cg, cb] = hexRgb(color)
+  const colorMid  = `rgba(${cr},${cg},${cb},0.95)`
+  const haloColor = `rgba(${cr},${cg},${cb},0.12)`
+
   const trackPath = useMemo(() => buildArcPath(cx, cy, r, START, TOTAL), [cx, cy, r])
   const arcSkPath = useMemo(() => buildArcPath(cx, cy, r, START, filled), [cx, cy, r, filled])
 
-  const textColor = score === 0 ? '#4A4A5A' : '#FFDD00'
+  const textColor = score === 0 ? '#4A4A5A' : color
 
   return (
     <View style={{ width: size, height: size * 0.72, alignSelf: 'center' }}>
@@ -248,15 +235,15 @@ function ScoreArc({ score, size = 108, sw = 6 }: { score: number; size?: number;
         <Path path={trackPath} style="stroke" strokeWidth={sw} color="rgba(255,255,255,0.07)" strokeCap="round" />
         {/* Halo */}
         {filled > 1 && (
-          <Path path={arcSkPath} style="stroke" strokeWidth={sw + 6} color="rgba(255,221,0,0.12)" strokeCap="round" />
+          <Path path={arcSkPath} style="stroke" strokeWidth={sw + 6} color={haloColor} strokeCap="round" />
         )}
-        {/* Arc dégradé doré */}
+        {/* Arc dégradé */}
         {filled > 1 && (
           <Path path={arcSkPath} style="stroke" strokeWidth={sw} strokeCap="round">
             <LinearGradient
               start={gStart}
               end={gEnd}
-              colors={['#ffffff', '#ffe566', '#FFDD00']}
+              colors={['#ffffff', colorMid, color]}
               positions={[0, 0.5, 1]}
             />
           </Path>
@@ -274,21 +261,134 @@ function ScoreArc({ score, size = 108, sw = 6 }: { score: number; size?: number;
           {String(score)}
         </SvgText>
         <SvgText x={cx} y={cy + size * 0.24} textAnchor="middle" fill="rgba(255,255,255,0.20)" fontSize={size * 0.08} fontWeight="700" letterSpacing={1.5}>
-          MYO
+          {label ?? 'MYO'}
         </SvgText>
       </Svg>
     </View>
   )
 }
 
-// ─── Barre animée RN ─────────────────────────────────────────────────────────
-function AnimatedBar({ val, color, progress }: {
-  val: number; color: string; progress: SharedValue<number>
+
+
+// ─── FamilyRadar — radar des sous-dimensions d'une famille ───────────────────
+function FamilyRadar({
+  familyIndex, sessionVals, avgVals, color, size,
+}: {
+  familyIndex: number; sessionVals: number[]; avgVals: number[]
+  color: string; size: number
 }) {
-  const style = useAnimatedStyle(() => ({
-    width: `${Math.round(val * 100 * progress.value)}%` as `${number}%`,
-  }))
-  return <Animated.View style={[styles.barFill, { backgroundColor: color }, style]} />
+  const N = sessionVals.length
+  if (N < 2) return null
+  const cx = size / 2
+  const cy = size / 2
+  const maxR = size * 0.33
+  const LABEL_R = maxR * 1.28
+  const LABEL_W = 56
+  const dimNames = DIM_NAMES[familyIndex] ?? []
+
+  const gradColors = useMemo(
+    () => sessionVals.map(() => [rgba(color, 0), rgba(color, 0.80)] as [string, string]),
+    [color, N],
+  )
+  const sectorPaths = useMemo(
+    () => sessionVals.map((val, i) => makeSectorPath(i, val, cx, cy, maxR, N)),
+    [sessionVals, cx, cy, maxR, N],
+  )
+  const avgPath = useMemo(
+    () => makeAvgPath(avgVals, cx, cy, maxR),
+    [avgVals, cx, cy, maxR],
+  )
+  const gridRings = useMemo(
+    () => [0.25, 0.5, 0.75, 1.0].map(t => makeGridRing(cx, cy, t * maxR)),
+    [cx, cy, maxR],
+  )
+  const divPaths = useMemo(
+    () => Array.from({ length: N }, (_, i) => makeDivider(i, cx, cy, maxR, N)),
+    [N, cx, cy, maxR],
+  )
+  const sectorArcs = useMemo(
+    () => Array.from({ length: N }, (_, i) =>
+      [0.25, 0.5, 0.75].map(t => makeSectorArc(i, cx, cy, t * maxR, N))
+    ),
+    [N, cx, cy, maxR],
+  )
+  const labelPos = useMemo(
+    () => Array.from({ length: N }, (_, i) => {
+      const a = ((i + 0.5) / N) * TWO_PI - Math.PI / 2
+      return { x: cx + LABEL_R * Math.cos(a), y: cy + LABEL_R * Math.sin(a) }
+    }),
+    [N, cx, cy, LABEL_R],
+  )
+
+  return (
+    <View style={{ width: size }}>
+      <Canvas style={{ width: size, height: size }}>
+        {gridRings.map((path, i) => (
+          <Path key={`fgr${i}`} path={path} style="stroke"
+            strokeWidth={i === 3 ? 0.7 : 0.45}
+            color={i === 3 ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.04)'} />
+        ))}
+        {sectorArcs.map((arcs, i) => arcs.map((path, li) => (
+          <Path key={`fsa${i}_${li}`} path={path} style="stroke" strokeWidth={0.4} color="rgba(255,255,255,0.04)" />
+        )))}
+        {divPaths.map((path, i) => (
+          <Path key={`fd${i}`} path={path} style="stroke" strokeWidth={0.65} color="rgba(255,255,255,0.06)" />
+        ))}
+        <Path path={avgPath} style="stroke" strokeWidth={2.5} color="rgba(90,130,210,0.12)" strokeCap="round" />
+        <Path path={avgPath} style="stroke" strokeWidth={1.2} color="rgba(110,155,230,0.55)" strokeCap="round" />
+        {sectorPaths.map((path, i) => (
+          <Group key={`fs${i}`} opacity={0.78}>
+            <Path path={path} style="fill">
+              <RadialGradient c={vec(cx, cy)} r={maxR} colors={gradColors[i]} />
+            </Path>
+          </Group>
+        ))}
+        {sessionVals.map((val, i) => {
+          const startRad = (i / N) * TWO_PI - Math.PI / 2 + GAP
+          const endRad   = ((i + 1) / N) * TWO_PI - Math.PI / 2 - GAP
+          const rimR = maxR + 4
+          const rimPath = Skia.Path.Make()
+          rimPath.moveTo(cx + rimR * Math.cos(startRad), cy + rimR * Math.sin(startRad))
+          for (let j = 1; j <= 20; j++) {
+            const a = startRad + (j / 20) * (endRad - startRad)
+            rimPath.lineTo(cx + rimR * Math.cos(a), cy + rimR * Math.sin(a))
+          }
+          return (
+            <Path key={`frim${i}`} path={rimPath} style="stroke" strokeWidth={1.8} strokeCap="round"
+              color={rgba(color, 0.52 + val * 0.40)} />
+          )
+        })}
+        <Circle cx={cx} cy={cy} r={5} color="rgba(10,10,15,0.95)" />
+        <Circle cx={cx} cy={cy} r={2.5} color="rgba(255,255,255,0.20)" />
+      </Canvas>
+      <View style={[StyleSheet.absoluteFill, { width: size, height: size }]} pointerEvents="none">
+        {labelPos.map((pos, i) => {
+          const delta = Math.round((sessionVals[i] - avgVals[i]) * 100)
+          const deltaColor = delta > 0 ? '#2da866' : delta < 0 ? '#b04040' : 'rgba(255,255,255,0.28)'
+          return (
+            <View key={i} style={[styles.labelWrap, { left: pos.x - LABEL_W / 2, top: pos.y - 12, width: LABEL_W }]}>
+              <Text
+                style={[styles.labelName, { color: 'rgba(255,255,255,0.55)', fontSize: 8 }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.65}
+              >
+                {dimNames[i] ?? `D${i}`}
+              </Text>
+              <Text style={[styles.labelScore, { fontSize: 10 }]}>
+                {Math.round(sessionVals[i] * 100)}
+              </Text>
+              {delta !== 0 && (
+                <Text style={[styles.labelDelta, { color: deltaColor }]}>
+                  {delta > 0 ? `+${delta}` : `${delta}`}
+                </Text>
+              )}
+            </View>
+          )
+        })}
+      </View>
+    </View>
+  )
 }
 
 // ─── Composant principal ──────────────────────────────────────────────────────
@@ -358,16 +458,6 @@ export default function MyoChart({
     SECTOR_COLORS_HEX.map(h => [rgba(h, 0), rgba(h, 0.78)] as [string, string]),
     [],
   )
-  // Paths des dimensions du secteur sélectionné
-  const dimPaths = useMemo(() => {
-    if (sel === null) return []
-    const dims = sessionValues[sel] ?? []
-    return dims.map((val, i) => {
-      const outerR = Math.max(val * maxR, 2)
-      const innerR = Math.max(0, outerR - (maxR / dims.length) * 0.5)
-      return makeDimArc(sel, val, cx, cy, maxR, innerR)
-    })
-  }, [sel, sessionValues, cx, cy, maxR])
 
   // ─── Positions étiquettes ─────────────────────────────────────────────────
   const LABEL_R   = maxR * 1.30
@@ -380,49 +470,6 @@ export default function MyoChart({
     [cx, cy, LABEL_R],
   )
 
-  // ─── ZOOM CAMÉRA — translation vers le centroïde du secteur ──────────────
-  // Quand on sélectionne fi, on "avance" vers ce secteur en décalant
-  // le canvas dans la direction opposée (comme si la caméra se rapprochait).
-  // La caméra se déplace de ~28% du rayon vers le secteur + scale 1.55×.
-  const ZOOM_SCALE     = 1.55
-  const ZOOM_TRANSLATE = maxR * 0.42   // déplacement du centre vers le secteur
-
-  const camScale = useSharedValue(1)
-  const camTx    = useSharedValue(0)
-  const camTy    = useSharedValue(0)
-
-  const springCam = { damping: 30, stiffness: 300 }
-
-  useEffect(() => {
-    if (sel === null) {
-      camScale.value = withSpring(1,    springCam)
-      camTx.value    = withSpring(0,    springCam)
-      camTy.value    = withSpring(0,    springCam)
-    } else {
-      // Centre angulaire du secteur sélectionné
-      const a   = ((sel + 0.5) / N_FAM) * TWO_PI - Math.PI / 2
-      // On translate dans la direction du secteur (avance = décale le contenu
-      // dans la direction du secteur, ce qui revient à translater le canvas
-      // de la même valeur — le viewport suit)
-      const tx  = Math.cos(a) * ZOOM_TRANSLATE
-      const ty  = Math.sin(a) * ZOOM_TRANSLATE
-      camScale.value = withSpring(ZOOM_SCALE, springCam)
-      camTx.value    = withSpring(tx,         springCam)
-      camTy.value    = withSpring(ty,         springCam)
-    }
-  }, [sel])
-
-  const canvasAnimStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: -camTx.value },
-      { translateY: -camTy.value },
-      { scale: camScale.value },
-      // Re-translate pour zoomer depuis le centroïde du secteur plutôt que
-      // le coin supérieur gauche du canvas
-      { translateX: camTx.value },
-      { translateY: camTy.value },
-    ],
-  }))
 
   // ─── Tap ──────────────────────────────────────────────────────────────────
   const handleTap = useCallback((evt: { nativeEvent: { locationX: number; locationY: number } }) => {
@@ -437,329 +484,180 @@ export default function MyoChart({
     setFamily(sel === fi ? null : fi)
   }, [cx, cy, maxR, sel, setFamily])
 
-  // ─── Panneau détail ───────────────────────────────────────────────────────
-  const panelOpacity    = useSharedValue(0)
-  const panelTranslateY = useSharedValue(14)
-  const barProgress     = useSharedValue(0)
-  const panelAnim       = useAnimatedStyle(() => ({
-    opacity  : panelOpacity.value,
-    transform: [{ translateY: panelTranslateY.value }],
-  }))
+  const accentHex = sel !== null ? SECTOR_COLORS_HEX[sel] : '#8a8a9a'
+  const famScore  = sel !== null ? famScores[sel] : 0
+
+  // ─── Animation zoom in-place ──────────────────────────────────────────────
+  const mainOpacity = useSharedValue(1)
+  const mainScale   = useSharedValue(1)
+  const famOpacity  = useSharedValue(0)
+  const famScale    = useSharedValue(0.84)
+  const famTy       = useSharedValue(16)
+  const hdrOpacity  = useSharedValue(0)
+  const hdrTy       = useSharedValue(10)
+
+  // Spring légèrement élastique pour un ressenti premium
+  const sSnappy  = { damping: 20, stiffness: 320 }  // sortie du main — vif
+  const sElegant = { damping: 16, stiffness: 240 }  // entrée du family — légèrement rebondissant
 
   useEffect(() => {
     if (sel === null) {
-      panelOpacity.value = withTiming(0, { duration: 160 })
-      return
+      // Retour : fam disparaît vite, main revient avec léger rebond
+      famOpacity.value  = withTiming(0,    { duration: 150 })
+      famScale.value    = withSpring(0.84, sSnappy)
+      famTy.value       = withSpring(16,   sSnappy)
+      hdrOpacity.value  = withTiming(0,    { duration: 120 })
+      hdrTy.value       = withSpring(10,   sSnappy)
+      // Main arrive après un court délai (laisse le fam disparaître d'abord)
+      mainOpacity.value = withTiming(1,    { duration: 240 })
+      mainScale.value   = withSpring(1,    sElegant)
+    } else {
+      // Sélection : main part vite, fam entre avec élégance
+      mainOpacity.value = withTiming(0,    { duration: 160 })
+      mainScale.value   = withSpring(1.14, sSnappy)
+      // Fam entre légèrement après (16ms) pour que le main soit déjà parti
+      famOpacity.value  = withTiming(1,    { duration: 300 })
+      famScale.value    = withSpring(1,    sElegant)
+      famTy.value       = withSpring(0,    sElegant)
+      hdrOpacity.value  = withTiming(1,    { duration: 260 })
+      hdrTy.value       = withSpring(0,    sElegant)
     }
-    panelTranslateY.value = 14
-    panelOpacity.value    = 0
-    barProgress.value     = 0
-    panelTranslateY.value = withSpring(0, { damping: 18, stiffness: 300 })
-    panelOpacity.value    = withTiming(1, { duration: 220, easing: Easing.bezier(0.16, 1, 0.3, 1) })
-    barProgress.value     = withDelay(100, withTiming(1, { duration: 540, easing: Easing.bezier(0.16, 1, 0.3, 1) }))
   }, [sel])
 
-  const accentHex = sel !== null ? SECTOR_COLORS_HEX[sel] : '#8a8a9a'
-  const famScore  = sel !== null ? famScores[sel] : 0
+  const mainAnimStyle = useAnimatedStyle(() => ({
+    opacity  : mainOpacity.value,
+    transform: [{ scale: mainScale.value }],
+  }))
+  const famAnimStyle = useAnimatedStyle(() => ({
+    opacity  : famOpacity.value,
+    transform: [
+      { scale: famScale.value },
+      { translateY: famTy.value },
+    ],
+  }))
+  const hdrAnimStyle = useAnimatedStyle(() => ({
+    opacity  : hdrOpacity.value,
+    transform: [{ translateY: hdrTy.value }],
+  }))
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <View style={{ width: S }}>
 
-      {/* Zone de tap */}
-      <TouchableOpacity activeOpacity={1} onPress={handleTap} style={{ width: S, height: S }}>
-        {/*
-          Wrapper clip fixe pour que le canvas zoomé ne déborde pas.
-          Le canvas est plus grand que S pour absorber la translation.
-        */}
-        <View style={{ width: S, height: S, overflow: 'hidden' }}>
-          <Animated.View style={[{ width: S, height: S }, canvasAnimStyle]}>
+      {/* Zone radar — superposition main + family, même empreinte S×S */}
+      <View style={{ width: S, height: S }}>
+
+        {/* Radar 8 familles — zoom-fade OUT quand famille sélectionnée */}
+        <Animated.View style={[{ width: S, height: S }, mainAnimStyle]}>
+          <TouchableOpacity activeOpacity={1} onPress={handleTap} style={{ width: S, height: S }}>
             <Canvas style={{ width: S, height: S }}>
-
-              {/* Anneaux grille */}
               {gridRings.map((path, i) => (
-                <Path
-                  key={`gr${i}`}
-                  path={path}
-                  style="stroke"
+                <Path key={`gr${i}`} path={path} style="stroke"
                   strokeWidth={i === 3 ? 0.7 : 0.45}
-                  color={i === 3 ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.04)'}
-                />
+                  color={i === 3 ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.04)'} />
               ))}
-
-              {/* Ticks arc par secteur */}
               {sectorArcs.map((arcs, fi) =>
                 arcs.map((path, li) => (
-                  <Path
-                    key={`sa${fi}_${li}`}
-                    path={path}
-                    style="stroke"
-                    strokeWidth={sel === fi ? 0.9 : 0.4}
-                    color={sel === fi
-                      ? rgba(SECTOR_COLORS_HEX[fi], 0.38)
-                      : 'rgba(255,255,255,0.04)'}
-                  />
+                  <Path key={`sa${fi}_${li}`} path={path} style="stroke" strokeWidth={0.4}
+                    color="rgba(255,255,255,0.04)" />
                 ))
               )}
-
-              {/* Diviseurs */}
               {divPaths.map((path, i) => (
                 <Path key={`d${i}`} path={path} style="stroke" strokeWidth={0.65} color="rgba(255,255,255,0.06)" />
               ))}
-
-              {/* Contour moyenne — visible */}
               <Path path={avgPath} style="stroke" strokeWidth={2.5} color="rgba(90,130,210,0.12)" strokeCap="round" />
               <Path path={avgPath} style="stroke" strokeWidth={1.2} color="rgba(110,155,230,0.55)" strokeCap="round" />
-
-              {/* Secteurs */}
-              {sectorPaths.map((path, fi) => {
-                const isSelected = sel === fi
-                const isDimmed   = sel !== null && !isSelected
-                return (
-                  <Group key={`s${fi}`} opacity={isDimmed ? 0.08 : isSelected ? 0.90 : 0.65}>
-                    <Path path={path} style="fill">
-                      <RadialGradient c={vec(cx, cy)} r={maxR} colors={gradColors[fi]} />
-                    </Path>
-                    {isSelected && (
-                      <Path path={path} style="stroke" strokeWidth={1.2} color={rgba(SECTOR_COLORS_HEX[fi], 0.85)} />
-                    )}
-                  </Group>
-                )
-              })}
-
-              {/* Variables dim dans le secteur (couches concentriques) */}
-              {sel !== null && dimPaths.map((path, i) => {
-                const val = sessionValues[sel]?.[i] ?? 0
-                if (val < 0.04) return null
-                return (
-                  <Group key={`dim${i}`} opacity={0.40 + val * 0.45}>
-                    <Path path={path} style="fill">
-                      <RadialGradient
-                        c={vec(cx, cy)}
-                        r={maxR}
-                        colors={[rgba(SECTOR_COLORS_HEX[sel], val * 0.95), rgba(SECTOR_COLORS_HEX[sel], 0)]}
-                      />
-                    </Path>
-                  </Group>
-                )
-              })}
-
-              {/* Rim extérieur par secteur */}
+              {sectorPaths.map((path, fi) => (
+                <Group key={`s${fi}`} opacity={0.65}>
+                  <Path path={path} style="fill">
+                    <RadialGradient c={vec(cx, cy)} r={maxR} colors={gradColors[fi]} />
+                  </Path>
+                </Group>
+              ))}
               {famScores.map((sc, fi) => {
                 const startRad = (fi / N_FAM) * TWO_PI - Math.PI / 2 + GAP
                 const endRad   = ((fi + 1) / N_FAM) * TWO_PI - Math.PI / 2 - GAP
-                const rimR     = maxR + 4
-                const rimPath  = Skia.Path.Make()
+                const rimR = maxR + 4
+                const rimPath = Skia.Path.Make()
                 rimPath.moveTo(cx + rimR * Math.cos(startRad), cy + rimR * Math.sin(startRad))
                 for (let i = 1; i <= 20; i++) {
                   const a = startRad + (i / 20) * (endRad - startRad)
                   rimPath.lineTo(cx + rimR * Math.cos(a), cy + rimR * Math.sin(a))
                 }
-                const isDimmed = sel !== null && sel !== fi
                 return (
-                  <Path
-                    key={`rim${fi}`}
-                    path={rimPath}
-                    style="stroke"
-                    strokeWidth={sel === fi ? 2.5 : 1.8}
-                    strokeCap="round"
-                    color={isDimmed
-                      ? rgba(SECTOR_COLORS_HEX[fi], 0.10)
-                      : rgba(SECTOR_COLORS_HEX[fi], 0.52 + sc * 0.40)}
-                  />
+                  <Path key={`rim${fi}`} path={rimPath} style="stroke" strokeWidth={1.8} strokeCap="round"
+                    color={rgba(SECTOR_COLORS_HEX[fi], 0.52 + sc * 0.40)} />
                 )
               })}
-
-              {/* Centre */}
               <Circle cx={cx} cy={cy} r={5} color="rgba(10,10,15,0.95)" />
               <Circle cx={cx} cy={cy} r={2.5} color="rgba(255,255,255,0.20)" />
-
             </Canvas>
-          </Animated.View>
-        </View>
-      </TouchableOpacity>
+          </TouchableOpacity>
 
-      {/* Labels — hors du clip, positionnés absolument sur le canvas réel */}
-      {showLabels && (
-        <View
-          style={[StyleSheet.absoluteFill, { width: S, height: S }]}
-          pointerEvents="none"
+          {/* Labels familles avec delta vs moyenne */}
+          {showLabels && (
+            <View style={[StyleSheet.absoluteFill, { width: S, height: S }]} pointerEvents="none">
+              {labelPos.map((pos, fi) => {
+                const delta      = Math.round((famScores[fi] - avgScores[fi]) * 100)
+                const deltaColor = delta > 0 ? '#2da866' : delta < 0 ? '#b04040' : 'rgba(255,255,255,0.28)'
+                return (
+                  <View key={fi} style={[styles.labelWrap, { left: pos.x - LABEL_W / 2, top: pos.y - 12, width: LABEL_W }]}>
+                    <Text style={[styles.labelName, { color: 'rgba(255,255,255,0.42)' }]}
+                      numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                      {FAMILY_NAMES_SHORT[fi]}
+                    </Text>
+                    <Text style={[styles.labelDelta, { color: deltaColor }]}>
+                      {delta > 0 ? `+${delta}` : `${delta}`}
+                    </Text>
+                  </View>
+                )
+              })}
+            </View>
+          )}
+        </Animated.View>
+
+        {/* Radar sous-dimensions — zoom-fade IN depuis même empreinte */}
+        <Animated.View
+          style={[StyleSheet.absoluteFill, famAnimStyle]}
+          pointerEvents={sel !== null ? 'auto' : 'none'}
         >
-          {labelPos.map((pos, fi) => {
-            const isSelected = sel === fi
-            const isDimmed   = sel !== null && !isSelected
-            return (
-              <View
-                key={fi}
-                style={[
-                  styles.labelWrap,
-                  {
-                    left   : pos.x - LABEL_W / 2,
-                    top    : pos.y - 12,
-                    width  : LABEL_W,
-                    opacity: isDimmed ? 0.12 : 1,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.labelName,
-                    { color: isSelected ? '#d4d4d4' : 'rgba(255,255,255,0.42)' },
-                  ]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.8}
-                >
-                  {FAMILY_NAMES_SHORT[fi]}
-                </Text>
-                {isSelected && (
-                  <Text style={styles.labelScore}>
-                    {Math.round(famScores[fi] * 100)}
-                  </Text>
-                )}
-              </View>
-            )
-          })}
-        </View>
-      )}
+          {sel !== null && (
+            <TouchableOpacity activeOpacity={1} onPress={() => setFamily(null)} style={{ width: S, height: S }}>
+              <FamilyRadar
+                familyIndex={sel}
+                sessionVals={sessionValues[sel] ?? []}
+                avgVals={averageValues[sel] ?? []}
+                color={accentHex}
+                size={S}
+              />
+            </TouchableOpacity>
+          )}
+        </Animated.View>
 
-      {/* Score arc */}
+      </View>
+
+      {/* Bandeau famille actuelle — slide-in sous le radar */}
+      <Animated.View style={[styles.famHeader, hdrAnimStyle]} pointerEvents="none">
+        {sel !== null && (
+          <View style={styles.famHeaderInner}>
+            <Text style={[styles.famHeaderIcon]}>{FAMILY_ICONS[sel]}</Text>
+            <Text style={[styles.famHeaderName, { color: accentHex }]}>{FAMILY_NAMES[sel]}</Text>
+            <Text style={styles.famHeaderHint}>· tap pour revenir</Text>
+          </View>
+        )}
+      </Animated.View>
+
+      {/* Score arc contextuel */}
       {showScore && (
         <View style={styles.scoreRow}>
-          <ScoreArc score={globalScore} size={108} sw={6} />
+          <ScoreArc
+            score={sel !== null ? Math.round(famScores[sel] * 100) : globalScore}
+            size={108}
+            sw={6}
+            color={sel !== null ? SECTOR_COLORS_HEX[sel] : '#FFDD00'}
+            label={sel !== null ? 'FAM.' : undefined}
+          />
         </View>
-      )}
-
-      {/* Panneau détail */}
-      {sel !== null && (
-        <Animated.View
-          style={[styles.panel, { borderColor: rgba(accentHex, 0.20) }, panelAnim]}
-          onStartShouldSetResponder={() => true}
-        >
-          <View style={[styles.panelAccentBar, { backgroundColor: accentHex }]} />
-
-          <View style={styles.panelHeader}>
-            <View style={styles.panelTitleRow}>
-              <Text style={styles.panelIcon}>{FAMILY_ICONS[sel]}</Text>
-              <Text style={[styles.panelTitle, { color: '#d4d4d4' }]}>
-                {FAMILY_NAMES[sel]}
-              </Text>
-            </View>
-            <View style={styles.famScoreRow}>
-              <View style={[styles.famScoreTrack, { backgroundColor: rgba(accentHex, 0.10) }]}>
-                <AnimatedBar val={famScore} color={accentHex} progress={barProgress} />
-              </View>
-              <Text style={[styles.famScoreVal, { color: '#c8c8c8' }]}>
-                {Math.round(famScore * 100)}
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => setFamily(null)}
-              style={styles.closeBtn}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            >
-              <X size={14} color="rgba(255,255,255,0.40)" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Dims — layout adaptatif : 1 col si ≤6, 2 cols si >6 */}
-          <ScrollView
-            style={styles.dimsScroll}
-            showsVerticalScrollIndicator={false}
-            nestedScrollEnabled
-          >
-            {sel !== null && DIM_NAMES[sel].length > 6 ? (
-              // 2 colonnes pour les familles denses (muscles = 17 dims)
-              <View style={styles.dimGrid}>
-                {DIM_NAMES[sel].map((name, i) => {
-                  const val    = sessionValues[sel]?.[i] ?? 0
-                  const avgVal = averageValues[sel]?.[i] ?? 0
-                  const delta  = val - avgVal
-                  const above  = delta > 0.05
-                  const below  = delta < -0.05
-                  const barColor = val < 0.04 ? 'rgba(255,255,255,0.10)' : above ? '#3dbf7a' : below ? '#cc5555' : accentHex
-                  return (
-                    <View key={i} style={[styles.dimCell, val < 0.04 && { opacity: 0.32 }]}>
-                      <Text style={styles.dimCellName} numberOfLines={1}>{name}</Text>
-                      {/* Barre double : avg + session */}
-                      <View style={styles.dimCellBarWrap}>
-                        {/* Track moyenne */}
-                        {avgVal > 0.02 && (
-                          <View style={[styles.dimCellAvgFill, { width: `${avgVal * 100}%` as `${number}%` }]} />
-                        )}
-                        {/* Barre session animée */}
-                        <View style={[styles.dimCellBarTrack, { backgroundColor: 'rgba(255,255,255,0.06)' }]}>
-                          <AnimatedBar val={val} color={barColor} progress={barProgress} />
-                        </View>
-                      </View>
-                      {/* Score + delta */}
-                      <View style={styles.dimCellMeta}>
-                        <Text style={[styles.dimCellVal, { color: val < 0.04 ? 'rgba(255,255,255,0.22)' : '#c8c8d0' }]}>
-                          {Math.round(val * 100)}
-                        </Text>
-                        {(above || below) && (
-                          <Text style={[styles.dimCellDelta, { color: above ? '#3dbf7a' : '#cc5555' }]}>
-                            {above ? `+${Math.round(delta * 100)}` : `${Math.round(delta * 100)}`}
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-                  )
-                })}
-              </View>
-            ) : (
-              // 1 colonne standard
-              <View style={styles.dimsContainer}>
-                {sel !== null && DIM_NAMES[sel].map((name, i) => {
-                  const val    = sessionValues[sel]?.[i] ?? 0
-                  const avgVal = averageValues[sel]?.[i] ?? 0
-                  const delta  = val - avgVal
-                  const above  = delta > 0.05
-                  const below  = delta < -0.05
-                  const barColor = val < 0.04 ? 'rgba(255,255,255,0.10)' : above ? '#3dbf7a' : below ? '#cc5555' : accentHex
-                  return (
-                    <View key={i} style={[styles.dimRow, val < 0.04 && styles.dimRowFaded]}>
-                      <Text style={[styles.dimName, val < 0.04 && { color: 'rgba(255,255,255,0.18)' }]}>
-                        {name}
-                      </Text>
-                      <View style={styles.dimBarWrap}>
-                        {/* Track complet = repère visuel */}
-                        <View style={[styles.dimBarTrack, { backgroundColor: 'rgba(255,255,255,0.06)' }]}>
-                          {/* Fond moyenne */}
-                          {avgVal > 0.02 && (
-                            <View style={[styles.dimAvgFill, { width: `${avgVal * 100}%` as `${number}%` }]} />
-                          )}
-                          {/* Barre session */}
-                          <AnimatedBar val={val} color={barColor} progress={barProgress} />
-                        </View>
-                        {/* Repère moyenne (ligne verticale) */}
-                        {avgVal > 0.02 && (
-                          <View style={[styles.dimAvgMark, { left: `${avgVal * 100}%` as `${number}%` }]} />
-                        )}
-                      </View>
-                      <Text style={[styles.dimVal, { color: val < 0.04 ? 'rgba(255,255,255,0.18)' : '#b0b0b8' }]}>
-                        {Math.round(val * 100)}
-                      </Text>
-                      {(above || below) ? (
-                        <Text style={[styles.dimDelta, { color: above ? '#3dbf7a' : '#cc5555' }]}>
-                          {above ? `+${Math.round(delta * 100)}` : `${Math.round(delta * 100)}`}
-                        </Text>
-                      ) : (
-                        <Text style={[styles.dimDelta, { color: 'rgba(255,255,255,0.18)' }]}>{'='}</Text>
-                      )}
-                    </View>
-                  )
-                })}
-              </View>
-            )}
-          </ScrollView>
-
-          <View style={[styles.avgNote, { borderTopColor: 'rgba(255,255,255,0.07)' }]}>
-            <View style={styles.avgLegendLine} />
-            <Text style={styles.avgNoteText}>Ligne bleue = votre moyenne · Vert/rouge = écart</Text>
-          </View>
-
-        </Animated.View>
       )}
 
     </View>
@@ -786,215 +684,45 @@ const styles = StyleSheet.create({
     color        : 'rgba(255,255,255,0.75)',
     marginTop    : 1,
   },
+  labelDelta: {
+    fontSize     : 8,
+    fontWeight   : '700',
+    fontVariant  : ['tabular-nums'],
+    letterSpacing: -0.2,
+    textAlign    : 'center',
+    marginTop    : 1,
+  },
   scoreRow: {
     alignItems: 'center',
     marginTop : -18,
   },
-  panel: {
-    marginHorizontal: 4,
-    marginTop       : 4,
-    backgroundColor : 'rgba(8,8,14,0.97)',
-    borderRadius    : 14,
-    borderWidth     : 1,
-    overflow        : 'hidden',
-    paddingTop      : 18,
-    paddingHorizontal: 14,
-    paddingBottom   : 14,
-  },
-  panelAccentBar: {
-    position    : 'absolute',
-    top         : 0,
-    left        : 0,
-    right       : 0,
-    height      : 2,
-    opacity     : 0.65,
-  },
-  panelHeader: {
-    flexDirection: 'row',
-    alignItems   : 'center',
-    marginBottom : 12,
-    gap          : 8,
-  },
-  panelTitleRow: {
-    flexDirection: 'row',
-    alignItems   : 'center',
-    gap          : 5,
-    minWidth     : 90,
-  },
-  panelIcon: {
-    fontSize: 13,
-  },
-  panelTitle: {
-    fontSize     : 12,
-    fontWeight   : '700',
-    letterSpacing: 1.2,
-  },
-  famScoreRow: {
-    flex         : 1,
-    flexDirection: 'row',
-    alignItems   : 'center',
-    gap          : 6,
-  },
-  famScoreTrack: {
-    flex        : 1,
-    height      : 3,
-    borderRadius: 2,
-    overflow    : 'hidden',
-  },
-  famScoreVal: {
-    fontSize   : 12,
-    fontWeight : '700',
-    minWidth   : 26,
-    textAlign  : 'right',
-    fontVariant: ['tabular-nums'],
-  },
-  closeBtn: {
-    width          : 22,
-    height         : 22,
+  famHeader: {
+    height         : 28,
     alignItems     : 'center',
     justifyContent : 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius   : 11,
+    marginTop      : 2,
   },
-  dimsScroll: {
-    maxHeight: 220,
-  },
-  dimsContainer: {
-    gap: 5,
-  },
-  // 2-col grid (famille muscles)
-  dimGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-  },
-  dimCell: {
-    width: '48%',
-    paddingVertical: 5,
-    paddingHorizontal: 5,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    gap: 3,
-  },
-  dimCellName: {
-    color: 'rgba(255,255,255,0.42)',
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 0.1,
-  },
-  dimCellBarWrap: {
-    position: 'relative',
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
-  },
-  dimCellAvgFill: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    height: '100%',
-    backgroundColor: 'rgba(110,155,230,0.20)',
-    borderRadius: 2,
-  },
-  dimCellBarTrack: {
-    ...StyleSheet.absoluteFillObject,
-    height: 4,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  dimCellMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  dimCellVal: {
-    fontSize: 10,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  dimCellDelta: {
-    fontSize: 9,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  dimRow: {
+  famHeaderInner: {
     flexDirection: 'row',
     alignItems   : 'center',
     gap          : 5,
   },
-  dimRowFaded: {
-    opacity: 0.38,
+  famHeaderIcon: {
+    fontSize: 11,
   },
-  dimName: {
-    color        : 'rgba(255,255,255,0.48)',
+  famHeaderName: {
     fontSize     : 10,
-    width        : 88,
-    letterSpacing: 0.1,
+    fontWeight   : '700',
+    letterSpacing: 1.0,
+    textTransform: 'uppercase',
   },
-  dimBarWrap: {
-    flex    : 1,
-    position: 'relative',
-  },
-  dimBarTrack: {
-    height      : 3,
-    borderRadius: 2,
-    overflow    : 'hidden',
-  },
-  dimAvgFill: {
-    position       : 'absolute',
-    top            : 0,
-    left           : 0,
-    height         : '100%',
-    backgroundColor: 'rgba(110,155,230,0.22)',
-    borderRadius   : 2,
-    zIndex         : 0,
-  },
-  dimAvgMark: {
-    position       : 'absolute',
-    top            : -1,
-    width          : 1.5,
-    height         : 5,
-    backgroundColor: 'rgba(110,155,230,0.85)',
-    borderRadius   : 1,
-    marginLeft     : -0.75,
-    zIndex         : 2,
+  famHeaderHint: {
+    fontSize     : 9,
+    color        : 'rgba(255,255,255,0.28)',
+    letterSpacing: 0.3,
   },
   barFill: {
     height      : '100%',
     borderRadius: 2,
-  },
-  dimVal: {
-    fontSize   : 10,
-    fontWeight : '600',
-    width      : 22,
-    textAlign  : 'right',
-    fontVariant: ['tabular-nums'],
-  },
-  dimDelta: {
-    fontSize   : 9,
-    fontWeight : '600',
-    width      : 24,
-    textAlign  : 'right',
-    fontVariant: ['tabular-nums'],
-  },
-  avgNote: {
-    flexDirection : 'row',
-    alignItems    : 'center',
-    gap           : 6,
-    marginTop     : 10,
-    paddingTop    : 8,
-    borderTopWidth: 1,
-  },
-  avgLegendLine: {
-    width          : 16,
-    height         : 2,
-    borderRadius   : 1,
-    backgroundColor: 'rgba(110,155,230,0.70)',
-  },
-  avgNoteText: {
-    fontSize     : 9,
-    color        : 'rgba(255,255,255,0.28)',
-    letterSpacing: 0.2,
   },
 })
