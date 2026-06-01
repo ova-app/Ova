@@ -47,7 +47,7 @@ const N_SEGS     = 140
 const N_SPOKES   = 26
 const MAX_R      = 1.8
 const H_TOP      = 0.9
-const H_BOT      = 0.45
+const H_BOT      = 0.22
 
 // ─── Familles ──────────────────────────────────────────────────────────────
 const FAMILY_NAMES = [
@@ -70,8 +70,6 @@ const SECTOR_COLORS_HEX = [
   '#f97316', '#ef4444', '#8b5cf6', '#06b6d4',
   '#fac775', '#22c55e', '#ec4899', '#3b82f6',
 ]
-
-export { FAMILY_NAMES, SECTOR_COLORS_HEX, MOCK_SESSION }
 
 const SECTOR_COLORS: readonly number[] = [
   0xf97316, 0xef4444, 0x8b5cf6, 0x06b6d4,
@@ -109,6 +107,9 @@ const MOCK_AVERAGE: number[][] = [
   [0.45, 0.42, 0.48, 0.50, 0.38],
 ]
 
+// Named exports — placed AFTER const declarations to avoid temporal dead zone
+export { FAMILY_NAMES, SECTOR_COLORS_HEX, MOCK_SESSION }
+
 // ─── DimConfig + précalcul ─────────────────────────────────────────────────
 interface DimConfig {
   fi: number
@@ -134,7 +135,7 @@ const DIM_CONFIGS: readonly DimConfig[] = (() => {
         angSigma  : subW * 0.62,
         rPeak     : 0.13 + ((gIdx * PHI) % 1) * 0.70,
         rWidth    : 0.085 + vi * 0.010,
-        harmN     : 64 + vi * 6,
+        harmN     : 6 + vi * 3,
       })
       gIdx++
     }
@@ -228,11 +229,11 @@ function ScoreArcGradient({
   // Track (gris)
   const trackPath = arcPath(cx, cy, r, START_DEG, TOTAL_DEG)
 
-  // Dégradé gris→orange→or : 3 stops sur [0,1]
+  // Dégradé sombre→jaune Orava
   const GRAD = [
-    { t: 0,    rgb: [0x8E, 0x8E, 0x93] },
-    { t: 0.5,  rgb: [0xD8, 0x5A, 0x30] },
-    { t: 1.0,  rgb: [0xFA, 0xC7, 0x75] },
+    { t: 0,    rgb: [0x2A, 0x24, 0x00] },
+    { t: 0.45, rgb: [0xCC, 0xAA, 0x00] },
+    { t: 1.0,  rgb: [0xFF, 0xDD, 0x00] },
   ] as const
 
   function lerpGrad(t: number): [number, number, number] {
@@ -315,62 +316,78 @@ function ScoreArcGradient({
   )
 }
 
-// ─── Géométries ────────────────────────────────────────────────────────────
-function makeTopoGeo(
-  data: number[][],
-  maxH: number,
-  sign: 1 | -1,
-  colored: boolean,
-): THREE.BufferGeometry {
-  const ringS  = N_RINGS * N_SEGS
-  const spokeS = N_SPOKES * N_RINGS
-  const total  = ringS + spokeS
+// ─── Sector LineSegments geometry (rings + spokes within one angular sector) ─
+function makeSectorLineGeo(fi: number, data: number[][], maxH: number): THREE.BufferGeometry {
+  const pts: number[] = []
 
-  const pos = new Float32Array(total * 6)
-  const col = colored ? new Float32Array(total * 6) : null
-
-  const setV = (
-    si: number,
-    vi: 0 | 1,
-    x: number,
-    y: number,
-    z: number,
-    c?: [number, number, number],
-  ): void => {
-    const b = si * 6 + vi * 3
-    pos[b] = x; pos[b + 1] = y; pos[b + 2] = z
-    if (col && c) { col[b] = c[0]; col[b + 1] = c[1]; col[b + 2] = c[2] }
-  }
-
-  for (let ri = 0; ri < N_RINGS; ri++) {
-    const r = ((ri + 1) / N_RINGS) * MAX_R
+  for (let ri = 1; ri <= N_RINGS; ri++) {
+    const r = (ri / N_RINGS) * MAX_R
     for (let si = 0; si < N_SEGS; si++) {
       const a1  = (si / N_SEGS) * TWO_PI
       const a2  = ((si + 1) / N_SEGS) * TWO_PI
-      const idx = ri * N_SEGS + si
-      setV(idx, 0, r * Math.cos(a1), sign * getH(r, a1, data, maxH), r * Math.sin(a1), colored ? getC(a1) : undefined)
-      setV(idx, 1, r * Math.cos(a2), sign * getH(r, a2, data, maxH), r * Math.sin(a2), colored ? getC(a2) : undefined)
+      const mid = (a1 + a2) / 2
+      if (Math.floor(((mid % TWO_PI) + TWO_PI) % TWO_PI / SECTOR_ANG) % N_SECTORS !== fi) continue
+      pts.push(
+        r * Math.cos(a1), getH(r, a1, data, maxH), r * Math.sin(a1),
+        r * Math.cos(a2), getH(r, a2, data, maxH), r * Math.sin(a2),
+      )
     }
   }
 
   for (let sp = 0; sp < N_SPOKES; sp++) {
     const a = (sp / N_SPOKES) * TWO_PI
-    const c = colored ? getC(a) : undefined
+    if (Math.floor(((a % TWO_PI) + TWO_PI) % TWO_PI / SECTOR_ANG) % N_SECTORS !== fi) continue
     for (let ri = 0; ri < N_RINGS; ri++) {
-      const r1  = (ri / N_RINGS) * MAX_R
-      const r2  = ((ri + 1) / N_RINGS) * MAX_R
-      const idx = ringS + sp * N_RINGS + ri
-      setV(idx, 0, r1 * Math.cos(a), sign * getH(r1, a, data, maxH), r1 * Math.sin(a), c)
-      setV(idx, 1, r2 * Math.cos(a), sign * getH(r2, a, data, maxH), r2 * Math.sin(a), c)
+      const r1 = (ri / N_RINGS) * MAX_R
+      const r2 = ((ri + 1) / N_RINGS) * MAX_R
+      pts.push(
+        r1 * Math.cos(a), getH(r1, a, data, maxH), r1 * Math.sin(a),
+        r2 * Math.cos(a), getH(r2, a, data, maxH), r2 * Math.sin(a),
+      )
     }
   }
 
   const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  if (col) geo.setAttribute('color', new THREE.BufferAttribute(col, 3))
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3))
   return geo
 }
 
+// ─── Full average terrain LineSegments (single colour, inverted Y) ──────────
+function makeAvgLineGeo(data: number[][], maxH: number): THREE.BufferGeometry {
+  const totalSeg = N_RINGS * N_SEGS + N_SPOKES * N_RINGS
+  const pts = new Float32Array(totalSeg * 6)
+  let idx = 0
+
+  for (let ri = 1; ri <= N_RINGS; ri++) {
+    const r = (ri / N_RINGS) * MAX_R
+    for (let si = 0; si < N_SEGS; si++) {
+      const a1 = (si / N_SEGS) * TWO_PI
+      const a2 = ((si + 1) / N_SEGS) * TWO_PI
+      const b  = idx * 6
+      pts[b]   = r * Math.cos(a1); pts[b+1] = -getH(r, a1, data, maxH); pts[b+2] = r * Math.sin(a1)
+      pts[b+3] = r * Math.cos(a2); pts[b+4] = -getH(r, a2, data, maxH); pts[b+5] = r * Math.sin(a2)
+      idx++
+    }
+  }
+
+  for (let sp = 0; sp < N_SPOKES; sp++) {
+    const a = (sp / N_SPOKES) * TWO_PI
+    for (let ri = 0; ri < N_RINGS; ri++) {
+      const r1 = (ri / N_RINGS) * MAX_R
+      const r2 = ((ri + 1) / N_RINGS) * MAX_R
+      const b  = idx * 6
+      pts[b]   = r1 * Math.cos(a); pts[b+1] = -getH(r1, a, data, maxH); pts[b+2] = r1 * Math.sin(a)
+      pts[b+3] = r2 * Math.cos(a); pts[b+4] = -getH(r2, a, data, maxH); pts[b+5] = r2 * Math.sin(a)
+      idx++
+    }
+  }
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(pts, 3))
+  return geo
+}
+
+// ─── Socle geometry (LineSegments) ────────────────────────────────────────
 function makeSocleGeo(): THREE.BufferGeometry {
   const R_INNER = MAX_R * 0.92
   const R_OUTER = MAX_R * 1.07
@@ -405,58 +422,6 @@ function makeSocleGeo(): THREE.BufferGeometry {
 
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pts, 3))
-  return geo
-}
-
-// ─── Géo session — un secteur à la fois (pour highlighting) ───────────────
-function makeTopoGeoSector(
-  fi: number,
-  data: number[][],
-  maxH: number,
-  sign: 1 | -1,
-  colored: boolean,
-): THREE.BufferGeometry {
-  const pts: number[] = []
-  const cols: number[] = []
-
-  for (let ri = 0; ri < N_RINGS; ri++) {
-    const r = ((ri + 1) / N_RINGS) * MAX_R
-    for (let si = 0; si < N_SEGS; si++) {
-      const a1  = (si / N_SEGS) * TWO_PI
-      const a2  = ((si + 1) / N_SEGS) * TWO_PI
-      const mid = (a1 + a2) / 2
-      if (Math.floor(((mid % TWO_PI + TWO_PI) % TWO_PI) / SECTOR_ANG) % N_SECTORS !== fi) continue
-      pts.push(
-        r * Math.cos(a1), sign * getH(r, a1, data, maxH), r * Math.sin(a1),
-        r * Math.cos(a2), sign * getH(r, a2, data, maxH), r * Math.sin(a2),
-      )
-      if (colored) {
-        const c1 = getC(a1); cols.push(c1[0], c1[1], c1[2])
-        const c2 = getC(a2); cols.push(c2[0], c2[1], c2[2])
-      }
-    }
-  }
-
-  for (let sp = 0; sp < N_SPOKES; sp++) {
-    const a = (sp / N_SPOKES) * TWO_PI
-    if (Math.floor(((a % TWO_PI + TWO_PI) % TWO_PI) / SECTOR_ANG) % N_SECTORS !== fi) continue
-    const c = colored ? getC(a) : undefined
-    for (let ri = 0; ri < N_RINGS; ri++) {
-      const r1 = (ri / N_RINGS) * MAX_R
-      const r2 = ((ri + 1) / N_RINGS) * MAX_R
-      pts.push(
-        r1 * Math.cos(a), sign * getH(r1, a, data, maxH), r1 * Math.sin(a),
-        r2 * Math.cos(a), sign * getH(r2, a, data, maxH), r2 * Math.sin(a),
-      )
-      if (colored && c) cols.push(c[0], c[1], c[2], c[0], c[1], c[2])
-    }
-  }
-
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3))
-  if (colored && cols.length > 0) {
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cols), 3))
-  }
   return geo
 }
 
@@ -543,18 +508,18 @@ export default function MyoOrb({
   }, [selectedFamily])
 
   // ─── Refs partagés GL ↔ React ────────────────────────────────────────────
-  const rafRef              = useRef<number | null>(null)
-  const cameraRef           = useRef<THREE.PerspectiveCamera | null>(null)
-  const sceneRef            = useRef<THREE.Scene | null>(null)
-  const sceneRotYRef        = useRef(0)
-  const targetRotYRef       = useRef(0)
-  const autoRotateRef       = useRef(true)
-  const selectedRef         = useRef<number | null>(null)
-  const svRef               = useRef(sessionValues)
-  const avRef               = useRef(averageValues)
-  const sessionMatsRef      = useRef<THREE.LineBasicMaterial[]>([])
-  const avgMatRef           = useRef<THREE.LineBasicMaterial | null>(null)
-  const hitboxMeshesRef     = useRef<THREE.Mesh[]>([])
+  const rafRef               = useRef<number | null>(null)
+  const cameraRef            = useRef<THREE.PerspectiveCamera | null>(null)
+  const sceneRef             = useRef<THREE.Scene | null>(null)
+  const sceneRotYRef         = useRef(0)
+  const targetRotYRef        = useRef(0)
+  const autoRotateRef        = useRef(true)
+  const selectedRef          = useRef<number | null>(null)
+  const svRef                = useRef(sessionValues)
+  const avRef                = useRef(averageValues)
+  const sessionMatsRef       = useRef<THREE.LineBasicMaterial[]>([])
+  const avgMatRef            = useRef<THREE.LineBasicMaterial | null>(null)
+  const hitboxMeshesRef      = useRef<THREE.Mesh[]>([])
   const autoRotateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ─── Score global — pondéré 1/8 par famille (évite que MUSCLES/17 dims écrase tout)
@@ -569,23 +534,22 @@ export default function MyoOrb({
     }
     return famCount > 0 ? Math.round((famSum / famCount) * 100) : 0
   }, [sessionValues])
-  const scoreColor = globalScore >= 66 ? '#FAC775' : globalScore >= 33 ? '#D85A30' : '#8E8E93'
 
   // ─── Positions 3D des étiquettes — dessus du pic de chaque secteur ───────
   const labelPositions3D = useMemo((): THREE.Vector3[] => {
     return Array.from({ length: N_SECTORS }, (_, fi) => {
       const sA = fi * SECTOR_ANG + SECTOR_ANG / 2
-      let maxH = 0
+      let maxHVal = 0
       for (let s = 0; s < 20; s++) {
         const a = fi * SECTOR_ANG + ((s + 0.5) / 20) * SECTOR_ANG
         for (let rI = 1; rI <= 8; rI++) {
           const h = getH((rI / 8) * MAX_R, a, sessionValues, H_TOP)
-          if (h > maxH) maxH = h
+          if (h > maxHVal) maxHVal = h
         }
       }
       return new THREE.Vector3(
         MAX_R * 0.65 * Math.cos(sA),
-        maxH + 0.22,
+        maxHVal + 0.22,
         MAX_R * 0.65 * Math.sin(sA),
       )
     })
@@ -706,11 +670,12 @@ export default function MyoOrb({
     if (autoRotateTimeoutRef.current) clearTimeout(autoRotateTimeoutRef.current)
   }, [])
 
-  // ─── GL context ──────────────────────────────────────────────────────────
+  // ─── GL context — MUST be fully synchronous (zero async/await/Promise) ───
   const onContextCreate = useCallback((gl: ExpoWebGLRenderingContext) => {
     const W = gl.drawingBufferWidth
     const H = gl.drawingBufferHeight
 
+    // Exact canvas proxy shape required by expo-gl
     const canvas = {
       width: W, height: H, style: {},
       clientWidth: W, clientHeight: H,
@@ -722,12 +687,14 @@ export default function MyoOrb({
       context: gl as WebGL2RenderingContext,
       antialias: false,
     })
+    // Both required by expo-gl
     renderer.setSize(W, H, false)
     renderer.setPixelRatio(1)
-    const bg = parseInt(bgColorRef.current.replace('#', ''), 16)
-    renderer.setClearColor(bg, 1)
+    const bgInt = parseInt(bgColorRef.current.replace('#', ''), 16)
+    renderer.setClearColor(bgInt, 1)
 
     const scene  = new THREE.Scene()
+
     const camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 100)
     camera.position.set(0, 3.2, 4.8)
     camera.lookAt(0, 0, 0)
@@ -736,26 +703,35 @@ export default function MyoOrb({
     cameraRef.current = camera
     sceneRef.current  = scene
 
+    // ─── Session terrain — 8 LineBasicMaterial sectors ───────────────────
     const mats: THREE.LineBasicMaterial[] = []
     for (let fi = 0; fi < N_SECTORS; fi++) {
-      const mat = new THREE.LineBasicMaterial({ vertexColors: true })
+      const mat = new THREE.LineBasicMaterial({
+        color      : SECTOR_COLORS[fi],
+        transparent: true,
+        opacity    : 1.0,
+      })
       mats.push(mat)
-      scene.add(new THREE.LineSegments(
-        makeTopoGeoSector(fi, svRef.current, H_TOP, 1, true),
-        mat,
-      ))
+      scene.add(new THREE.LineSegments(makeSectorLineGeo(fi, svRef.current, H_TOP), mat))
     }
     sessionMatsRef.current = mats
 
-    const avgMat = new THREE.LineBasicMaterial({ color: 0x4e7d9e })
+    // ─── Historical terrain — single LineBasicMaterial ───────────────────
+    const avgMat = new THREE.LineBasicMaterial({
+      color      : 0x2a3a4e,
+      transparent: true,
+      opacity    : 0.55,
+    })
     avgMatRef.current = avgMat
-    scene.add(new THREE.LineSegments(makeTopoGeo(avRef.current, H_BOT, -1, false), avgMat))
+    scene.add(new THREE.LineSegments(makeAvgLineGeo(avRef.current, H_BOT), avgMat))
 
+    // ─── Socle — near-invisible, dark navy ────────────────────────────────
     scene.add(new THREE.LineSegments(
       makeSocleGeo(),
-      new THREE.LineBasicMaterial({ color: 0x606060 }),
+      new THREE.LineBasicMaterial({ color: 0x606060, transparent: true, opacity: 0.25 }),
     ))
 
+    // ─── Hitboxes (invisible pie-slices for raycasting) ───────────────────
     const hitboxes: THREE.Mesh[] = []
     for (let fi = 0; fi < N_SECTORS; fi++) {
       const hb = makeSectorHitbox(fi)
@@ -789,15 +765,19 @@ export default function MyoOrb({
           const mat    = mats[fi]
           const dimmed = sel !== null && fi !== sel
           mat.opacity     = dimmed ? 0.28 : 1.0
-          mat.transparent = dimmed
+          mat.transparent = fi !== sel
           mat.needsUpdate = true
         }
-        avgMat.opacity     = sel !== null ? 0.20 : 1.0
-        avgMat.transparent = sel !== null
-        avgMat.needsUpdate = true
+        const av = avgMatRef.current
+        if (av !== null) {
+          av.opacity     = sel !== null ? 0.20 : 0.55
+          av.transparent = true
+          av.needsUpdate = true
+        }
       }
 
       renderer.render(scene, camera)
+      // REQUIRED: must be called after every renderer.render() in the RAF loop
       gl.endFrameEXP()
     }
     rafRef.current = requestAnimationFrame(tick)
@@ -814,7 +794,7 @@ export default function MyoOrb({
   return (
     <Animated.View style={[{ width: S }, mountAnim]}>
 
-      {/* ── Orb 3D (S×S, clippé) ── */}
+      {/* Orb 3D (S×S, clippé) */}
       <View style={{ width: S, height: S }}>
         {/* Canvas GL + labels + touch */}
         <View style={[styles.orbContainer, { width: S, height: S }]}>
@@ -850,14 +830,14 @@ export default function MyoOrb({
         </View>
       </View>
 
-      {/* ── Score arc dégradé centré sous l'orb ── */}
+      {/* Score arc dégradé centré sous l'orb */}
       {showScore && (
         <View style={styles.scoreArcRow}>
           <ScoreArcGradient score={globalScore} size={100} strokeWidth={8} />
         </View>
       )}
 
-      {/* ── Panneau détail — SOUS l'orb, flux normal ── */}
+      {/* Panneau détail — SOUS l'orb, flux normal */}
       {selectedFamily !== null && (
         <Animated.View
           style={[styles.detailPanel, panelAnim]}

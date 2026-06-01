@@ -12,8 +12,11 @@ import {
   KeyboardAvoidingView,
   useWindowDimensions,
   Platform,
+  Share,
+  ActionSheetIOS,
+  Alert,
 } from 'react-native'
-import Animated, { useSharedValue, useAnimatedStyle, useAnimatedReaction, runOnJS, withRepeat, withSequence, withTiming, withDelay, Easing } from 'react-native-reanimated'
+import Animated, { useSharedValue, useAnimatedStyle, useAnimatedReaction, runOnJS, withRepeat, withSequence, withTiming, withDelay, Easing, cancelAnimation } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Share2, MoreVertical, Heart, MessageCircle, X, Send, HelpCircle } from 'lucide-react-native'
@@ -21,7 +24,7 @@ import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, font, duration } from '@/constants/theme'
 import { prBadgeRecipe, type PrType } from '@/constants/recipes'
-import MyoOrb, { FAMILY_NAMES, SECTOR_COLORS_HEX } from '@/app/workout/myo-orb'
+import MyoChart, { FAMILY_NAMES, SECTOR_COLORS_HEX } from '@/app/workout/myo-chart'
 import MyoGlossaryScreen from '@/app/myo-glossary'
 import { sessionValuesFromSignature } from '@/lib/myo'
 import { Zap, Flame, Dumbbell, Trophy } from 'lucide-react-native'
@@ -511,7 +514,8 @@ export default function FeedDetailScreen(): React.JSX.Element {
 
   // Animation volume total 0 → valeur finale
   const volumeAnim = useSharedValue(0)
-  const [displayVolume, setDisplayVolume] = useState<number | null>(null)
+  const [displayVolume, setDisplayVolume] = useState<number>(0)
+  const [volumeReady, setVolumeReady] = useState<boolean>(false)
 
   useAnimatedReaction(
     () => volumeAnim.value,
@@ -520,8 +524,13 @@ export default function FeedDetailScreen(): React.JSX.Element {
 
   useEffect(() => {
     if (workout?.total_volume_kg == null) return
+    cancelAnimation(volumeAnim)
     volumeAnim.value = 0
-    volumeAnim.value = withTiming(workout.total_volume_kg, { duration: 500, easing: Easing.bezier(0.16, 1, 0.3, 1) })
+    setVolumeReady(true)
+    volumeAnim.value = withSequence(
+      withTiming(0, { duration: 0 }),
+      withTiming(workout.total_volume_kg, { duration: 1800, easing: Easing.bezier(0.16, 1, 0.3, 1) })
+    )
   }, [workout?.id])
 
   // Animation hint "GUIDE" sur le bouton HelpCircle
@@ -802,6 +811,39 @@ export default function FeedDetailScreen(): React.JSX.Element {
 
   const s = buildStyles(colors)
 
+  const handleShare = useCallback(async () => {
+    const title = workout?.title ?? 'Séance'
+    const vol = workout?.total_volume_kg != null ? `${Math.round(workout.total_volume_kg)} kg` : ''
+    const date = workout ? formatDate(workout.started_at) : ''
+    try {
+      await Share.share({
+        message: `${title} · ${vol} · ${date} — via Orava`,
+        title,
+      })
+    } catch {}
+  }, [workout])
+
+  const handleMenu = useCallback(() => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Annuler', 'Copier le lien', 'Signaler'],
+          destructiveButtonIndex: 2,
+          cancelButtonIndex: 0,
+        },
+        (idx) => {
+          if (idx === 1) void Share.share({ message: `orava://feed/${id}` })
+        }
+      )
+    } else {
+      Alert.alert('Options', undefined, [
+        { text: 'Copier le lien', onPress: () => Share.share({ message: `orava://feed/${id}` }) },
+        { text: 'Signaler', style: 'destructive', onPress: () => {} },
+        { text: 'Annuler', style: 'cancel' },
+      ])
+    }
+  }, [id])
+
   if (loading) {
     return (
       <View style={s.loader}>
@@ -845,7 +887,7 @@ export default function FeedDetailScreen(): React.JSX.Element {
         decelerationRate={0.96}
       >
       <View>
-        {/* ── Header ── */}
+        {/* ── Header compact (back + user + actions) ── */}
         <View style={[s.header, { paddingTop: insets.top + spacing.s2 }]}>
           <Pressable
             style={({ pressed }) => [s.backBtn, pressed && { opacity: 0.6 }]}
@@ -854,27 +896,12 @@ export default function FeedDetailScreen(): React.JSX.Element {
             accessibilityLabel="Retour"
             hitSlop={8}
           >
-            <ChevronLeft size={24} color={colors.textPrimary} />
+            <ChevronLeft size={22} color={colors.textPrimary} />
           </Pressable>
 
-          <Text style={s.headerDate} numberOfLines={1}>
-            {formatDate(workout.started_at)}
-          </Text>
-
-          <Pressable style={({ pressed }) => [s.headerBtn, pressed && { opacity: 0.6 }]} hitSlop={8}>
-            <Share2 size={20} color={colors.textPrimary} />
-          </Pressable>
-        </View>
-
-        {/* ── User row ── */}
-        <View style={s.userRow}>
           <View style={[s.userAvatar, { backgroundColor: colors.backgroundSecondary }]}>
             {workout.user.avatar_url ? (
-              <Image
-                source={{ uri: workout.user.avatar_url }}
-                style={s.userAvatarImg}
-                accessibilityLabel="Avatar utilisateur"
-              />
+              <Image source={{ uri: workout.user.avatar_url }} style={s.userAvatarImg} accessibilityLabel="Avatar" />
             ) : (
               <Text style={s.userAvatarInit}>
                 {(workout.user.full_name?.[0] ?? workout.user.username?.[0] ?? 'U').toUpperCase()}
@@ -886,19 +913,26 @@ export default function FeedDetailScreen(): React.JSX.Element {
             <Text style={s.userName} numberOfLines={1}>
               {workout.user.full_name || workout.user.username || 'Utilisateur'}
             </Text>
-            {workout.location_city ? (
-              <Text style={s.userHandle} numberOfLines={1}>
-                {workout.location_city}
-              </Text>
-            ) : (
-              <Text style={s.userHandle} numberOfLines={1}>
-                @{workout.user.username || 'user'}
-              </Text>
-            )}
+            <Text style={s.userHandle} numberOfLines={1}>
+              {formatDate(workout.started_at)}
+            </Text>
           </View>
 
-          <Pressable style={({ pressed }) => [s.menuBtn, pressed && { opacity: 0.6 }]} hitSlop={8}>
-            <MoreVertical size={20} color={colors.textSecondary} />
+          <Pressable
+            style={({ pressed }) => [s.headerBtn, pressed && { opacity: 0.6 }]}
+            onPress={() => void handleShare()}
+            hitSlop={8}
+            accessibilityLabel="Partager"
+          >
+            <Share2 size={18} color={colors.textSecondary} />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [s.headerBtn, pressed && { opacity: 0.6 }]}
+            onPress={handleMenu}
+            hitSlop={8}
+            accessibilityLabel="Plus d'options"
+          >
+            <MoreVertical size={18} color={colors.textSecondary} />
           </Pressable>
         </View>
 
@@ -914,7 +948,7 @@ export default function FeedDetailScreen(): React.JSX.Element {
           <Text style={s.heroLabel}>VOLUME TOTAL</Text>
           <View style={s.heroRow}>
             <Text style={[s.heroValue, { color: colors.accent }]} allowFontScaling={false}>
-              {displayVolume != null ? formatVolume(displayVolume) : formatVolume(workout.total_volume_kg)}
+              {volumeReady ? formatVolume(displayVolume) : formatVolume(workout.total_volume_kg)}
             </Text>
           </View>
           <View style={s.statChips}>
@@ -984,12 +1018,11 @@ export default function FeedDetailScreen(): React.JSX.Element {
             accessibilityLabel="Voir le graphe Myo en grand"
           >
             <View pointerEvents="none" style={s.myoMiniOrb}>
-              <MyoOrb
+              <MyoChart
                 sessionValues={sessionValues}
                 size={140}
                 selectedFamily={null}
                 onFamilySelect={() => {}}
-                bgColor={colors.backgroundSecondary}
                 showScore={false}
                 showLabels={false}
               />
@@ -1193,12 +1226,11 @@ export default function FeedDetailScreen(): React.JSX.Element {
             contentContainerStyle={s.myoFsOrb}
             showsVerticalScrollIndicator={false}
           >
-            <MyoOrb
+            <MyoChart
               sessionValues={sessionValues}
               size={screenWidth - 32}
               selectedFamily={selectedFamily}
               onFamilySelect={(fi) => setSelectedFamily(fi)}
-              bgColor={colors.background}
             />
           </ScrollView>
           <View style={[s.familySelector, { paddingHorizontal: spacing.s4, paddingBottom: spacing.s3 }]}>
@@ -1285,77 +1317,62 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       paddingBottom: spacing.s12,
     },
 
-    // Header
+    // Header compact
     header: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: spacing.s4,
-      paddingBottom: spacing.s4,
+      paddingHorizontal: spacing.s3,
+      paddingBottom: spacing.s3,
+      marginBottom: spacing.s4,
+      gap: spacing.s2,
     },
     backBtn: {
-      width: 44,
-      height: 44,
+      width: 36,
+      height: 36,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    headerDate: {
-      ...typography.subtitle,
-      fontFamily: font.bold,
-      color: colors.textPrimary,
-      flex: 1,
-      textAlign: 'center',
+      flexShrink: 0,
     },
     headerBtn: {
-      width: 44,
-      height: 44,
+      width: 36,
+      height: 36,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-
-    // User row
-    userRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.s4,
-      marginBottom: spacing.s6,
-      gap: spacing.s3,
+      flexShrink: 0,
     },
     userAvatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
       overflow: 'hidden',
+      flexShrink: 0,
     },
     userAvatarImg: {
       width: '100%',
       height: '100%',
     },
     userAvatarInit: {
-      ...typography.caption,
+      fontSize: 13,
       fontFamily: font.bold,
       color: colors.textPrimary,
     },
     userInfo: {
       flex: 1,
+      minWidth: 0,
     },
     userName: {
-      ...typography.body,
+      fontSize: 13,
       fontFamily: font.bold,
       color: colors.textPrimary,
+      letterSpacing: -0.1,
     },
     userHandle: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      marginTop: spacing.s1,
-    },
-    menuBtn: {
-      width: 44,
-      height: 44,
-      alignItems: 'center',
-      justifyContent: 'center',
+      fontSize: 11,
+      fontFamily: font.regular,
+      color: colors.textTertiary,
+      marginTop: 1,
     },
 
     // Titre séance

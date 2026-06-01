@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AppState,
   AppStateStatus,
@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { SkipForward } from 'lucide-react-native'
-import Svg, { Circle } from 'react-native-svg'
+import { Canvas, Path, Skia } from '@shopify/react-native-skia'
 import { storage } from '@/lib/storage'
 import Animated, {
   useSharedValue,
@@ -32,10 +32,25 @@ const PRESETS = [
   { label: '3min', value: 180 },
 ]
 
-const ARC_DIAMETER = 260
-const STROKE_WIDTH = 8
+const ARC_DIAMETER  = 260
+const STROKE_WIDTH  = 8
 const RADIUS_CIRCLE = (ARC_DIAMETER / 2) - STROKE_WIDTH
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS_CIRCLE
+const ARC_CX        = ARC_DIAMETER / 2
+const ARC_CY        = ARC_DIAMETER / 2
+
+// Full-circle track path — static, computed once
+const TRACK_PATH = (() => {
+  const p = Skia.Path.Make()
+  const N = 80
+  for (let i = 0; i <= N; i++) {
+    const a = ((i / N) * 2 - 0.5) * Math.PI
+    const x = ARC_CX + RADIUS_CIRCLE * Math.cos(a)
+    const y = ARC_CY + RADIUS_CIRCLE * Math.sin(a)
+    if (i === 0) p.moveTo(x, y)
+    else p.lineTo(x, y)
+  }
+  return p
+})()
 
 function formatTime(seconds: number): string {
   const s = Math.max(0, Math.ceil(seconds))
@@ -145,7 +160,27 @@ export default function TimerScreen() {
   }, [finished, paused, remaining, startTick, clearTick])
 
   const progress = totalRef.current > 0 ? remaining / totalRef.current : 0
-  const strokeDashoffset = CIRCUMFERENCE * (1 - progress)
+
+  const progressPath = useMemo(() => {
+    const p = Skia.Path.Make()
+    if (progress <= 0) return p
+    const N = Math.max(4, Math.round(progress * 80))
+    const startRad = -Math.PI / 2
+    const sweepRad  = progress * 2 * Math.PI
+    for (let i = 0; i <= N; i++) {
+      const a = startRad + (i / N) * sweepRad
+      const x = ARC_CX + RADIUS_CIRCLE * Math.cos(a)
+      const y = ARC_CY + RADIUS_CIRCLE * Math.sin(a)
+      if (i === 0) p.moveTo(x, y)
+      else p.lineTo(x, y)
+    }
+    return p
+  }, [progress])
+
+  const arcColor =
+    progress < 0.15 ? colors.error :
+    progress < 0.30 ? '#FF6B00'    :
+    colors.accent
 
   const handleSubtract = useCallback(() => {
     if (finished) return
@@ -185,34 +220,24 @@ export default function TimerScreen() {
           activeOpacity={0.85}
           style={styles.arcWrapper}
         >
-          <Svg
-            width={ARC_DIAMETER}
-            height={ARC_DIAMETER}
-            style={styles.svg}
-          >
-            {/* Track gris */}
-            <Circle
-              cx={ARC_DIAMETER / 2}
-              cy={ARC_DIAMETER / 2}
-              r={RADIUS_CIRCLE}
-              stroke={colors.backgroundTertiary}
+          <Canvas style={[styles.svg, { width: ARC_DIAMETER, height: ARC_DIAMETER }]}>
+            <Path
+              path={TRACK_PATH}
+              style="stroke"
               strokeWidth={STROKE_WIDTH}
-              fill="none"
+              color={colors.backgroundTertiary}
+              strokeCap="round"
             />
-            {/* Arc de progression jaune */}
-            <Circle
-              cx={ARC_DIAMETER / 2}
-              cy={ARC_DIAMETER / 2}
-              r={RADIUS_CIRCLE}
-              stroke={colors.accent}
-              strokeWidth={STROKE_WIDTH}
-              fill="none"
-              strokeDasharray={CIRCUMFERENCE}
-              strokeDashoffset={strokeDashoffset}
-              strokeLinecap="round"
-              transform={`rotate(-90, ${ARC_DIAMETER / 2}, ${ARC_DIAMETER / 2})`}
-            />
-          </Svg>
+            {progress > 0 && (
+              <Path
+                path={progressPath}
+                style="stroke"
+                strokeWidth={STROKE_WIDTH}
+                color={arcColor}
+                strokeCap="round"
+              />
+            )}
+          </Canvas>
 
           {/* Temps centré dans l'anneau */}
           <View style={styles.arcCenter} pointerEvents="none">

@@ -26,8 +26,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Haptics from 'expo-haptics'
 import { Plus, Trash2, X, Search, Zap, Flame, Trophy, Dumbbell, Check, ChevronLeft } from 'lucide-react-native'
 import Svg, { Circle } from 'react-native-svg'
+import { Canvas, Path, Skia, LinearGradient as SkiaLinearGradient, vec } from '@shopify/react-native-skia'
 import { useTheme } from '@/context/ThemeContext'
-import { spacing, radius, typography, touchTarget, spring } from '@/constants/theme'
+import { spacing, radius, typography, touchTarget, spring, font } from '@/constants/theme'
 import {
   useWorkout,
   WorkoutExercise,
@@ -40,6 +41,94 @@ import { supabase } from '@/lib/supabase'
 import { getGhostReference, type GhostSet } from '@/lib/ghost'
 import { getLastLocalSet } from '@/lib/db'
 import WheelPickerModal from './wheel-picker-modal'
+
+const { width: SCREEN_W } = Dimensions.get('window')
+
+// ─── GhostCompareBar ─────────────────────────────────────────────────────────
+
+function GhostCompareBar({
+  ghostWeight,
+  currentWeight,
+  ghostBeaten,
+}: {
+  ghostWeight: number
+  currentWeight: number
+  ghostBeaten: boolean
+}) {
+  const W      = SCREEN_W - spacing.s4 * 2
+  const H      = 4
+  const maxW   = Math.max(ghostWeight, currentWeight, 1)
+  const ghostPx = Math.min((ghostWeight / maxW) * W, W)
+  const currPx  = Math.min((currentWeight / maxW) * W, W)
+
+  const barProg = useSharedValue(0)
+  useEffect(() => {
+    barProg.value = 0
+    barProg.value = withSpring(1, { damping: 18, stiffness: 200 })
+  }, [currentWeight])
+
+  const currStyle = useAnimatedStyle(() => ({
+    width: Math.max(barProg.value * currPx, H),
+  }))
+
+  const trackPath = useMemo(() => {
+    const p = Skia.Path.Make()
+    p.moveTo(0, 0); p.lineTo(W, 0); p.lineTo(W, H); p.lineTo(0, H); p.close()
+    return p
+  }, [W])
+
+  const delta  = Math.round((currentWeight - ghostWeight) * 10) / 10
+  const beaten = ghostBeaten
+
+  return (
+    <View style={{ paddingHorizontal: spacing.s4, paddingTop: spacing.s1, paddingBottom: spacing.s2 }}>
+      {/* Barre */}
+      <View style={{ height: H, borderRadius: H / 2, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.06)' }}>
+        {/* Marqueur fantôme */}
+        <View style={{
+          position: 'absolute',
+          left: ghostPx - 1,
+          top: -1,
+          width: 2,
+          height: H + 2,
+          backgroundColor: 'rgba(255,255,255,0.30)',
+          borderRadius: 1,
+        }} />
+        {/* Barre courante */}
+        <Animated.View style={[{ height: H, borderRadius: H / 2, overflow: 'hidden' }, currStyle]}>
+          <Canvas style={{ width: W, height: H }}>
+            <Path path={trackPath} style="fill">
+              <SkiaLinearGradient
+                start={vec(0, 0)}
+                end={vec(W, 0)}
+                colors={beaten
+                  ? ['rgba(0,230,115,0.45)', '#00E673']
+                  : delta < 0
+                  ? ['rgba(255,59,48,0.35)', 'rgba(255,59,48,0.70)']
+                  : ['rgba(255,255,255,0.22)', 'rgba(255,255,255,0.50)']}
+              />
+            </Path>
+          </Canvas>
+        </Animated.View>
+      </View>
+      {/* Label delta */}
+      <Text style={{
+        color: beaten ? '#00E673' : delta < 0 ? 'rgba(255,59,48,0.80)' : 'rgba(255,255,255,0.32)',
+        fontSize: 11,
+        fontFamily: font.medium,
+        marginTop: spacing.s1,
+        letterSpacing: 0.3,
+        fontVariant: ['tabular-nums'],
+      }}>
+        {delta > 0
+          ? `↑ +${delta} kg vs fantôme`
+          : delta < 0
+          ? `↓ ${Math.abs(delta)} kg vs fantôme`
+          : `= fantôme · ${ghostWeight} kg`}
+      </Text>
+    </View>
+  )
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -139,9 +228,10 @@ interface SetRowProps {
   set: WorkoutSet
   onDelete: () => void
   colors: ReturnType<typeof useTheme>['colors']
+  ghostVolume?: number
 }
 
-function SetRow({ set, onDelete, colors }: SetRowProps) {
+function SetRow({ set, onDelete, colors, ghostVolume }: SetRowProps) {
   const translateX = useSharedValue(0)
   const baseOffset = useSharedValue(0)
   const rowHeight = useSharedValue<number>(touchTarget.comfort)
@@ -223,6 +313,21 @@ function SetRow({ set, onDelete, colors }: SetRowProps) {
               <Text style={[styles.prBadgeText, { color: prColor }]}>
                 {prLevel === 'gold' ? 'PR' : prLevel === 'silver' ? '2e' : '3e'}
               </Text>
+            </View>
+          )}
+          {ghostVolume !== undefined && ghostVolume > 0 && (
+            <View style={styles.setVolumeBar}>
+              <View
+                style={[
+                  styles.setVolumeFill,
+                  {
+                    width: `${Math.min((set.weight_kg * set.reps / ghostVolume) * 100, 100)}%` as `${number}%`,
+                    backgroundColor: set.weight_kg * set.reps >= ghostVolume
+                      ? '#00E673'
+                      : 'rgba(255,59,48,0.55)',
+                  },
+                ]}
+              />
             </View>
           )}
         </Animated.View>
@@ -1031,6 +1136,7 @@ export default function SessionScreen() {
                   set={set}
                   onDelete={() => handleRemoveSet(idx)}
                   colors={colors}
+                  ghostVolume={ghostRef?.volume}
                 />
               ))}
             </ScrollView>
@@ -1061,6 +1167,15 @@ export default function SessionScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Ghost compare bar */}
+          {ghostEnabled && ghostRef !== null && (
+            <GhostCompareBar
+              ghostWeight={ghostRef.weight_kg}
+              currentWeight={draftWeight}
+              ghostBeaten={ghostBeaten}
+            />
+          )}
 
           {/* LOG SET button — sticky at bottom */}
           <View style={[styles.logSetWrapper, { paddingBottom: Math.max(insets.bottom, spacing.s4) }]}>
@@ -1460,5 +1575,21 @@ const styles = StyleSheet.create({
     ...typography.body,
     textAlign: 'center',
     marginTop: spacing.s8,
+  },
+
+  // ── Ghost volume indicator in set row ──
+  setVolumeBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 1,
+    overflow: 'hidden',
+  },
+  setVolumeFill: {
+    height: 2,
+    borderRadius: 1,
   },
 })

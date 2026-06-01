@@ -67,7 +67,9 @@
       "Bash(git restore *)",
       "Bash(python3)",
       "Bash(git commit -m ' *)",
-      "Bash(powershell -Command \"Select-String -Path 'app/**/*.tsx','app/*.tsx' -Pattern 'LogoOrava|OravaLogo|orava_logo|width: 48.*borderRadius: 24|width.*48.*borderRadius.*24' -Recurse | Select-Object Filename, LineNumber, Line\")"
+      "Bash(powershell -Command \"Select-String -Path 'app/**/*.tsx','app/*.tsx' -Pattern 'LogoOrava|OravaLogo|orava_logo|width: 48.*borderRadius: 24|width.*48.*borderRadius.*24' -Recurse | Select-Object Filename, LineNumber, Line\")",
+      "PowerShell(Remove-Item \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\\\\app\\\\workout\\\\_myo_impl_a.tsx\" -Force -Confirm:$false)",
+      "PowerShell(Remove-Item \"c:\\\\Users\\\\SofianeBESSILA\\\\orava\\\\mobile_app\\\\app\\\\workout\\\\_myo_impl_b.tsx\" -Force -Confirm:$false)"
     ],
     "additionalDirectories": [
       "c:\\Users\\SofianeBESSILA\\orava\\mobile_app\\app\\workout"

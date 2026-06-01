@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Dimensions,
   View,
   Text,
   FlatList,
@@ -8,6 +9,7 @@ import {
   StatusBar,
   ScrollView,
 } from 'react-native'
+import { Canvas, Circle as SkiaCircle, RadialGradient, vec } from '@shopify/react-native-skia'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ChevronLeft, Zap, Flame, Shield } from 'lucide-react-native'
@@ -263,6 +265,32 @@ const slotSt = StyleSheet.create({
   },
 })
 
+// ─── PodiumGlow ──────────────────────────────────────────────────────────────
+
+const CARD_W = Dimensions.get('window').width - spacing.s4 * 2
+
+function PodiumGlow({ level }: { level: PrLevel }): React.JSX.Element {
+  const COLS: Record<PrLevel, string> = { gold: '#FAC775', silver: '#C0C0C0', bronze: '#CD7F32' }
+  const c   = COLS[level]
+  const r   = CARD_W / 2
+  const H   = 72
+
+  return (
+    <Canvas
+      style={{ position: 'absolute', top: 0, left: 0, right: 0, height: H }}
+      pointerEvents="none"
+    >
+      <SkiaCircle cx={CARD_W / 2} cy={0} r={r}>
+        <RadialGradient
+          c={vec(CARD_W / 2, 0)}
+          r={r}
+          colors={[`${c}28`, `${c}00`]}
+        />
+      </SkiaCircle>
+    </Canvas>
+  )
+}
+
 // ─── ExerciseCard (inline) ────────────────────────────────────────────────────
 
 interface ExerciseCardProps {
@@ -277,6 +305,9 @@ function ExerciseCard({ item, colors }: ExerciseCardProps): React.JSX.Element {
 
   return (
     <View style={[cardSt.card, { backgroundColor: colors.backgroundSecondary }]}>
+
+      {/* Glow pour les cards gold */}
+      {hasGold && <PodiumGlow level="gold" />}
 
       {/* En-tête exercice */}
       <View style={cardSt.header}>

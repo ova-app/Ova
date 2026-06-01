@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Animated as RNAnimated,
   Dimensions,
@@ -28,12 +28,12 @@ import Animated, {
   Easing,
   cancelAnimation,
 } from 'react-native-reanimated'
-import Svg, { Path, Circle, Rect } from 'react-native-svg'
+import Svg, { Path, Circle } from 'react-native-svg'
+import { Canvas, Path as SkiaPath, Skia, LinearGradient as SkiaLinearGradient, vec } from '@shopify/react-native-skia'
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle)
 const AnimatedPath = Animated.createAnimatedComponent(Path)
 const RNAnimatedSvgPath = RNAnimated.createAnimatedComponent(Path)
-const AnimatedRect = Animated.createAnimatedComponent(Rect)
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Heart, MessageCircle, RefreshCw, MapPin, X, Zap, Flame, Trophy } from 'lucide-react-native'
 import { useTheme } from '@/context/ThemeContext'
@@ -305,22 +305,37 @@ function PRPill({ prs }: { prs: WorkoutPRSummary }) {
 
 function SkeletonCard() {
   const { colors } = useTheme()
-  const shimmer = useSharedValue(0.4)
+  const CARD_W  = Dimensions.get('window').width - spacing.s4 * 2
+  const CARD_H  = 88
+  const BEAM_W  = 220
+
+  const shimX = useSharedValue(-(BEAM_W + 16))
 
   useEffect(() => {
-    shimmer.value = withRepeat(
-      withTiming(0.8, { duration: 700, easing: Easing.inOut(Easing.sin) }),
+    shimX.value = -(BEAM_W + 16)
+    shimX.value = withRepeat(
+      withTiming(CARD_W + 16, { duration: 1100, easing: Easing.bezier(0.37, 0, 0.63, 1) }),
       -1,
-      true
+      false,
     )
   }, [])
 
-  const shimmerStyle = useAnimatedStyle(() => ({
-    opacity: shimmer.value,
+  const shimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shimX.value }],
   }))
 
+  const beamPath = useMemo(() => {
+    const p = Skia.Path.Make()
+    p.moveTo(0, 0)
+    p.lineTo(BEAM_W, 0)
+    p.lineTo(BEAM_W, CARD_H)
+    p.lineTo(0, CARD_H)
+    p.close()
+    return p
+  }, [])
+
   return (
-    <Animated.View style={[styles.skeletonCard, { backgroundColor: colors.backgroundSecondary }, shimmerStyle]}>
+    <View style={[styles.skeletonCard, { backgroundColor: colors.backgroundSecondary, overflow: 'hidden' }]}>
       <View style={styles.skeletonRow}>
         <View style={[styles.skeletonAvatar, { backgroundColor: colors.backgroundTertiary }]} />
         <View style={{ flex: 1, gap: 8 }}>
@@ -328,7 +343,22 @@ function SkeletonCard() {
           <View style={[styles.skeletonLine, { width: '35%', height: 10, backgroundColor: colors.backgroundTertiary }]} />
         </View>
       </View>
-    </Animated.View>
+      <Animated.View
+        style={[{ position: 'absolute', top: 0, left: 0, width: BEAM_W, height: CARD_H }, shimStyle]}
+        pointerEvents="none"
+      >
+        <Canvas style={{ width: BEAM_W, height: CARD_H }}>
+          <SkiaPath path={beamPath} style="fill">
+            <SkiaLinearGradient
+              start={vec(0, 0)}
+              end={vec(BEAM_W, 0)}
+              colors={['rgba(18,18,26,0)', 'rgba(60,60,80,0.55)', 'rgba(18,18,26,0)']}
+              positions={[0, 0.5, 1]}
+            />
+          </SkiaPath>
+        </Canvas>
+      </Animated.View>
+    </View>
   )
 }
 
@@ -645,92 +675,7 @@ function CommentsModal({
   )
 }
 
-// ─── Spark Border ────────────────────────────────────────────────────────────
-// Deux étincelles opposées : coin haut-droit → bas-gauche et coin bas-gauche → haut-droit
 
-function SparkBorder({ width, height }: { width: number; height: number }) {
-  const { colors } = useTheme()
-  const R = 12  // = radius.md
-  // Perimeter du rect arrondi : côtés droits + 4 quarts de cercle = 4*(π/2*R) = 2πR
-  const perimeter = 2 * (width + height) + (2 * Math.PI - 8) * R
-  const SPARK_LEN = 16
-  // Chemin SVG d'un Rect rx=R : démarre à (x+R, y) haut-gauche, sens horaire.
-  // Segment haut = W-2R, arc HR = πR/2, segment droit = H-2R, arc BR = πR/2, etc.
-  const W = width - 2   // dimensions internes (x=1, y=1)
-  const H = height - 2
-  // Coin haut-droit = fin du segment haut (avant l'arc)
-  const posCoinHR = W - 2 * R
-  // Coin bas-gauche = après segment haut + arc HR + segment droit + arc BR + segment bas + arc BG
-  const posCoinBL = (W - 2 * R) + (Math.PI * R / 2) + (H - 2 * R) + (Math.PI * R / 2) + (W - 2 * R)
-
-  // Étincelle 1 : part du coin haut-droit, avance en sens horaire
-  // Étincelle 2 : part du coin bas-gauche, avance en sens horaire
-  // Chacune parcourt la moitié du périmètre et s'arrête au coin opposé
-  const offset1 = useSharedValue(-posCoinHR)
-  const opacity1 = useSharedValue(0)
-  const offset2 = useSharedValue(-posCoinBL)
-  const opacity2 = useSharedValue(0)
-
-  useEffect(() => {
-    function triggerSpark() {
-      cancelAnimation(offset1)
-      cancelAnimation(offset2)
-      cancelAnimation(opacity1)
-      cancelAnimation(opacity2)
-
-      offset1.value = -posCoinHR
-      offset2.value = -posCoinBL
-      opacity1.value = 0
-      opacity2.value = 0
-
-      offset1.value = withTiming(-(posCoinHR + perimeter / 2), { duration: 3000, easing: Easing.linear })
-      offset2.value = withTiming(-(posCoinBL + perimeter / 2), { duration: 3000, easing: Easing.linear })
-
-      const fade = withSequence(
-        withTiming(0.25, { duration: 300 }),
-        withTiming(0.25, { duration: 800 }),
-        withTiming(0, { duration: 300 })
-      )
-      opacity1.value = fade
-      opacity2.value = fade
-    }
-
-    const initial = setTimeout(triggerSpark, 1667)
-    const interval = setInterval(triggerSpark, 5000)
-    return () => { clearTimeout(initial); clearInterval(interval) }
-  }, [perimeter, posCoinHR, posCoinBL])
-
-  const animProps1 = useAnimatedProps(() => ({ strokeDashoffset: offset1.value }))
-  const animProps2 = useAnimatedProps(() => ({ strokeDashoffset: offset2.value }))
-  const style1 = useAnimatedStyle(() => ({ opacity: opacity1.value }))
-  const style2 = useAnimatedStyle(() => ({ opacity: opacity2.value }))
-
-  const rectProps = {
-    x: 1, y: 1,
-    width: width - 2, height: height - 2,
-    rx: R, ry: R,
-    fill: 'none' as const,
-    stroke: colors.accent,
-    strokeWidth: 1.5,
-    strokeDasharray: `${SPARK_LEN} ${perimeter - SPARK_LEN}`,
-    strokeLinecap: 'round' as const,
-  }
-
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <Animated.View style={[StyleSheet.absoluteFill, style1]}>
-        <Svg width={width} height={height}>
-          <AnimatedRect {...rectProps} animatedProps={animProps1} />
-        </Svg>
-      </Animated.View>
-      <Animated.View style={[StyleSheet.absoluteFill, style2]}>
-        <Svg width={width} height={height}>
-          <AnimatedRect {...rectProps} animatedProps={animProps2} />
-        </Svg>
-      </Animated.View>
-    </View>
-  )
-}
 
 // ─── Feed Item ────────────────────────────────────────────────────────────────
 
@@ -743,7 +688,6 @@ interface FeedItemProps {
 
 function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemProps) {
   const { colors } = useTheme()
-  const [cardLayout, setCardLayout] = useState<{ width: number; height: number } | null>(null)
   const [likesModalVisible, setLikesModalVisible] = useState(false)
   const [commentsModalVisible, setCommentsModalVisible] = useState(false)
   const [likes, setLikes] = useState<Like[]>([])
@@ -880,7 +824,6 @@ function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemPro
     <>
       <View
         style={{ marginBottom: spacing.s3 }}
-        onLayout={(e) => setCardLayout({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}
       >
       <TouchableOpacity
         activeOpacity={0.7}
@@ -1023,7 +966,6 @@ function FeedItem({ item, currentUserId, onLike, onNavigateDetail }: FeedItemPro
         </View>
 
       </TouchableOpacity>
-      {cardLayout && <SparkBorder width={cardLayout.width} height={cardLayout.height} />}
       </View>
 
       {/* Modals */}
@@ -1978,11 +1920,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.s3,
     borderRadius: radius.md,
     marginBottom: spacing.s3,
-    shadowColor: '#FFDD00',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 2,
-    elevation: 2,
   },
   row1: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Image,
   Alert,
+  RefreshControl,
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { ChevronLeft, Camera, AlertCircle, Calendar } from 'lucide-react-native'
@@ -119,52 +120,61 @@ export default function EditProfileScreen(): React.JSX.Element {
   const [fullNameFocused, setFullNameFocused] = useState(false)
   const [showPoidsRuler, setShowPoidsRuler] = useState(false)
   const [showTailleRuler, setShowTailleRuler] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
-  useEffect(() => {
-    async function loadProfile(): Promise<void> {
-      try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) { router.replace('/auth/login'); return }
-        setUserId(user.id)
+  const loadProfile = useCallback(async (isRefresh = false): Promise<void> => {
+    if (!isRefresh) setLoading(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { router.replace('/auth/login'); return }
+      setUserId(user.id)
 
-        const { data, error } = await supabase
-          .from('users')
-          .select('username, full_name, avatar_url, date_naissance, height_cm')
-          .eq('id', user.id)
-          .single()
+      const { data, error } = await supabase
+        .from('users')
+        .select('username, full_name, avatar_url, date_naissance, height_cm')
+        .eq('id', user.id)
+        .single()
 
-        if (error) throw error
+      if (error) throw error
 
-        const { data: metricsData } = await supabase
-          .from('body_metrics')
-          .select('weight_kg')
-          .eq('user_id', user.id)
-          .order('measured_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
+      const { data: metricsData } = await supabase
+        .from('body_metrics')
+        .select('weight_kg')
+        .eq('user_id', user.id)
+        .order('measured_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-        const dateParts = data.date_naissance ? isoToDateParts(data.date_naissance) : { day: '', month: '', year: '' }
+      const dateParts = data.date_naissance ? isoToDateParts(data.date_naissance) : { day: '', month: '', year: '' }
 
-        setAvatarUrl((data as { avatar_url?: string | null }).avatar_url ?? null)
-        setForm({
-          username: (data as { username?: string | null }).username ?? '',
-          fullName: (data as { full_name?: string | null }).full_name ?? '',
-          dateDay: dateParts.day,
-          dateMonth: dateParts.month,
-          dateYear: dateParts.year,
-          poidsKg: metricsData?.weight_kg ? String(metricsData.weight_kg) : '',
-          tailleCm: (data as { height_cm?: number | null }).height_cm
-            ? String((data as { height_cm?: number | null }).height_cm)
-            : '',
-        })
-      } catch {
-        setErrors({ global: 'Impossible de charger le profil.' })
-      } finally {
-        setLoading(false)
-      }
+      setAvatarUrl((data as { avatar_url?: string | null }).avatar_url ?? null)
+      setAvatarLocalUri(null)
+      setForm({
+        username: (data as { username?: string | null }).username ?? '',
+        fullName: (data as { full_name?: string | null }).full_name ?? '',
+        dateDay: dateParts.day,
+        dateMonth: dateParts.month,
+        dateYear: dateParts.year,
+        poidsKg: metricsData?.weight_kg ? String(metricsData.weight_kg) : '',
+        tailleCm: (data as { height_cm?: number | null }).height_cm
+          ? String((data as { height_cm?: number | null }).height_cm)
+          : '',
+      })
+      setErrors({})
+    } catch {
+      setErrors({ global: 'Impossible de charger le profil.' })
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
     }
-    void loadProfile()
   }, [router])
+
+  useEffect(() => { void loadProfile() }, [loadProfile])
+
+  const onRefresh = useCallback((): void => {
+    setRefreshing(true)
+    void loadProfile(true)
+  }, [loadProfile])
 
   function validate(): boolean {
     const e: ProfileErrors = {}
@@ -210,7 +220,6 @@ export default function EditProfileScreen(): React.JSX.Element {
       }
 
       const isoDate = buildIsoDate(form.dateDay, form.dateMonth, form.dateYear)
-      const heightNum = form.tailleCm ? parseFloat(form.tailleCm) : null
 
       const { error: userError } = await supabase
         .from('users')
@@ -219,7 +228,7 @@ export default function EditProfileScreen(): React.JSX.Element {
           full_name: form.fullName.trim(),
           date_naissance: isoDate,
           avatar_url: finalAvatarUrl,
-          height_cm: heightNum,
+          height_cm: form.tailleCm ? parseFloat(form.tailleCm) : null,
         })
         .eq('id', userId)
 
@@ -228,11 +237,12 @@ export default function EditProfileScreen(): React.JSX.Element {
       if (form.poidsKg) {
         const poidsNum = parseFloat(form.poidsKg)
         if (!isNaN(poidsNum)) {
-          await supabase.from('body_metrics').insert({
+          const { error: metricsError } = await supabase.from('body_metrics').insert({
             user_id: userId,
             weight_kg: poidsNum,
             measured_at: new Date().toISOString(),
           })
+          if (metricsError) throw metricsError
         }
       }
 
@@ -341,6 +351,14 @@ export default function EditProfileScreen(): React.JSX.Element {
         contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+          />
+        }
       >
 
         {/* ── Avatar ── */}

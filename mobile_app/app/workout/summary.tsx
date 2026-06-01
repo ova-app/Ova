@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
   Image,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Switch,
@@ -33,6 +34,7 @@ import { useWorkout, computePodium, WorkoutExercise, PrLevel } from '@/context/W
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { saveMyoSignature, computeSessionValues, computeMuscleDims, type EmRow } from '@/lib/myo'
 
+import { Canvas, Path as SkiaPath, Skia, LinearGradient as SkiaLinearGradient, vec } from '@shopify/react-native-skia'
 import { insertLocalSet, insertLocalSession } from '@/lib/db'
 import { computePrediction } from '@/lib/predictor'
 import { storage } from '@/lib/storage'
@@ -62,7 +64,7 @@ const PR_LEVEL_LABEL: Record<string, string> = {
   bronze: 'BRONZE',
 }
 
-// ─── PR Row (Figma style — dense pill) ───────────────────────────────────────
+// ─── PR Row ──────────────────────────────────────────────────────────────────
 
 function PrRow({
   level,
@@ -86,15 +88,26 @@ function PrRow({
 
   const animStyle = useAnimatedStyle(() => ({
     opacity: anim.value,
-    transform: [{ translateY: (1 - anim.value) * 6 }],
+    transform: [{ translateX: (1 - anim.value) * -14 }],
   }))
 
   return (
     <Animated.View style={[styles.prRow, { backgroundColor: colors.backgroundSecondary }, animStyle]}>
-      <Icon size={16} color={tint} />
-      <Text style={[styles.prRowLabel, { color: tint }]}>
-        {PR_LABEL[type]} · {value}
-      </Text>
+      {/* Barre accent gauche flush */}
+      <View style={[styles.prRowAccentBar, { backgroundColor: tint }]} />
+      {/* Icône cerclée */}
+      <View style={[styles.prRowIconWrap, { backgroundColor: `${tint}1A` }]}>
+        <Icon size={15} color={tint} />
+      </View>
+      {/* Contenu */}
+      <View style={styles.prRowContent}>
+        <Text style={[styles.prRowTypeLabel, { color: tint }]}>{PR_LABEL[type]}</Text>
+        <Text style={[styles.prRowValueText, { color: colors.textPrimary }]}>{value}</Text>
+      </View>
+      {/* Badge niveau */}
+      <View style={[styles.prLevelPill, { borderColor: `${tint}45`, backgroundColor: `${tint}12` }]}>
+        <Text style={[styles.prLevelPillText, { color: tint }]}>{PR_LEVEL_LABEL[level]}</Text>
+      </View>
     </Animated.View>
   )
 }
@@ -131,6 +144,9 @@ function MuscleLegend({ colors }: { colors: ReturnType<typeof useTheme>['colors'
 
 // ─── Muscle Bar ───────────────────────────────────────────────────────────────
 
+const MUSCLE_BAR_H      = 7
+const MUSCLE_BAR_RADIUS = 3.5
+
 function MuscleBar({
   label,
   pct,
@@ -144,39 +160,48 @@ function MuscleBar({
   colors: ReturnType<typeof useTheme>['colors']
   delay: number
 }) {
-  const barWidth = useSharedValue(0)
+  const trackW = SCREEN_W - spacing.s4 * 2 - 84 - 40 - spacing.s3 * 2
 
+  const progress = useSharedValue(0)
   useEffect(() => {
-    barWidth.value = withDelay(delay, withTiming(pct, { duration: 600, easing: Easing.bezier(0.16, 1, 0.3, 1) }))
+    progress.value = withDelay(delay, withTiming(pct, { duration: 620, easing: Easing.bezier(0.16, 1, 0.3, 1) }))
   }, [])
 
   const barStyle = useAnimatedStyle(() => ({
-    width: `${barWidth.value * 100}%` as `${number}%`,
+    width: Math.max(progress.value * trackW, MUSCLE_BAR_RADIUS * 2),
   }))
 
-  const barColor = isPrimary ? colors.accent : colors.textSecondary
+  const barPath = React.useMemo(() => {
+    const p = Skia.Path.Make()
+    p.addRRect({ rect: { x: 0, y: 0, width: trackW, height: MUSCLE_BAR_H }, rx: MUSCLE_BAR_RADIUS, ry: MUSCLE_BAR_RADIUS })
+    return p
+  }, [trackW])
+
+  const gradStart = isPrimary ? colors.accent : '#7A7A8C'
+  const gradEnd   = isPrimary ? '#FAC775'    : '#3A3A4A'
 
   return (
     <View style={styles.muscleRow}>
       <Text style={[styles.muscleLabel, { color: isPrimary ? colors.textPrimary : colors.textSecondary }]} numberOfLines={1}>
         {label}
       </Text>
-      <View style={styles.muscleBarTrack}>
-        <View style={[styles.muscleBarBg, { backgroundColor: `${barColor}18` }]}>
-          <Animated.View
-            style={[
-              styles.muscleBarFill,
-              { backgroundColor: barColor },
-              barStyle,
-            ]}
-          />
+      <View style={[styles.muscleBarTrack, { width: trackW }]}>
+        <View style={[styles.muscleBarBg, { backgroundColor: `${gradStart}14` }]}>
+          <Animated.View style={[styles.muscleBarAnimWrap, barStyle]}>
+            <Canvas style={{ width: trackW, height: MUSCLE_BAR_H }}>
+              <SkiaPath path={barPath} style="fill">
+                <SkiaLinearGradient
+                  start={vec(0, 0)}
+                  end={vec(trackW, 0)}
+                  colors={[gradStart, gradEnd]}
+                />
+              </SkiaPath>
+            </Canvas>
+          </Animated.View>
         </View>
       </View>
       <Text
-        style={[
-          styles.musclePct,
-          { color: isPrimary ? colors.accent : colors.textTertiary },
-        ]}
+        style={[styles.musclePct, { color: isPrimary ? colors.accent : colors.textTertiary }]}
         allowFontScaling={false}
       >
         {Math.round(pct * 100)}%
@@ -248,6 +273,165 @@ function muscleLabelFr(key: string): string {
   return map[key] ?? key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ')
 }
 
+// ─── Volume Trend Sparkline ───────────────────────────────────────────────────
+
+function VolumeTrendSparkline({
+  history,
+  current,
+}: {
+  history: number[]
+  current: number
+}) {
+  const all = useMemo(() => [...history, current], [history, current])
+  const W = SCREEN_W - spacing.s4 * 2
+  const H = 52
+  const padX = 4
+  const padY = 8
+  const n = all.length
+
+  const [activeIdx, setActiveIdx] = useState<number | null>(null)
+
+  function findIdx(x: number): number {
+    const t = (Math.max(padX, Math.min(W - padX, x)) - padX) / (W - padX * 2)
+    return Math.max(0, Math.min(n - 1, Math.round(t * (n - 1))))
+  }
+
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (e) => setActiveIdx(findIdx(e.nativeEvent.locationX)),
+    onPanResponderMove: (e) => setActiveIdx(findIdx(e.nativeEvent.locationX)),
+    onPanResponderRelease: () => setActiveIdx(null),
+    onPanResponderTerminate: () => setActiveIdx(null),
+  }), [n, W])
+
+  const { linePath, fillPath, pts } = useMemo(() => {
+    if (all.length < 2) return { linePath: null, fillPath: null, pts: [] }
+    const maxV = Math.max(...all, 1)
+    const computedPts = all.map((v, i) => ({
+      x: padX + (i / (n - 1)) * (W - padX * 2),
+      y: padY + (1 - v / maxV) * (H - padY * 2),
+    }))
+    const line = Skia.Path.Make()
+    const fill = Skia.Path.Make()
+    line.moveTo(computedPts[0].x, computedPts[0].y)
+    fill.moveTo(computedPts[0].x, H)
+    fill.lineTo(computedPts[0].x, computedPts[0].y)
+    for (let i = 1; i < computedPts.length; i++) {
+      const prev = computedPts[i - 1]
+      const curr = computedPts[i]
+      const cpx = (prev.x + curr.x) / 2
+      line.cubicTo(cpx, prev.y, cpx, curr.y, curr.x, curr.y)
+      fill.cubicTo(cpx, prev.y, cpx, curr.y, curr.x, curr.y)
+    }
+    fill.lineTo(computedPts[computedPts.length - 1].x, H)
+    fill.close()
+    return { linePath: line, fillPath: fill, pts: computedPts }
+  }, [all, W, H, n, padX, padY])
+
+  const lineReveal = useSharedValue(0)
+  useEffect(() => {
+    lineReveal.value = 0
+    lineReveal.value = withDelay(600, withTiming(1, { duration: 820, easing: Easing.bezier(0.16, 1, 0.3, 1) }))
+  }, [all.length])
+
+  const revealStyle = useAnimatedStyle(() => ({ width: lineReveal.value * W }))
+
+  if (!linePath || !fillPath) return null
+
+  const activeVal = activeIdx !== null ? all[activeIdx] : null
+  const activePt  = activeIdx !== null ? pts[activeIdx] : null
+  const isLast    = activeIdx === n - 1
+
+  return (
+    <View style={{ width: W, marginTop: spacing.s3 }}>
+      {/* En-tête explicatif */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.s2 }}>
+        <Text style={{ color: 'rgba(255,255,255,0.28)', fontSize: 9, fontFamily: font.medium, letterSpacing: 1.2, textTransform: 'uppercase' }}>
+          VOLUME · {n} séances
+        </Text>
+        <Text style={{ color: 'rgba(255,255,255,0.28)', fontSize: 9, fontFamily: font.medium, letterSpacing: 0.5 }}>
+          cette séance →
+        </Text>
+      </View>
+      {/* Canvas + touch */}
+      <View style={{ width: W, height: H }} {...panResponder.panHandlers}>
+        {/* Zone remplie */}
+        <Canvas style={{ width: W, height: H, position: 'absolute' }}>
+          <SkiaPath path={fillPath} style="fill" opacity={0.10}>
+            <SkiaLinearGradient start={vec(0, 0)} end={vec(0, H)} colors={['#FFDD00', 'rgba(255,221,0,0)']} />
+          </SkiaPath>
+        </Canvas>
+        {/* Ligne */}
+        <View style={{ overflow: 'hidden', position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+          <Animated.View style={[{ height: H }, revealStyle]}>
+            <Canvas style={{ width: W, height: H }}>
+              <SkiaPath path={linePath} style="stroke" strokeWidth={1.8} strokeCap="round" strokeJoin="round" color="#FFDD00" />
+            </Canvas>
+          </Animated.View>
+        </View>
+        {/* Dot séance courante */}
+        <Canvas style={{ width: W, height: H, position: 'absolute' }} pointerEvents="none">
+          <SkiaPath
+            path={(() => {
+              const p = Skia.Path.Make()
+              if (pts.length > 0) {
+                const last = pts[pts.length - 1]
+                p.addCircle(last.x, last.y, 4)
+              }
+              return p
+            })()}
+            style="fill"
+            color="#FFDD00"
+          />
+        </Canvas>
+        {/* Curseur actif */}
+        {activeIdx !== null && activePt && (
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill]}>
+            {/* Ligne verticale */}
+            <View style={{
+              position: 'absolute',
+              left: activePt.x - 0.5,
+              top: 0,
+              width: 1,
+              height: H,
+              backgroundColor: 'rgba(255,255,255,0.18)',
+            }} />
+            {/* Dot */}
+            <View style={{
+              position: 'absolute',
+              left: activePt.x - 4,
+              top: activePt.y - 4,
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: isLast ? '#FFDD00' : 'rgba(255,255,255,0.70)',
+              borderWidth: 1.5,
+              borderColor: '#0A0A0F',
+            }} />
+            {/* Bulle valeur */}
+            <View style={{
+              position: 'absolute',
+              left: Math.max(0, Math.min(activePt.x - 36, W - 72)),
+              top: activePt.y < H / 2 ? activePt.y + 10 : activePt.y - 28,
+              backgroundColor: 'rgba(26,26,36,0.92)',
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.10)',
+            }}>
+              <Text style={{ color: isLast ? '#FFDD00' : '#F0F0F5', fontSize: 11, fontFamily: font.bold, fontVariant: ['tabular-nums'], letterSpacing: -0.2 }}>
+                {Math.round(activeVal!).toLocaleString('fr-FR')} kg
+              </Text>
+            </View>
+          </View>
+        )}
+      </View>
+    </View>
+  )
+}
+
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export default function SummaryScreen() {
@@ -260,6 +444,7 @@ export default function SummaryScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [histVolumes, setHistVolumes] = useState<number[]>([])
 
   const [sessionValues, setSessionValues] = useState<number[][]>(() => {
     const sets = exercises.flatMap(ex =>
@@ -308,6 +493,28 @@ export default function SummaryScreen() {
         temps_repos_moy_sec: 120, ratio_actif: 0.5, poids_max_kg: pMax, charge_relative: 65,
         muscleDims,
       }))
+    })()
+  }, [])
+
+  // Fetch last 8 workout volumes for trend sparkline
+  useEffect(() => {
+    void (async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase
+        .from('workouts')
+        .select('total_volume_kg')
+        .eq('user_id', user.id)
+        .not('total_volume_kg', 'is', null)
+        .order('started_at', { ascending: false })
+        .limit(8)
+      if (data?.length) {
+        setHistVolumes(
+          (data as { total_volume_kg: number }[])
+            .map(w => w.total_volume_kg)
+            .reverse()
+        )
+      }
     })()
   }, [])
 
@@ -726,6 +933,11 @@ export default function SummaryScreen() {
           </View>
         </Animated.View>
 
+        {/* Trend sparkline — contexte séances précédentes */}
+        {histVolumes.length > 0 && (
+          <VolumeTrendSparkline history={histVolumes} current={totalVolume} />
+        )}
+
         {/* ── Séparateur ── */}
         <View style={[styles.divider, { backgroundColor: colors.separator }]} />
 
@@ -734,25 +946,28 @@ export default function SummaryScreen() {
           <Animated.View style={[styles.section, style2]}>
             <SectionHeader label="PRs DÉTECTÉS" colors={colors} />
             <View style={styles.prList}>
-              {bestPrCharge !== null && (
-                <PrRow
-                  level={bestPrCharge}
-                  type="charge"
-                  value={prChargeDetected.length > 0
-                    ? `+${Math.round(prChargeDetected.reduce((m, s) => Math.max(m, s.weight_kg), 0))} kg`
-                    : '—'
-                  }
-                  delay={80}
-                />
-              )}
-              {bestPrSerie !== null && prSerieMax > 0 && (
-                <PrRow
-                  level={bestPrSerie}
-                  type="serie"
-                  value={`${prSerieMax} pts`}
-                  delay={160}
-                />
-              )}
+              {bestPrCharge !== null && (() => {
+                const best = prChargeDetected.reduce((b, s) => s.weight_kg > (b?.weight_kg ?? 0) ? s : b, null as typeof prChargeDetected[0] | null)
+                return best ? (
+                  <PrRow
+                    level={bestPrCharge}
+                    type="charge"
+                    value={`${best.weight_kg} kg`}
+                    delay={80}
+                  />
+                ) : null
+              })()}
+              {bestPrSerie !== null && (() => {
+                const best = prSerieDetected.reduce((b, s) => (s.weight_kg * s.reps) > ((b?.weight_kg ?? 0) * (b?.reps ?? 0)) ? s : b, null as typeof prSerieDetected[0] | null)
+                return best ? (
+                  <PrRow
+                    level={bestPrSerie}
+                    type="serie"
+                    value={`${best.weight_kg} kg × ${best.reps}`}
+                    delay={160}
+                  />
+                ) : null
+              })()}
             </View>
           </Animated.View>
         )}
@@ -1038,7 +1253,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
 
-  // PR rows (Figma style)
+  // PR rows
   prList: {
     gap: spacing.s2,
   },
@@ -1049,12 +1264,52 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.s4,
     paddingVertical: spacing.s4,
     borderRadius: radius.lg,
-    minHeight: 52,
+    minHeight: 64,
+    overflow: 'hidden',
   },
-  prRowLabel: {
-    fontSize: 14,
+  prRowAccentBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    borderRadius: 2,
+  },
+  prRowIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    marginLeft: spacing.s1,
+  },
+  prRowContent: {
+    flex: 1,
+    gap: 2,
+  },
+  prRowTypeLabel: {
+    fontSize: 9,
     fontFamily: font.bold,
-    letterSpacing: 0.2,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  prRowValueText: {
+    fontSize: 22,
+    fontFamily: font.black,
+    letterSpacing: -0.5,
+    fontVariant: ['tabular-nums'],
+  },
+  prLevelPill: {
+    paddingHorizontal: spacing.s2,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    borderWidth: 1,
+  },
+  prLevelPillText: {
+    fontSize: 9,
+    fontFamily: font.bold,
+    letterSpacing: 1.2,
   },
 
   // Muscle section
@@ -1096,16 +1351,21 @@ const styles = StyleSheet.create({
     width: 84,
   },
   muscleBarTrack: {
-    flex: 1,
+    // width set inline
   },
   muscleBarBg: {
-    height: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
+    height      : MUSCLE_BAR_H,
+    borderRadius: MUSCLE_BAR_RADIUS,
+    overflow    : 'hidden',
+  },
+  muscleBarAnimWrap: {
+    height      : MUSCLE_BAR_H,
+    overflow    : 'hidden',
+    borderRadius: MUSCLE_BAR_RADIUS,
   },
   muscleBarFill: {
-    height: '100%',
-    borderRadius: 3,
+    height      : '100%',
+    borderRadius: MUSCLE_BAR_RADIUS,
   },
   musclePct: {
     fontSize: 12,

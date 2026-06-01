@@ -16,6 +16,7 @@ import Animated, {
 } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { X } from 'lucide-react-native'
+import { Canvas, Path, Skia, LinearGradient as SkiaLinearGradient, vec } from '@shopify/react-native-skia'
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, touchTarget, spring } from '@/constants/theme'
 
@@ -165,6 +166,118 @@ function SingleWheel({ values, selectedValue, onValueChange, label, isEmpty }: S
   )
 }
 
+// ─── GhostWeightBar ──────────────────────────────────────────────────────────
+
+const GHOST_W = Dimensions.get('window').width - spacing.s4 * 2
+const GHOST_TRACK_H = 6
+const GHOST_CH = 20
+
+function GhostWeightBar({
+  currentWeight,
+  ghostValue,
+  colors,
+}: {
+  currentWeight: number
+  ghostValue: number
+  colors: ReturnType<typeof useTheme>['colors']
+}) {
+  const maxWeight = ghostValue * 1.5
+  const ghostX = (ghostValue / maxWeight) * GHOST_W
+  const fillW = Math.min((Math.max(currentWeight, 0) / maxWeight) * GHOST_W, GHOST_W)
+  const beaten = currentWeight > ghostValue
+  const delta = currentWeight - ghostValue
+  const cy = (GHOST_CH - GHOST_TRACK_H) / 2
+
+  const trackPath = useMemo(() => {
+    const p = Skia.Path.Make()
+    p.addRRect(Skia.RRectXY(
+      Skia.XYWHRect(0, cy, GHOST_W, GHOST_TRACK_H),
+      GHOST_TRACK_H / 2, GHOST_TRACK_H / 2,
+    ))
+    return p
+  }, [cy])
+
+  const fillPath = useMemo(() => {
+    if (fillW < 1) return null
+    const p = Skia.Path.Make()
+    p.addRRect(Skia.RRectXY(
+      Skia.XYWHRect(0, cy, fillW, GHOST_TRACK_H),
+      GHOST_TRACK_H / 2, GHOST_TRACK_H / 2,
+    ))
+    return p
+  }, [fillW, cy])
+
+  const markerPath = useMemo(() => {
+    const p = Skia.Path.Make()
+    p.moveTo(ghostX, cy - 3)
+    p.lineTo(ghostX, cy + GHOST_TRACK_H + 3)
+    return p
+  }, [ghostX, cy])
+
+
+  return (
+    <View style={ghostWeightStyles.container}>
+      <View style={ghostWeightStyles.labelRow}>
+        <Text style={[ghostWeightStyles.label, { color: colors.textTertiary }]}>FANTÔME</Text>
+        <Text style={[ghostWeightStyles.value, {
+          color: beaten ? '#00E673' : delta < 0 ? 'rgba(255,59,48,0.85)' : colors.textSecondary,
+        }]}>
+          {beaten ? `+${delta.toFixed(1)} kg` : delta < 0 ? `${Math.abs(delta).toFixed(1)} kg en dessous` : `${ghostValue} kg cible`}
+        </Text>
+      </View>
+      <Canvas style={{ width: GHOST_W, height: GHOST_CH }}>
+        {/* Track */}
+        <Path path={trackPath} color="rgba(255,255,255,0.07)" />
+        {/* Fill avec gradient */}
+        {fillPath && (
+          <Path path={fillPath} style="fill">
+            <SkiaLinearGradient
+              start={vec(0, 0)}
+              end={vec(Math.max(fillW, 1), 0)}
+              colors={beaten
+                ? ['rgba(0,230,115,0.45)', '#00E673']
+                : delta < 0
+                ? ['rgba(255,59,48,0.30)', 'rgba(255,59,48,0.65)']
+                : ['rgba(240,240,245,0.12)', 'rgba(240,240,245,0.32)']}
+            />
+          </Path>
+        )}
+        {/* Marqueur fantôme */}
+        <Path
+          path={markerPath}
+          style="stroke"
+          strokeWidth={2}
+          color={beaten ? 'rgba(0,230,115,0.60)' : delta < 0 ? 'rgba(255,59,48,0.55)' : 'rgba(255,255,255,0.45)'}
+        />
+      </Canvas>
+    </View>
+  )
+}
+
+const ghostWeightStyles = StyleSheet.create({
+  container: {
+    paddingHorizontal: spacing.s4,
+    paddingBottom: spacing.s3,
+    gap: spacing.s2,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+  },
+  value: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    fontVariant: ['tabular-nums'],
+  },
+})
+
 // ─── Main Modal ────────────────────────────────────────────────────────────
 
 export default function WheelPickerModal({
@@ -217,9 +330,6 @@ export default function WheelPickerModal({
   }
 
   if (!mounted) return null
-
-  // Current ghost status: weight beats ghost
-  const ghostBeatenCurrent = ghostBeaten && state.weight > (ghostValue ?? 0)
 
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
@@ -281,33 +391,13 @@ export default function WheelPickerModal({
           />
         </View>
 
-        {/* Ghost badge (if weight picker) */}
+        {/* Ghost weight bar */}
         {ghostValue !== undefined && weightValues.length > 0 && (
-          <View style={styles.ghostSection}>
-            <View
-              style={[
-                styles.ghostBadge,
-                {
-                  backgroundColor: ghostBeatenCurrent
-                    ? colors.accent
-                    : colors.backgroundTertiary,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.ghostBadgeText,
-                  {
-                    color: ghostBeatenCurrent ? colors.background : colors.textSecondary,
-                  },
-                ]}
-              >
-                {ghostBeatenCurrent
-                  ? `↑ BATTU · +${(state.weight - ghostValue).toFixed(1)} kg`
-                  : `↑ ${ghostValue.toFixed(1)} kg`}
-              </Text>
-            </View>
-          </View>
+          <GhostWeightBar
+            currentWeight={state.weight}
+            ghostValue={ghostValue}
+            colors={colors}
+          />
         )}
 
         {/* Bottom buttons */}
@@ -426,23 +516,6 @@ const styles = StyleSheet.create({
   wheelLabel: {
     ...typography.caption,
     letterSpacing: 1.2,
-  },
-
-  // ── Ghost badge ──
-  ghostSection: {
-    paddingHorizontal: spacing.s4,
-    paddingBottom: spacing.s3,
-    alignItems: 'center',
-  },
-  ghostBadge: {
-    paddingHorizontal: spacing.s3,
-    paddingVertical: spacing.s2,
-    borderRadius: radius.full,
-  },
-  ghostBadgeText: {
-    ...typography.caption,
-    letterSpacing: 0.3,
-    fontSize: 11,
   },
 
   // ── Footer buttons ──

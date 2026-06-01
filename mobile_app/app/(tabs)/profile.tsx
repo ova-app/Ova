@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   SectionList,
   TouchableOpacity,
+  RefreshControl,
 } from 'react-native'
 import Animated, {
   useSharedValue,
@@ -23,10 +24,14 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useRouter, useFocusEffect } from 'expo-router'
 import { Zap, Flame, Trophy, ChevronRight, Shield, TrendingUp, Settings, Users, UserPlus } from 'lucide-react-native'
 import Svg, { Circle as SvgCircle } from 'react-native-svg'
+import { Canvas, Path as SkiaPath, Skia, LinearGradient as SkiaLinearGradient, vec } from '@shopify/react-native-skia'
+import { Dimensions } from 'react-native'
 import { supabase } from '@/lib/supabase'
+
+const { width: PROFILE_W } = Dimensions.get('window')
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, font } from '@/constants/theme'
 import { formatVolume } from '@/lib/utils'
@@ -119,7 +124,43 @@ interface SparklineData {
 }
 
 function SparklineRow({ data, colors }: { data: SparklineData[]; colors: any }) {
-  if (data.length === 0) {
+  const canvasW = PROFILE_W - spacing.s4 * 4
+  const canvasH = 56
+
+  const { linePath, fillPath } = useMemo(() => {
+    if (data.length === 0) return { linePath: null, fillPath: null }
+
+    const maxVol = Math.max(...data.map(d => d.volume), 1)
+    const n = data.length
+    const padX = 4
+    const padY = 6
+    const pts = data.map((d, i) => ({
+      x: padX + (i / Math.max(n - 1, 1)) * (canvasW - padX * 2),
+      y: padY + (1 - d.volume / maxVol) * (canvasH - padY * 2),
+    }))
+
+    const line = Skia.Path.Make()
+    const fill = Skia.Path.Make()
+
+    line.moveTo(pts[0].x, pts[0].y)
+    fill.moveTo(pts[0].x, canvasH)
+    fill.lineTo(pts[0].x, pts[0].y)
+
+    for (let i = 1; i < pts.length; i++) {
+      const prev = pts[i - 1]
+      const curr = pts[i]
+      const cpx = (prev.x + curr.x) / 2
+      line.cubicTo(cpx, prev.y, cpx, curr.y, curr.x, curr.y)
+      fill.cubicTo(cpx, prev.y, cpx, curr.y, curr.x, curr.y)
+    }
+
+    fill.lineTo(pts[pts.length - 1].x, canvasH)
+    fill.close()
+
+    return { linePath: line, fillPath: fill }
+  }, [data, canvasW, canvasH])
+
+  if (data.length === 0 || !linePath || !fillPath) {
     return (
       <Text style={{ ...typography.caption, color: colors.textTertiary, textAlign: 'center', marginVertical: spacing.s3 }}>
         Aucune séance récente
@@ -127,28 +168,26 @@ function SparklineRow({ data, colors }: { data: SparklineData[]; colors: any }) 
     )
   }
 
-  const maxVol = Math.max(...data.map(d => d.volume), 1)
-  const h = 48
-
   return (
-    <View style={{ flexDirection: 'row', gap: spacing.s1, alignItems: 'flex-end', height: h, marginVertical: spacing.s3 }}>
-      {data.map((item, idx) => {
-        const ratio = item.volume / maxVol
-        const barH = Math.max(4, h * ratio)
-        return (
-          <View
-            key={idx}
-            style={{
-              flex: 1,
-              height: barH,
-              backgroundColor: colors.accent,
-              borderRadius: radius.sm,
-              opacity: 0.8,
-            }}
-          />
-        )
-      })}
-    </View>
+    <Canvas style={{ width: canvasW, height: canvasH, marginVertical: spacing.s3 }}>
+      {/* Zone remplie — gradient vertical */}
+      <SkiaPath path={fillPath} style="fill" opacity={0.18}>
+        <SkiaLinearGradient
+          start={vec(0, 0)}
+          end={vec(0, canvasH)}
+          colors={['#FFDD00', 'rgba(255,221,0,0)']}
+        />
+      </SkiaPath>
+      {/* Ligne principale */}
+      <SkiaPath
+        path={linePath}
+        style="stroke"
+        strokeWidth={2}
+        strokeCap="round"
+        strokeJoin="round"
+        color="#FFDD00"
+      />
+    </Canvas>
   )
 }
 
@@ -490,6 +529,7 @@ export default function ProfileScreen(): React.JSX.Element {
   const [sparklineData, setSparklineData] = useState<SparklineData[]>([])
   const [historySections, setHistorySections] = useState<HistorySection[]>([])
   const [deconnexionLoading, setDeconnexionLoading] = useState<boolean>(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -615,8 +655,15 @@ export default function ProfileScreen(): React.JSX.Element {
 
   }, [router])
 
-  useEffect(() => {
-    void fetchProfile()
+  useFocusEffect(
+    useCallback(() => {
+      void fetchProfile()
+    }, [fetchProfile])
+  )
+
+  const onRefresh = useCallback((): void => {
+    setRefreshing(true)
+    void fetchProfile().finally(() => setRefreshing(false))
   }, [fetchProfile])
 
   async function seDeconnecter(): Promise<void> {
@@ -641,6 +688,14 @@ export default function ProfileScreen(): React.JSX.Element {
         keyExtractor={item => item.id}
         scrollEnabled
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+          />
+        }
         ListHeaderComponent={() => (
           <View style={s.headerContainer}>
             {/* Avatar + Nom + Quick actions */}

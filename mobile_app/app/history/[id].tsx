@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -7,13 +7,24 @@ import {
   StyleSheet,
   Image,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Dumbbell, Flame, MapPin, Trophy, Zap } from 'lucide-react-native'
+import { Canvas, Path, Skia, Group, LinearGradient, vec } from '@shopify/react-native-skia'
+import Animated, {
+  useSharedValue,
+  withDelay,
+  withTiming,
+  useAnimatedStyle,
+  Easing,
+} from 'react-native-reanimated'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, font } from '@/constants/theme'
 import { prBadgeRecipe, type PrType } from '@/constants/recipes'
+
+const { width: SCREEN_W } = Dimensions.get('window')
 
 // ─── PR Badge (unified) ──────────────────────────────────────────────────────
 
@@ -85,7 +96,8 @@ interface ExerciseWithSets {
 
 interface MuscleBar {
   muscleLabel: string
-  pct: number // normalized 0-100
+  pct: number  // normalized 0-100
+  role: 'primary' | 'secondary'
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -139,6 +151,76 @@ const MUSCLE_LABEL_MAP: Record<string, string> = {
   rhomboide: 'Rhomboïdes',
   erecteurs_rachis: 'Érecteurs rachis',
   avant_bras: 'Avant-bras',
+}
+
+// ─── Barre musculaire Skia animée ────────────────────────────────────────────
+
+const BAR_H = 7
+const BAR_RADIUS = 3.5
+const ACCENT_COLOR = '#FFDD00'
+
+function SkiaMuscleBar({
+  label,
+  pct,
+  delay,
+  role,
+}: {
+  label: string
+  pct: number
+  delay: number
+  role: 'primary' | 'secondary'
+}) {
+  const { colors } = useTheme()
+  const barW = SCREEN_W - spacing.s4 * 2 - 96 - 36 - spacing.s3 * 2
+  const progress = useSharedValue(0)
+
+  useEffect(() => {
+    progress.value = withDelay(delay, withTiming(pct / 100, { duration: 650, easing: Easing.bezier(0.16, 1, 0.3, 1) }))
+  }, [])
+
+  const isPrimary = role === 'primary'
+  const gradStart = isPrimary ? ACCENT_COLOR : '#FF6B00'
+  const gradEnd   = isPrimary ? '#FAC775'    : '#7A7A8C'
+
+  const barStyle = useAnimatedStyle(() => ({
+    width: Math.max(progress.value * barW, BAR_RADIUS * 2),
+  }))
+
+  const barPath = useMemo(() => {
+    const p = Skia.Path.Make()
+    p.addRRect({ rect: { x: 0, y: 0, width: barW, height: BAR_H }, rx: BAR_RADIUS, ry: BAR_RADIUS })
+    return p
+  }, [barW])
+
+  return (
+    <View style={histStyles.muscleRow}>
+      <Text
+        style={[histStyles.muscleLabel, { color: isPrimary ? '#F0F0F5' : '#9A7A5C' }]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+      <View style={[histStyles.muscleBarTrack, { width: barW, backgroundColor: `${gradStart}14` }]}>
+        <Animated.View style={[histStyles.muscleBarAnimWrap, barStyle]}>
+          <Canvas style={{ width: barW, height: BAR_H }}>
+            <Path path={barPath} style="fill">
+              <LinearGradient
+                start={vec(0, 0)}
+                end={vec(barW, 0)}
+                colors={[gradStart, gradEnd]}
+              />
+            </Path>
+          </Canvas>
+        </Animated.View>
+      </View>
+      <Text
+        style={[histStyles.musclePct, { color: isPrimary ? ACCENT_COLOR : '#4A4A5A' }]}
+        allowFontScaling={false}
+      >
+        {pct}%
+      </Text>
+    </View>
+  )
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -227,7 +309,8 @@ export default function HistoryDetailScreen(): React.JSX.Element {
         .in('role', ['primary', 'secondary'])
 
       if (emData) {
-        const muscleVol: Record<string, number> = {}
+        const muscleVol:  Record<string, number>               = {}
+        const muscleRole: Record<string, 'primary' | 'secondary'> = {}
 
         for (const em of emData) {
           const ex = exs.find(e => e.exerciseId === em.exercise_id)
@@ -237,13 +320,18 @@ export default function HistoryDetailScreen(): React.JSX.Element {
           }, 0)
           const label = MUSCLE_LABEL_MAP[em.muscle as string] ?? (em.muscle as string)
           muscleVol[label] = (muscleVol[label] ?? 0) + vol
+          // primary wins over secondary
+          if (!muscleRole[label] || em.role === 'primary') {
+            muscleRole[label] = em.role as 'primary' | 'secondary'
+          }
         }
 
         const maxVol = Math.max(...Object.values(muscleVol), 1)
         const bars: MuscleBar[] = Object.entries(muscleVol)
           .map(([muscleLabel, vol]) => ({
             muscleLabel,
-            pct: Math.round((vol / maxVol) * 100),
+            pct:  Math.round((vol / maxVol) * 100),
+            role: muscleRole[muscleLabel] ?? 'secondary',
           }))
           .sort((a, b) => b.pct - a.pct)
           .slice(0, 6)
@@ -400,26 +488,18 @@ export default function HistoryDetailScreen(): React.JSX.Element {
           </View>
         )}
 
-        {/* ── Muscles travaillés ── */}
+        {/* ── Muscles travaillés — Skia bars ── */}
         {muscleBars.length > 0 && (
           <View style={s.section}>
             <Text style={s.sectionTitle}>MUSCLES TRAVAILLÉS</Text>
-
             {muscleBars.map((bar, idx) => (
-              <View key={idx} style={s.muscleRow}>
-                <Text style={s.muscleLabel} numberOfLines={1}>{bar.muscleLabel}</Text>
-
-                <View style={s.muscleBarTrack}>
-                  <View
-                    style={[s.muscleBarFill, { width: `${bar.pct}%` }]}
-                  />
-                </View>
-
-                <Text style={s.musclePct} accessibilityLabel={`${bar.pct} pourcent`}>
-                  {bar.pct}
-                  <Text style={s.musclePctSymbol}>%</Text>
-                </Text>
-              </View>
+              <SkiaMuscleBar
+                key={bar.muscleLabel}
+                label={bar.muscleLabel}
+                pct={bar.pct}
+                delay={idx * 70}
+                role={bar.role}
+              />
             ))}
           </View>
         )}
@@ -731,3 +811,36 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
   })
 }
+
+// ─── Styles statiques SkiaMuscleBar ──────────────────────────────────────────
+
+const histStyles = StyleSheet.create({
+  muscleRow: {
+    flexDirection: 'row',
+    alignItems   : 'center',
+    marginBottom : spacing.s3,
+    gap          : spacing.s3,
+  },
+  muscleLabel: {
+    fontSize : 12,
+    fontFamily: font.medium,
+    width    : 96,
+  },
+  muscleBarTrack: {
+    height      : BAR_H,
+    borderRadius: BAR_RADIUS,
+    overflow    : 'hidden',
+  },
+  muscleBarAnimWrap: {
+    height      : BAR_H,
+    overflow    : 'hidden',
+    borderRadius: BAR_RADIUS,
+  },
+  musclePct: {
+    fontSize   : 12,
+    fontFamily : font.bold,
+    width      : 36,
+    textAlign  : 'right',
+    fontVariant: ['tabular-nums'],
+  },
+})
