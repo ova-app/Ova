@@ -1,28 +1,14 @@
-import React, { useRef, useEffect, useMemo } from 'react'
+import React, { useRef, useEffect, useMemo, useCallback } from 'react'
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
-  Dimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native'
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  interpolate,
-  Extrapolate,
-} from 'react-native-reanimated'
-import { spacing, typography, font } from '@/constants/theme'
-
-interface Colors {
-  accent: string
-  textTertiary: string
-  textSecondary: string
-  background: string
-  backgroundSecondary: string
-}
+import { spacing, typography, font, radius } from '@/constants/theme'
+import type { ThemeColors } from '@/constants/theme'
 
 interface RulerPickerProps {
   value: number
@@ -31,173 +17,133 @@ interface RulerPickerProps {
   step: number
   unit: string
   onChange: (value: number) => void
-  colors: Colors
+  colors: ThemeColors
 }
 
-const ITEM_HEIGHT = 40
-const VISIBLE_ITEMS = 6
-const PICKER_HEIGHT = ITEM_HEIGHT * VISIBLE_ITEMS
+const ITEM_H = 44
+const VISIBLE = 5
+const PICKER_H = ITEM_H * VISIBLE  // 220
+const PAD = PICKER_H / 2           // 110
+
+// item i is centered when scrollY = ITEM_H/2 + i * ITEM_H
+// (derived: paddingTop=110, item_center_in_content = 110 + i*44 + 22 = 132+i*44
+//  visible_center = scrollY+110 → scrollY = 22 + i*44 = ITEM_H/2 + i*ITEM_H)
 
 export default function RulerPicker({
-  value,
-  min,
-  max,
-  step,
-  unit,
-  onChange,
-  colors,
+  value, min, max, step, unit, onChange, colors,
 }: RulerPickerProps) {
-  const scrollViewRef = useRef<ScrollView>(null)
-  const scrollOffset = useSharedValue(0)
-  const screenWidth = Dimensions.get('window').width
+  const ref = useRef<ScrollView>(null)
 
-  // Generate items array
   const items = useMemo(() => {
     const arr: number[] = []
-    for (let i = min; i <= max; i += step) {
-      arr.push(Math.round(i * 10) / 10) // Avoid floating point issues
+    for (let v = min; v <= max; v = Math.round((v + step) * 100) / 100) {
+      arr.push(v)
     }
     return arr
   }, [min, max, step])
 
-  // Find closest item to current value
-  const selectedIndex = useMemo(() => {
-    return items.findIndex(item => Math.abs(item - value) < step / 2)
-  }, [items, value, step])
+  const indexOfValue = useCallback((v: number) => {
+    const i = items.findIndex(item => Math.abs(item - v) < step / 2)
+    return i === -1 ? 0 : i
+  }, [items, step])
 
-  // Snap to index on mount or value change
   useEffect(() => {
-    if (selectedIndex !== -1 && scrollViewRef.current) {
-      const offset = selectedIndex * ITEM_HEIGHT - (PICKER_HEIGHT / 2 - ITEM_HEIGHT / 2)
-      scrollViewRef.current.scrollTo({ y: offset, animated: true })
+    const i = indexOfValue(value)
+    ref.current?.scrollTo({ y: ITEM_H / 2 + i * ITEM_H, animated: false })
+  }, [value, indexOfValue])
+
+  const onScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetY = e.nativeEvent.contentOffset.y
+    const i = Math.max(0, Math.min(
+      Math.round((offsetY - ITEM_H / 2) / ITEM_H),
+      items.length - 1
+    ))
+    const newVal = items[i]
+    if (newVal !== undefined) {
+      const snapY = ITEM_H / 2 + i * ITEM_H
+      ref.current?.scrollTo({ y: snapY, animated: true })
+      if (newVal !== value) onChange(newVal)
     }
-  }, [selectedIndex])
-
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const offsetY = event.nativeEvent.contentOffset.y
-    scrollOffset.value = offsetY
-
-    // Snap to nearest item on scroll end
-    const centerIndex = Math.round(offsetY / ITEM_HEIGHT)
-    const snappedIndex = Math.max(0, Math.min(centerIndex, items.length - 1))
-    const newValue = items[snappedIndex]
-    if (newValue !== value) {
-      onChange(newValue)
-    }
-  }
-
-  const animatedValueStyle = useAnimatedStyle(() => {
-    const opacity = interpolate(
-      scrollOffset.value,
-      [-ITEM_HEIGHT, 0, ITEM_HEIGHT],
-      [0.5, 1, 0.5],
-      Extrapolate.CLAMP
-    )
-    return { opacity }
-  })
+  }, [items, onChange, value])
 
   return (
-    <View style={styles.container}>
-      <View style={styles.main}>
-        {/* Ruler/Scroll area */}
-        <ScrollView
-          ref={scrollViewRef}
-          showsVerticalScrollIndicator={false}
-          scrollEventThrottle={16}
-          onScroll={handleScroll}
-          snapToInterval={ITEM_HEIGHT}
-          decelerationRate="fast"
-          contentContainerStyle={{
-            paddingVertical: PICKER_HEIGHT / 2,
-          }}
-          style={{ height: PICKER_HEIGHT }}
-        >
-          {items.map((item, idx) => (
-            <View key={idx} style={{ height: ITEM_HEIGHT, justifyContent: 'center' }}>
-              <Text style={[typography.body, { color: colors.textTertiary, fontSize: 13 }]}>
-                {item.toFixed(step < 1 ? 1 : 0)}
-              </Text>
-            </View>
-          ))}
-        </ScrollView>
+    <View style={styles.wrap}>
+      <ScrollView
+        ref={ref}
+        style={{ height: PICKER_H, flex: 1 }}
+        contentContainerStyle={{ paddingVertical: PAD }}
+        showsVerticalScrollIndicator={false}
+        snapToInterval={ITEM_H}
+        decelerationRate="fast"
+        scrollEventThrottle={64}
+        onMomentumScrollEnd={onScrollEnd}
+        onScrollEndDrag={onScrollEnd}
+      >
+        {items.map((item) => (
+          <View key={item} style={styles.item}>
+            <Text style={[styles.itemText, { color: colors.textSecondary }]}>
+              {item.toFixed(step < 1 ? 1 : 0)}
+            </Text>
+          </View>
+        ))}
+      </ScrollView>
 
-        {/* Cursor highlight */}
-        <View
-          style={[
-            styles.cursor,
-            {
-              borderColor: colors.accent,
-              backgroundColor: `${colors.accent}08`,
-            },
-          ]}
-        />
-      </View>
+      <View
+        pointerEvents="none"
+        style={[
+          styles.cursor,
+          { borderColor: colors.accent, backgroundColor: `${colors.accent}12` },
+        ]}
+      />
 
-      {/* Value display */}
-      <View style={styles.valueContainer}>
-        <Animated.Text
-          style={[
-            typography.display,
-            {
-              color: colors.accent,
-              fontFamily: font.extraBold,
-            },
-            animatedValueStyle,
-          ]}
-        >
+      <View style={styles.valueSide}>
+        <Text style={[typography.display, styles.valueText, { color: colors.accent }]}>
           {value.toFixed(step < 1 ? 1 : 0)}
-        </Animated.Text>
-        <Text style={[typography.body, { color: colors.textSecondary }]}>
+        </Text>
+        <Text style={[typography.caption, { color: colors.textSecondary }]}>
           {unit}
         </Text>
       </View>
-
-      {/* Glow effect (iOS style) */}
-      <View
-        style={[
-          styles.glow,
-          {
-            shadowColor: colors.accent,
-            shadowOpacity: 0.3,
-            shadowRadius: 8,
-            elevation: 4,
-          },
-        ]}
-      />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
+  wrap: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.s4,
-  },
-  main: {
-    width: '100%',
+    borderRadius: radius.md,
+    overflow: 'hidden',
     position: 'relative',
+  },
+  item: {
+    height: ITEM_H,
+    justifyContent: 'center',
+    paddingLeft: spacing.s5,
+  },
+  itemText: {
+    fontSize: 15,
+    fontFamily: font.regular,
+    fontVariant: ['tabular-nums'],
   },
   cursor: {
     position: 'absolute',
-    top: PICKER_HEIGHT / 2 - ITEM_HEIGHT / 2,
-    left: spacing.s5,
-    right: spacing.s5,
-    height: ITEM_HEIGHT,
-    borderWidth: 1,
+    left: spacing.s4,
+    right: 104,
+    top: PICKER_H / 2 - ITEM_H / 2,
+    height: ITEM_H,
+    borderWidth: 1.5,
     borderRadius: 8,
-    zIndex: 10,
   },
-  valueContainer: {
+  valueSide: {
+    width: 96,
     alignItems: 'center',
-    gap: spacing.s1,
+    justifyContent: 'center',
+    gap: 2,
+    paddingRight: spacing.s4,
   },
-  glow: {
-    position: 'absolute',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    top: PICKER_HEIGHT / 2 - 24,
-    right: spacing.s5,
-    zIndex: -1,
+  valueText: {
+    fontFamily: font.extraBold,
+    fontVariant: ['tabular-nums'],
   },
 })

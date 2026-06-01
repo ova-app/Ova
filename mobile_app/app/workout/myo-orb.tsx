@@ -228,8 +228,27 @@ function ScoreArcGradient({
   // Track (gris)
   const trackPath = arcPath(cx, cy, r, START_DEG, TOTAL_DEG)
 
-  // Dégradé simulé : N segments colorés le long de l'arc rempli
-  const N_SEG = 48
+  // Dégradé gris→orange→or : 3 stops sur [0,1]
+  const GRAD = [
+    { t: 0,    rgb: [0x8E, 0x8E, 0x93] },
+    { t: 0.5,  rgb: [0xD8, 0x5A, 0x30] },
+    { t: 1.0,  rgb: [0xFA, 0xC7, 0x75] },
+  ] as const
+
+  function lerpGrad(t: number): [number, number, number] {
+    let lo = GRAD[0], hi = GRAD[GRAD.length - 1]
+    for (let k = 0; k < GRAD.length - 1; k++) {
+      if (t >= GRAD[k].t && t <= GRAD[k + 1].t) { lo = GRAD[k]; hi = GRAD[k + 1]; break }
+    }
+    const ft = lo.t === hi.t ? 0 : (t - lo.t) / (hi.t - lo.t)
+    return [
+      Math.round(lo.rgb[0] * (1 - ft) + hi.rgb[0] * ft),
+      Math.round(lo.rgb[1] * (1 - ft) + hi.rgb[1] * ft),
+      Math.round(lo.rgb[2] * (1 - ft) + hi.rgb[2] * ft),
+    ]
+  }
+
+  const N_SEG = 180
   const segDeg = filled / N_SEG
   const segments: { path: string; color: string }[] = []
 
@@ -237,44 +256,17 @@ function ScoreArcGradient({
     for (let i = 0; i < N_SEG; i++) {
       const t      = i / N_SEG
       const sStart = START_DEG + i * segDeg
-      const sLen   = segDeg * 1.05
+      const sLen   = segDeg * 1.5
       const path   = arcPath(cx, cy, r, sStart, sLen)
       if (!path) continue
-
-      // Interpolation couleur sur les 8 familles (arc-en-ciel)
-      const colorIdx = t * (SECTOR_COLORS_HEX.length - 1)
-      const lo = Math.floor(colorIdx)
-      const hi = Math.min(lo + 1, SECTOR_COLORS_HEX.length - 1)
-      const ft = colorIdx - lo
-
-      const parse = (hex: string) => [
-        parseInt(hex.slice(1, 3), 16),
-        parseInt(hex.slice(3, 5), 16),
-        parseInt(hex.slice(5, 7), 16),
-      ]
-      const c0 = parse(SECTOR_COLORS_HEX[lo])
-      const c1 = parse(SECTOR_COLORS_HEX[hi])
-      const r8 = Math.round(c0[0] * (1 - ft) + c1[0] * ft)
-      const g8 = Math.round(c0[1] * (1 - ft) + c1[1] * ft)
-      const b8 = Math.round(c0[2] * (1 - ft) + c1[2] * ft)
-      const color = `rgb(${r8},${g8},${b8})`
-
-      segments.push({ path, color })
+      const [r8, g8, b8] = lerpGrad(t)
+      segments.push({ path, color: `rgb(${r8},${g8},${b8})` })
     }
   }
 
-  // Couleur du score text = dernier segment (couleur "bout de l'arc")
-  const endT    = (score / 100)
-  const endIdx  = endT * (SECTOR_COLORS_HEX.length - 1)
-  const endLo   = Math.floor(endIdx)
-  const endHi   = Math.min(endLo + 1, SECTOR_COLORS_HEX.length - 1)
-  const endFt   = endIdx - endLo
-  const parse   = (hex: string) => [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)]
-  const ec0     = parse(SECTOR_COLORS_HEX[endLo])
-  const ec1     = parse(SECTOR_COLORS_HEX[endHi])
-  const scoreTextColor = score === 0
-    ? '#4A4A5A'
-    : `rgb(${Math.round(ec0[0]*(1-endFt)+ec1[0]*endFt)},${Math.round(ec0[1]*(1-endFt)+ec1[1]*endFt)},${Math.round(ec0[2]*(1-endFt)+ec1[2]*endFt)})`
+  // Couleur texte = couleur au bout de l'arc
+  const [er, eg, eb] = lerpGrad(score / 100)
+  const scoreTextColor = score === 0 ? '#4A4A5A' : `rgb(${er},${eg},${eb})`
 
   return (
     <Svg width={size} height={size * 0.72} viewBox={`0 0 ${size} ${size}`} pointerEvents="none">

@@ -180,16 +180,13 @@ function MyoIcon({ size = 80, bg = '#0A0A0F' }: { size?: number; bg?: string }) 
 
 // ─── Logo Orava ───────────────────────────────────────────────────────────────
 
-function OravaLogo({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
+function OravaLogo() {
   return (
-    <Svg width={40} height={40} viewBox="0 0 100 100">
-      <Circle cx="50" cy="50" r="44"   stroke={colors.accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="35.5" stroke={colors.accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="27"   stroke={colors.accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="18.5" stroke={colors.accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="10"   stroke={colors.accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="3.5"  fill={colors.accent} />
-    </Svg>
+    <Image
+      source={require('../../assets/orava_logo.png')}
+      style={{ width: 40, height: 40 }}
+      resizeMode="contain"
+    />
   )
 }
 
@@ -698,8 +695,8 @@ function SparkBorder({ width, height }: { width: number; height: number }) {
       opacity2.value = fade
     }
 
-    const initial = setTimeout(triggerSpark, 900)
-    const interval = setInterval(triggerSpark, 6000)
+    const initial = setTimeout(triggerSpark, 1667)
+    const interval = setInterval(triggerSpark, 5000)
     return () => { clearTimeout(initial); clearInterval(interval) }
   }, [perimeter, posCoinHR, posCoinBL])
 
@@ -1825,7 +1822,7 @@ export default function FeedScreen() {
       <View style={[styles.header, { paddingHorizontal: spacing.s4, paddingVertical: spacing.s3 }]}>
         <Animated.View style={logoAnimStyle}>
           <TouchableOpacity onPress={() => router.push('/chat')} activeOpacity={0.8}>
-            <OravaLogo colors={colors} />
+            <OravaLogo />
           </TouchableOpacity>
         </Animated.View>
         {/* Clip parent — le texte émerge depuis le bord gauche */}

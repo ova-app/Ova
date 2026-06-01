@@ -9,9 +9,9 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from 'react-native'
 import { useRouter } from 'expo-router'
-import Svg, { Circle } from 'react-native-svg'
 import { AlertCircle } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
@@ -33,18 +33,15 @@ interface ErreurFormulaire {
   global?: string
 }
 
-// ─── Logo Orava — bull's-eye cercle jaune ────────────────────────────────────
+// ─── Logo Orava ───────────────────────────────────────────────────────────────
 
-function LogoOrava({ accent }: { accent: string; bg: string }): React.JSX.Element {
+function LogoOrava(): React.JSX.Element {
   return (
-    <Svg width={48} height={48} viewBox="0 0 100 100">
-      <Circle cx="50" cy="50" r="44"   stroke={accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="35.5" stroke={accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="27"   stroke={accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="18.5" stroke={accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="10"   stroke={accent} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="3.5"  fill={accent} />
-    </Svg>
+    <Image
+      source={require('../../assets/orava_logo.png')}
+      style={{ width: 48, height: 48 }}
+      resizeMode="contain"
+    />
   )
 }
 
@@ -132,7 +129,7 @@ export default function RegisterScreen(): React.JSX.Element {
       >
         {/* Hero */}
         <View style={styles.hero}>
-          <LogoOrava accent={colors.accent} bg={colors.background} />
+          <LogoOrava />
           <Text style={styles.wordmark}>ORAVA</Text>
           <Text style={styles.tagline}>Chaque séance devient une œuvre.</Text>
         </View>

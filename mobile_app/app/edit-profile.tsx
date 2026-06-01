@@ -11,13 +11,14 @@ import {
   Platform,
   ActivityIndicator,
   Image,
+  Alert,
 } from 'react-native'
 import { useRouter } from 'expo-router'
-import { ChevronLeft, Calendar, AlertCircle } from 'lucide-react-native'
+import { ChevronLeft, Camera, AlertCircle, Calendar } from 'lucide-react-native'
 import * as ImagePicker from 'expo-image-picker'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
-import { spacing, radius, typography, font } from '@/constants/theme'
+import { spacing, radius, typography, font, touchTarget } from '@/constants/theme'
 import { inputRecipe, InputState } from '@/constants/recipes'
 import RulerPicker from '@/components/RulerPicker'
 
@@ -26,11 +27,11 @@ import RulerPicker from '@/components/RulerPicker'
 interface ProfileForm {
   username: string
   fullName: string
-  dateNaissance: string
+  dateDay: string    // "DD"
+  dateMonth: string  // "MM"
+  dateYear: string   // "YYYY"
   poidsKg: string
   tailleCm: string
-  ageLeBrut: string
-  masseGrassePct: string
 }
 
 interface ProfileErrors {
@@ -39,42 +40,54 @@ interface ProfileErrors {
   dateNaissance?: string
   poidsKg?: string
   tailleCm?: string
-  ageLeBrut?: string
-  masseGrassePct?: string
   global?: string
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatDateForDisplay(isoDate: string): string {
-  if (!isoDate) return ''
-  const parts = isoDate.split('-')
-  if (parts.length !== 3) return isoDate
-  return `${parts[2]} / ${parts[1]} / ${parts[0]}`
+function isoToDateParts(iso: string): { day: string; month: string; year: string } {
+  const p = iso.split('-')
+  if (p.length === 3) return { day: p[2] ?? '', month: p[1] ?? '', year: p[0] ?? '' }
+  return { day: '', month: '', year: '' }
 }
 
-function parseDateInput(input: string): string {
-  // Accepte dd/mm/yyyy ou dd / mm / yyyy → yyyy-mm-dd
-  const cleaned = input.replace(/\s/g, '').replace(/\//g, '/')
-  const parts = cleaned.split('/')
-  if (parts.length === 3 && parts[2].length === 4) {
-    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`
-  }
-  return input
+function buildIsoDate(day: string, month: string, year: string): string | null {
+  if (day.length !== 2 || month.length !== 2 || year.length !== 4) return null
+  const d = parseInt(day, 10), m = parseInt(month, 10), y = parseInt(year, 10)
+  if (isNaN(d) || isNaN(m) || isNaN(y)) return null
+  if (d < 1 || d > 31 || m < 1 || m > 12 || y < 1900 || y > 2100) return null
+  return `${year}-${month}-${day}`
 }
 
 function getInitiales(fullName: string, username: string): string {
   if (fullName.trim()) {
     const words = fullName.trim().split(/\s+/)
-    if (words.length >= 2) {
-      return `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase()
-    }
-    return words[0][0].toUpperCase()
+    if (words.length >= 2) return `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase()
+    return (words[0][0] ?? '?').toUpperCase()
   }
-  if (username.trim()) {
-    return username.trim().charAt(0).toUpperCase()
+  return username.trim().charAt(0).toUpperCase() || '?'
+}
+
+async function uploadAvatarToStorage(localUri: string, uid: string): Promise<string | null> {
+  try {
+    const response = await fetch(localUri)
+    const blob = await response.blob()
+    const rawExt = localUri.split('.').pop()?.split('?')[0]?.toLowerCase()
+    const ext = rawExt === 'png' ? 'png' : 'jpg'
+    const contentType = ext === 'png' ? 'image/png' : 'image/jpeg'
+    const path = `${uid}/avatar.${ext}`
+
+    const { error } = await supabase.storage
+      .from('avatars')
+      .upload(path, blob, { upsert: true, contentType })
+
+    if (error) throw error
+
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+    return `${data.publicUrl}?t=${Date.now()}`
+  } catch {
+    return null
   }
-  return '?'
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -83,48 +96,45 @@ export default function EditProfileScreen(): React.JSX.Element {
   const { colors } = useTheme()
   const router = useRouter()
 
+  const dayRef = useRef<TextInput>(null)
+  const monthRef = useRef<TextInput>(null)
+  const yearRef = useRef<TextInput>(null)
+
   const [form, setForm] = useState<ProfileForm>({
     username: '',
     fullName: '',
-    dateNaissance: '',
+    dateDay: '',
+    dateMonth: '',
+    dateYear: '',
     poidsKg: '',
     tailleCm: '',
-    ageLeBrut: '',
-    masseGrassePct: '',
   })
   const [errors, setErrors] = useState<ProfileErrors>({})
-  const [loading, setLoading] = useState<boolean>(true)
-  const [saving, setSaving] = useState<boolean>(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [avatarLocalUri, setAvatarLocalUri] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
-  const [usernameFocused, setUsernameFocused] = useState<boolean>(false)
-  const [fullNameFocused, setFullNameFocused] = useState<boolean>(false)
-  const [poidsKgFocused, setPoidsKgFocused] = useState<boolean>(false)
-  const [datePickerOpen, setDatePickerOpen] = useState<boolean>(false)
-  const dateInputRef = useRef<TextInput>(null)
-  const [rulerMode, setRulerMode] = useState<string | null>(null)
-
-  // ─── Load profil existant ──────────────────────────────────────────────────
+  const [usernameFocused, setUsernameFocused] = useState(false)
+  const [fullNameFocused, setFullNameFocused] = useState(false)
+  const [showPoidsRuler, setShowPoidsRuler] = useState(false)
+  const [showTailleRuler, setShowTailleRuler] = useState(false)
 
   useEffect(() => {
     async function loadProfile(): Promise<void> {
       try {
         const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-          router.replace('/auth/login')
-          return
-        }
+        if (!user) { router.replace('/auth/login'); return }
         setUserId(user.id)
 
         const { data, error } = await supabase
           .from('users')
-          .select('username, full_name, avatar_url, date_naissance')
+          .select('username, full_name, avatar_url, date_naissance, height_cm')
           .eq('id', user.id)
           .single()
 
         if (error) throw error
 
-        // Récupérer dernier poids
         const { data: metricsData } = await supabase
           .from('body_metrics')
           .select('weight_kg')
@@ -133,18 +143,19 @@ export default function EditProfileScreen(): React.JSX.Element {
           .limit(1)
           .maybeSingle()
 
-        setAvatarUrl(data.avatar_url ?? null)
-        const dataAny = data as any
+        const dateParts = data.date_naissance ? isoToDateParts(data.date_naissance) : { day: '', month: '', year: '' }
+
+        setAvatarUrl((data as { avatar_url?: string | null }).avatar_url ?? null)
         setForm({
-          username: data.username ?? '',
-          fullName: data.full_name ?? '',
-          dateNaissance: data.date_naissance
-            ? formatDateForDisplay(data.date_naissance)
-            : '',
+          username: (data as { username?: string | null }).username ?? '',
+          fullName: (data as { full_name?: string | null }).full_name ?? '',
+          dateDay: dateParts.day,
+          dateMonth: dateParts.month,
+          dateYear: dateParts.year,
           poidsKg: metricsData?.weight_kg ? String(metricsData.weight_kg) : '',
-          tailleCm: dataAny?.taille_cm ? String(dataAny.taille_cm) : '',
-          ageLeBrut: dataAny?.age ? String(dataAny.age) : '',
-          masseGrassePct: dataAny?.masse_grasse_pct ? String(dataAny.masse_grasse_pct) : '',
+          tailleCm: (data as { height_cm?: number | null }).height_cm
+            ? String((data as { height_cm?: number | null }).height_cm)
+            : '',
         })
       } catch {
         setErrors({ global: 'Impossible de charger le profil.' })
@@ -152,58 +163,31 @@ export default function EditProfileScreen(): React.JSX.Element {
         setLoading(false)
       }
     }
-
     void loadProfile()
   }, [router])
 
-  // ─── Validation ───────────────────────────────────────────────────────────
-
   function validate(): boolean {
-    const newErrors: ProfileErrors = {}
+    const e: ProfileErrors = {}
+    if (!form.username.trim()) e.username = "Nom d'utilisateur requis"
+    else if (form.username.length < 3) e.username = 'Minimum 3 caractères'
+    if (!form.fullName.trim()) e.fullName = 'Nom complet requis'
 
-    if (!form.username.trim()) {
-      newErrors.username = "Nom d'utilisateur requis"
-    } else if (form.username.length < 3) {
-      newErrors.username = 'Minimum 3 caractères'
-    }
-
-    if (!form.fullName.trim()) {
-      newErrors.fullName = 'Nom complet requis'
+    const hasAnyDatePart = form.dateDay || form.dateMonth || form.dateYear
+    if (hasAnyDatePart && !buildIsoDate(form.dateDay, form.dateMonth, form.dateYear)) {
+      e.dateNaissance = 'Date invalide — format : jj / mm / aaaa'
     }
 
     if (form.poidsKg) {
-      const poids = parseFloat(form.poidsKg)
-      if (isNaN(poids) || poids < 20 || poids > 500) {
-        newErrors.poidsKg = 'Poids invalide (20–500 kg)'
-      }
+      const p = parseFloat(form.poidsKg)
+      if (isNaN(p) || p < 20 || p > 500) e.poidsKg = 'Poids invalide (20–500 kg)'
     }
-
     if (form.tailleCm) {
-      const taille = parseFloat(form.tailleCm)
-      if (isNaN(taille) || taille < 100 || taille > 220) {
-        newErrors.tailleCm = 'Taille invalide (100–220 cm)'
-      }
+      const t = parseFloat(form.tailleCm)
+      if (isNaN(t) || t < 100 || t > 250) e.tailleCm = 'Taille invalide (100–250 cm)'
     }
-
-    if (form.ageLeBrut) {
-      const age = parseFloat(form.ageLeBrut)
-      if (isNaN(age) || age < 10 || age > 100) {
-        newErrors.ageLeBrut = 'Âge invalide (10–100 ans)'
-      }
-    }
-
-    if (form.masseGrassePct) {
-      const mg = parseFloat(form.masseGrassePct)
-      if (isNaN(mg) || mg < 5 || mg > 50) {
-        newErrors.masseGrassePct = 'Masse grasse invalide (5–50%)'
-      }
-    }
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
+    setErrors(e)
+    return Object.keys(e).length === 0
   }
-
-  // ─── Save ─────────────────────────────────────────────────────────────────
 
   async function saveProfile(): Promise<void> {
     if (!validate() || !userId) return
@@ -211,13 +195,22 @@ export default function EditProfileScreen(): React.JSX.Element {
     setErrors({})
 
     try {
-      const isoDate = form.dateNaissance
-        ? parseDateInput(form.dateNaissance)
-        : null
+      let finalAvatarUrl = avatarUrl
 
-      const tailleCmNum = form.tailleCm ? parseInt(form.tailleCm, 10) : null
-      const ageNum = form.ageLeBrut ? parseInt(form.ageLeBrut, 10) : null
-      const masseGrassaPctNum = form.masseGrassePct ? parseFloat(form.masseGrassePct) : null
+      if (avatarLocalUri) {
+        const uploaded = await uploadAvatarToStorage(avatarLocalUri, userId)
+        if (!uploaded) {
+          setErrors({ global: "Impossible d'uploader la photo. Réessaie." })
+          setSaving(false)
+          return
+        }
+        finalAvatarUrl = uploaded
+        setAvatarUrl(uploaded)
+        setAvatarLocalUri(null)
+      }
+
+      const isoDate = buildIsoDate(form.dateDay, form.dateMonth, form.dateYear)
+      const heightNum = form.tailleCm ? parseFloat(form.tailleCm) : null
 
       const { error: userError } = await supabase
         .from('users')
@@ -225,9 +218,8 @@ export default function EditProfileScreen(): React.JSX.Element {
           username: form.username.trim(),
           full_name: form.fullName.trim(),
           date_naissance: isoDate,
-          taille_cm: tailleCmNum,
-          age: ageNum,
-          masse_grasse_pct: masseGrassaPctNum,
+          avatar_url: finalAvatarUrl,
+          height_cm: heightNum,
         })
         .eq('id', userId)
 
@@ -236,14 +228,11 @@ export default function EditProfileScreen(): React.JSX.Element {
       if (form.poidsKg) {
         const poidsNum = parseFloat(form.poidsKg)
         if (!isNaN(poidsNum)) {
-          const { error: metricsError } = await supabase
-            .from('body_metrics')
-            .insert({
-              user_id: userId,
-              weight_kg: poidsNum,
-              measured_at: new Date().toISOString(),
-            })
-          if (metricsError) throw metricsError
+          await supabase.from('body_metrics').insert({
+            user_id: userId,
+            weight_kg: poidsNum,
+            measured_at: new Date().toISOString(),
+          })
         }
       }
 
@@ -255,19 +244,50 @@ export default function EditProfileScreen(): React.JSX.Element {
     }
   }
 
-  // ─── Avatar picker ────────────────────────────────────────────────────────
-
   async function pickAvatar(): Promise<void> {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    })
-
-    if (!result.canceled && result.assets[0]) {
-      setAvatarUrl(result.assets[0].uri)
-    }
+    Alert.alert('Photo de profil', 'Choisir depuis…', [
+      {
+        text: 'Galerie',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+          if (status !== 'granted') {
+            Alert.alert('Permission refusée', "Accorde l'accès à la galerie dans les Réglages.")
+            return
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+          })
+          if (!result.canceled && result.assets[0]) {
+            setAvatarUrl(result.assets[0].uri)
+            setAvatarLocalUri(result.assets[0].uri)
+          }
+        },
+      },
+      {
+        text: 'Caméra',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync()
+          if (status !== 'granted') {
+            Alert.alert('Permission refusée', "Accorde l'accès à la caméra dans les Réglages.")
+            return
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ['images'],
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+          })
+          if (!result.canceled && result.assets[0]) {
+            setAvatarUrl(result.assets[0].uri)
+            setAvatarLocalUri(result.assets[0].uri)
+          }
+        },
+      },
+      { text: 'Annuler', style: 'cancel' },
+    ])
   }
 
   async function seDeconnecter(): Promise<void> {
@@ -286,6 +306,9 @@ export default function EditProfileScreen(): React.JSX.Element {
     )
   }
 
+  const dateHasError = !!errors.dateNaissance
+  const dateIsFilled = form.dateDay.length > 0 || form.dateMonth.length > 0 || form.dateYear.length > 0
+
   return (
     <KeyboardAvoidingView
       style={s.root}
@@ -295,27 +318,21 @@ export default function EditProfileScreen(): React.JSX.Element {
 
       {/* ── Header ── */}
       <View style={s.header}>
-        <Pressable
-          style={s.backBtn}
-          onPress={() => router.back()}
-          hitSlop={8}
-          accessibilityLabel="Retour"
-        >
+        <Pressable style={s.backBtn} onPress={() => router.back()} hitSlop={8}>
           <ChevronLeft size={24} color={colors.textPrimary} strokeWidth={2} />
         </Pressable>
-        <Text style={s.headerTitle}>Mon profil</Text>
+        <Text style={s.headerTitle}>Modifier le profil</Text>
         <Pressable
           style={s.saveBtn}
           onPress={() => void saveProfile()}
           disabled={saving}
           accessibilityRole="button"
-          accessibilityLabel="Sauvegarder"
+          accessibilityLabel="Enregistrer"
         >
-          {saving ? (
-            <ActivityIndicator color={colors.accent} size="small" />
-          ) : (
-            <Text style={s.saveBtnLabel}>Sauvegarder</Text>
-          )}
+          {saving
+            ? <ActivityIndicator color={colors.accent} size="small" />
+            : <Text style={s.saveBtnLabel}>Enregistrer</Text>
+          }
         </Pressable>
       </View>
 
@@ -334,26 +351,34 @@ export default function EditProfileScreen(): React.JSX.Element {
             accessibilityRole="button"
             accessibilityLabel="Changer la photo de profil"
           >
-            {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={s.avatar} />
-            ) : (
-              <View style={s.avatarPlaceholder}>
-                <Text style={s.avatarInitials}>{initiales}</Text>
-              </View>
-            )}
+            {avatarUrl
+              ? <Image source={{ uri: avatarUrl }} style={s.avatar} />
+              : (
+                <View style={s.avatarPlaceholder}>
+                  <Text style={s.avatarInitials}>{initiales}</Text>
+                </View>
+              )
+            }
+            <View style={s.cameraBadge}>
+              <Camera size={14} color={colors.background} strokeWidth={2.5} />
+            </View>
           </Pressable>
-          <Text style={s.avatarChangeLabel}>Changer la photo</Text>
+          <Text style={s.avatarLabel}>
+            {avatarLocalUri ? 'Photo sélectionnée · non enregistrée' : 'Modifier la photo'}
+          </Text>
         </View>
 
         {/* ── Erreur globale ── */}
         {errors.global ? (
           <View style={s.errorBanner}>
+            <AlertCircle size={14} color={colors.error} strokeWidth={2} />
             <Text style={s.errorBannerText}>{errors.global}</Text>
           </View>
         ) : null}
 
-        {/* ── Champs ── */}
-        <View style={s.form}>
+        {/* ── Section Identité ── */}
+        <Text style={s.sectionLabel}>IDENTITÉ</Text>
+        <View style={s.sectionCard}>
 
           {/* Nom d'utilisateur */}
           {(() => {
@@ -365,11 +390,11 @@ export default function EditProfileScreen(): React.JSX.Element {
             return (
               <View style={s.fieldGroup}>
                 <Text style={r.label}>NOM D&apos;UTILISATEUR</Text>
-                <View style={r.container}>
+                <View style={[r.container, s.transparentInput]}>
                   <TextInput
                     style={r.input}
                     value={form.username}
-                    onChangeText={(v) => setForm(f => ({ ...f, username: v }))}
+                    onChangeText={v => setForm(f => ({ ...f, username: v }))}
                     onFocus={() => setUsernameFocused(true)}
                     onBlur={() => setUsernameFocused(false)}
                     placeholder="@tonpseudo"
@@ -377,20 +402,18 @@ export default function EditProfileScreen(): React.JSX.Element {
                     autoCapitalize="none"
                     autoCorrect={false}
                     textContentType="username"
-                    accessibilityLabel="Nom d'utilisateur"
                   />
-                  {errors.username ? (
-                    <View style={r.icon}>
-                      <AlertCircle size={16} color={colors.error} strokeWidth={2} />
-                    </View>
-                  ) : null}
+                  {errors.username
+                    ? <View style={r.icon}><AlertCircle size={16} color={colors.error} strokeWidth={2} /></View>
+                    : null
+                  }
                 </View>
-                {errors.username ? (
-                  <Text style={r.helper}>{errors.username}</Text>
-                ) : null}
+                {errors.username ? <Text style={r.helper}>{errors.username}</Text> : null}
               </View>
             )
           })()}
+
+          <View style={s.fieldSep} />
 
           {/* Nom complet */}
           {(() => {
@@ -402,246 +425,219 @@ export default function EditProfileScreen(): React.JSX.Element {
             return (
               <View style={s.fieldGroup}>
                 <Text style={r.label}>NOM COMPLET</Text>
-                <View style={r.container}>
+                <View style={[r.container, s.transparentInput]}>
                   <TextInput
                     style={r.input}
                     value={form.fullName}
-                    onChangeText={(v) => setForm(f => ({ ...f, fullName: v }))}
+                    onChangeText={v => setForm(f => ({ ...f, fullName: v }))}
                     onFocus={() => setFullNameFocused(true)}
                     onBlur={() => setFullNameFocused(false)}
                     placeholder="Prénom Nom"
                     placeholderTextColor={colors.textTertiary}
                     textContentType="name"
-                    accessibilityLabel="Nom complet"
                   />
-                  {errors.fullName ? (
-                    <View style={r.icon}>
-                      <AlertCircle size={16} color={colors.error} strokeWidth={2} />
-                    </View>
-                  ) : null}
+                  {errors.fullName
+                    ? <View style={r.icon}><AlertCircle size={16} color={colors.error} strokeWidth={2} /></View>
+                    : null
+                  }
                 </View>
-                {errors.fullName ? (
-                  <Text style={r.helper}>{errors.fullName}</Text>
-                ) : null}
+                {errors.fullName ? <Text style={r.helper}>{errors.fullName}</Text> : null}
               </View>
             )
           })()}
 
-          {/* Date de naissance */}
+        </View>
+
+        {/* ── Section Mesures ── */}
+        <Text style={s.sectionLabel}>MESURES</Text>
+        <View style={s.sectionCard}>
+
+          {/* Date de naissance — 3 champs séparés */}
+          <View style={s.fieldGroup}>
+            <View style={s.dateHeader}>
+              <Text style={[s.dateLabel, dateHasError && { color: colors.error }]}>
+                DATE DE NAISSANCE
+              </Text>
+              <Calendar size={14} color={dateHasError ? colors.error : colors.textTertiary} strokeWidth={1.5} />
+            </View>
+            <View style={[s.dateRow, dateHasError && s.dateRowError]}>
+              {/* JJ */}
+              <View style={s.dateSegment}>
+                <TextInput
+                  ref={dayRef}
+                  style={[s.dateInput, { color: form.dateDay ? colors.textPrimary : colors.textTertiary }]}
+                  value={form.dateDay}
+                  onChangeText={v => {
+                    const d = v.replace(/\D/g, '').slice(0, 2)
+                    setForm(f => ({ ...f, dateDay: d }))
+                    if (d.length === 2) monthRef.current?.focus()
+                  }}
+                  onKeyPress={({ nativeEvent }) => {
+                    if (nativeEvent.key === 'Backspace' && form.dateDay === '') {
+                      // nothing to go back to
+                    }
+                  }}
+                  placeholder="JJ"
+                  placeholderTextColor={colors.textTertiary}
+                  keyboardType="numeric"
+                  maxLength={2}
+                  returnKeyType="next"
+                />
+              </View>
+              <Text style={s.dateSep}>/</Text>
+              {/* MM */}
+              <View style={s.dateSegment}>
+                <TextInput
+                  ref={monthRef}
+                  style={[s.dateInput, { color: form.dateMonth ? colors.textPrimary : colors.textTertiary }]}
+                  value={form.dateMonth}
+                  onChangeText={v => {
+                    const d = v.replace(/\D/g, '').slice(0, 2)
+                    setForm(f => ({ ...f, dateMonth: d }))
+                    if (d.length === 2) yearRef.current?.focus()
+                  }}
+                  onKeyPress={({ nativeEvent }) => {
+                    if (nativeEvent.key === 'Backspace' && form.dateMonth === '') {
+                      dayRef.current?.focus()
+                    }
+                  }}
+                  placeholder="MM"
+                  placeholderTextColor={colors.textTertiary}
+                  keyboardType="numeric"
+                  maxLength={2}
+                  returnKeyType="next"
+                />
+              </View>
+              <Text style={s.dateSep}>/</Text>
+              {/* AAAA */}
+              <View style={[s.dateSegment, s.dateYearSegment]}>
+                <TextInput
+                  ref={yearRef}
+                  style={[s.dateInput, { color: form.dateYear ? colors.textPrimary : colors.textTertiary }]}
+                  value={form.dateYear}
+                  onChangeText={v => {
+                    const d = v.replace(/\D/g, '').slice(0, 4)
+                    setForm(f => ({ ...f, dateYear: d }))
+                  }}
+                  onKeyPress={({ nativeEvent }) => {
+                    if (nativeEvent.key === 'Backspace' && form.dateYear === '') {
+                      monthRef.current?.focus()
+                    }
+                  }}
+                  placeholder="AAAA"
+                  placeholderTextColor={colors.textTertiary}
+                  keyboardType="numeric"
+                  maxLength={4}
+                  returnKeyType="done"
+                />
+              </View>
+            </View>
+            {dateHasError ? (
+              <View style={s.dateError}>
+                <AlertCircle size={12} color={colors.error} strokeWidth={2} />
+                <Text style={[s.dateErrorText, { color: colors.error }]}>{errors.dateNaissance}</Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={s.fieldSep} />
+
+          {/* Taille */}
           {(() => {
-            const state: InputState =
-              errors.dateNaissance ? 'error' :
-              datePickerOpen ? 'active' :
-              form.dateNaissance.length > 0 ? 'filled' : 'default'
+            const state: InputState = errors.tailleCm ? 'error' : 'default'
             const r = inputRecipe(state, colors)
             return (
               <View style={s.fieldGroup}>
-                <Text style={r.label}>DATE DE NAISSANCE</Text>
-                {datePickerOpen ? (
-                  <View style={r.container}>
-                    <TextInput
-                      ref={dateInputRef}
-                      style={r.input}
-                      value={form.dateNaissance}
-                      onChangeText={(v) => setForm(f => ({ ...f, dateNaissance: v }))}
-                      onBlur={() => {
-                        setDatePickerOpen(false)
-                      }}
-                      placeholder="jj / mm / aaaa"
-                      placeholderTextColor={colors.textTertiary}
-                      keyboardType="numeric"
-                      maxLength={14}
-                      autoFocus
-                      accessibilityLabel="Date de naissance"
+                <Text style={r.label}>TAILLE</Text>
+                {showTailleRuler ? (
+                  <View style={s.rulerWrap}>
+                    <RulerPicker
+                      value={form.tailleCm ? parseFloat(form.tailleCm) : 170}
+                      min={140}
+                      max={220}
+                      step={1}
+                      unit="cm"
+                      onChange={v => setForm(f => ({ ...f, tailleCm: String(v) }))}
+                      colors={colors}
                     />
-                    <View style={r.icon}>
-                      {errors.dateNaissance ? (
-                        <AlertCircle size={16} color={colors.error} strokeWidth={2} />
-                      ) : (
-                        <Calendar size={16} color={colors.accent} strokeWidth={1.5} />
-                      )}
-                    </View>
+                    <Pressable
+                      style={s.rulerDoneBtn}
+                      onPress={() => setShowTailleRuler(false)}
+                    >
+                      <Text style={s.rulerDoneBtnText}>Valider</Text>
+                    </Pressable>
                   </View>
                 ) : (
                   <Pressable
-                    style={[r.container, s.dateDisplayRow]}
-                    onPress={() => setDatePickerOpen(true)}
+                    style={[r.container, s.transparentInput]}
+                    onPress={() => setShowTailleRuler(true)}
                     accessibilityRole="button"
-                    accessibilityLabel="Date de naissance, appuyez pour modifier"
+                    accessibilityLabel="Modifier la taille"
                   >
-                    <Text style={[r.input, form.dateNaissance ? s.dateValueText : s.datePlaceholderText]}>
-                      {form.dateNaissance || 'jj / mm / aaaa'}
+                    <Text style={[r.input, { color: form.tailleCm ? colors.textPrimary : colors.textTertiary }]}>
+                      {form.tailleCm ? `${form.tailleCm} cm` : 'Non renseignée'}
                     </Text>
-                    <View style={r.icon}>
-                      {errors.dateNaissance ? (
-                        <AlertCircle size={16} color={colors.error} strokeWidth={2} />
-                      ) : (
-                        <Calendar size={16} color={colors.textTertiary} strokeWidth={1.5} />
-                      )}
-                    </View>
                   </Pressable>
                 )}
-                {errors.dateNaissance ? (
-                  <Text style={r.helper}>{errors.dateNaissance}</Text>
-                ) : null}
+                {errors.tailleCm ? <Text style={r.helper}>{errors.tailleCm}</Text> : null}
               </View>
             )
           })()}
 
+          <View style={s.fieldSep} />
+
           {/* Poids */}
-          <View style={s.fieldGroup}>
-            <Text style={[inputRecipe('default', colors).label]}>POIDS</Text>
-            {rulerMode === 'poids' ? (
-              <View style={s.rulerContainer}>
-                <RulerPicker
-                  value={form.poidsKg ? parseFloat(form.poidsKg) : 70}
-                  min={20}
-                  max={200}
-                  step={0.5}
-                  unit="kg"
-                  onChange={(v) => setForm(f => ({ ...f, poidsKg: String(v) }))}
-                  colors={colors}
-                />
-                <Pressable
-                  onPress={() => setRulerMode(null)}
-                  style={s.rulerDoneBtn}
-                >
-                  <Text style={s.rulerDoneBtnText}>Valider</Text>
-                </Pressable>
+          {(() => {
+            const state: InputState = errors.poidsKg ? 'error' : 'default'
+            const r = inputRecipe(state, colors)
+            return (
+              <View style={s.fieldGroup}>
+                <Text style={r.label}>POIDS</Text>
+                {showPoidsRuler ? (
+                  <View style={s.rulerWrap}>
+                    <RulerPicker
+                      value={form.poidsKg ? parseFloat(form.poidsKg) : 70}
+                      min={20}
+                      max={200}
+                      step={0.5}
+                      unit="kg"
+                      onChange={v => setForm(f => ({ ...f, poidsKg: String(v) }))}
+                      colors={colors}
+                    />
+                    <Pressable
+                      style={s.rulerDoneBtn}
+                      onPress={() => setShowPoidsRuler(false)}
+                    >
+                      <Text style={s.rulerDoneBtnText}>Valider</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Pressable
+                    style={[r.container, s.transparentInput]}
+                    onPress={() => setShowPoidsRuler(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Modifier le poids"
+                  >
+                    <Text style={[r.input, { color: form.poidsKg ? colors.textPrimary : colors.textTertiary }]}>
+                      {form.poidsKg ? `${form.poidsKg} kg` : 'Non renseigné'}
+                    </Text>
+                  </Pressable>
+                )}
+                {errors.poidsKg ? <Text style={r.helper}>{errors.poidsKg}</Text> : null}
               </View>
-            ) : (
-              <Pressable
-                style={[inputRecipe(errors.poidsKg ? 'error' : form.poidsKg ? 'filled' : 'default', colors).container, s.rulerPressable]}
-                onPress={() => setRulerMode('poids')}
-              >
-                <Text style={[inputRecipe(form.poidsKg ? 'filled' : 'default', colors).input, form.poidsKg ? { color: colors.textPrimary } : { color: colors.textTertiary }]}>
-                  {form.poidsKg || '70'} kg
-                </Text>
-              </Pressable>
-            )}
-            {errors.poidsKg ? (
-              <Text style={inputRecipe('error', colors).helper}>{errors.poidsKg}</Text>
-            ) : null}
-          </View>
-
-          {/* Taille */}
-          <View style={s.fieldGroup}>
-            <Text style={[inputRecipe('default', colors).label]}>TAILLE</Text>
-            {rulerMode === 'taille' ? (
-              <View style={s.rulerContainer}>
-                <RulerPicker
-                  value={form.tailleCm ? parseFloat(form.tailleCm) : 170}
-                  min={100}
-                  max={220}
-                  step={1}
-                  unit="cm"
-                  onChange={(v) => setForm(f => ({ ...f, tailleCm: String(v) }))}
-                  colors={colors}
-                />
-                <Pressable
-                  onPress={() => setRulerMode(null)}
-                  style={s.rulerDoneBtn}
-                >
-                  <Text style={s.rulerDoneBtnText}>Valider</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Pressable
-                style={[inputRecipe(errors.tailleCm ? 'error' : form.tailleCm ? 'filled' : 'default', colors).container, s.rulerPressable]}
-                onPress={() => setRulerMode('taille')}
-              >
-                <Text style={[inputRecipe(form.tailleCm ? 'filled' : 'default', colors).input, form.tailleCm ? { color: colors.textPrimary } : { color: colors.textTertiary }]}>
-                  {form.tailleCm || '170'} cm
-                </Text>
-              </Pressable>
-            )}
-            {errors.tailleCm ? (
-              <Text style={inputRecipe('error', colors).helper}>{errors.tailleCm}</Text>
-            ) : null}
-          </View>
-
-          {/* Âge */}
-          <View style={s.fieldGroup}>
-            <Text style={[inputRecipe('default', colors).label]}>ÂGE</Text>
-            {rulerMode === 'age' ? (
-              <View style={s.rulerContainer}>
-                <RulerPicker
-                  value={form.ageLeBrut ? parseFloat(form.ageLeBrut) : 25}
-                  min={10}
-                  max={100}
-                  step={1}
-                  unit="ans"
-                  onChange={(v) => setForm(f => ({ ...f, ageLeBrut: String(v) }))}
-                  colors={colors}
-                />
-                <Pressable
-                  onPress={() => setRulerMode(null)}
-                  style={s.rulerDoneBtn}
-                >
-                  <Text style={s.rulerDoneBtnText}>Valider</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Pressable
-                style={[inputRecipe(errors.ageLeBrut ? 'error' : form.ageLeBrut ? 'filled' : 'default', colors).container, s.rulerPressable]}
-                onPress={() => setRulerMode('age')}
-              >
-                <Text style={[inputRecipe(form.ageLeBrut ? 'filled' : 'default', colors).input, form.ageLeBrut ? { color: colors.textPrimary } : { color: colors.textTertiary }]}>
-                  {form.ageLeBrut || '25'} ans
-                </Text>
-              </Pressable>
-            )}
-            {errors.ageLeBrut ? (
-              <Text style={inputRecipe('error', colors).helper}>{errors.ageLeBrut}</Text>
-            ) : null}
-          </View>
-
-          {/* Masse grasse */}
-          <View style={s.fieldGroup}>
-            <Text style={[inputRecipe('default', colors).label]}>MASSE GRASSE</Text>
-            {rulerMode === 'mg' ? (
-              <View style={s.rulerContainer}>
-                <RulerPicker
-                  value={form.masseGrassePct ? parseFloat(form.masseGrassePct) : 20}
-                  min={5}
-                  max={50}
-                  step={0.5}
-                  unit="%"
-                  onChange={(v) => setForm(f => ({ ...f, masseGrassePct: String(v) }))}
-                  colors={colors}
-                />
-                <Pressable
-                  onPress={() => setRulerMode(null)}
-                  style={s.rulerDoneBtn}
-                >
-                  <Text style={s.rulerDoneBtnText}>Valider</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Pressable
-                style={[inputRecipe(errors.masseGrassePct ? 'error' : form.masseGrassePct ? 'filled' : 'default', colors).container, s.rulerPressable]}
-                onPress={() => setRulerMode('mg')}
-              >
-                <Text style={[inputRecipe(form.masseGrassePct ? 'filled' : 'default', colors).input, form.masseGrassePct ? { color: colors.textPrimary } : { color: colors.textTertiary }]}>
-                  {form.masseGrassePct || '20'} %
-                </Text>
-              </Pressable>
-            )}
-            {errors.masseGrassePct ? (
-              <Text style={inputRecipe('error', colors).helper}>{errors.masseGrassePct}</Text>
-            ) : null}
-          </View>
+            )
+          })()}
 
         </View>
 
         {/* ── Déconnexion ── */}
         <Pressable
-          style={({ pressed }) => [s.deconnexionBtn, pressed && { opacity: 0.6 }]}
+          style={({ pressed }) => [s.decoBtn, pressed && { opacity: 0.5 }]}
           onPress={() => void seDeconnecter()}
           accessibilityRole="button"
           accessibilityLabel="Se déconnecter"
         >
-          <Text style={s.deconnexionText}>Déconnexion</Text>
+          <Text style={s.decoText}>Se déconnecter</Text>
         </Pressable>
 
         <View style={s.bottomPad} />
@@ -654,14 +650,8 @@ export default function EditProfileScreen(): React.JSX.Element {
 
 function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
   return StyleSheet.create({
-    root: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    centered: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
+    root: { flex: 1, backgroundColor: colors.background },
+    centered: { alignItems: 'center', justifyContent: 'center' },
 
     // ── Header ──
     header: {
@@ -688,7 +678,7 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       height: 44,
       justifyContent: 'center',
       alignItems: 'flex-end',
-      minWidth: 44,
+      minWidth: 80,
     },
     saveBtnLabel: {
       ...typography.body,
@@ -697,31 +687,34 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
 
     // ── Scroll ──
-    scroll: {
-      flex: 1,
-    },
+    scroll: { flex: 1 },
     scrollContent: {
       paddingHorizontal: spacing.s4,
+      paddingTop: spacing.s2,
     },
 
     // ── Avatar ──
     avatarSection: {
       alignItems: 'center',
-      paddingTop: spacing.s6,
-      paddingBottom: spacing.s4,
+      paddingVertical: spacing.s6,
     },
     avatarWrap: {
-      marginBottom: spacing.s2,
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      borderWidth: 2,
+      borderColor: colors.accent,
+      padding: 3,
+      position: 'relative',
     },
     avatar: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
+      width: '100%',
+      height: '100%',
+      borderRadius: 38,
     },
     avatarPlaceholder: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
+      flex: 1,
+      borderRadius: 38,
       backgroundColor: colors.backgroundSecondary,
       alignItems: 'center',
       justifyContent: 'center',
@@ -730,10 +723,23 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       ...typography.title,
       color: colors.accent,
     },
-    avatarChangeLabel: {
+    cameraBadge: {
+      position: 'absolute',
+      bottom: 0,
+      right: 0,
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+    avatarLabel: {
       ...typography.caption,
-      color: colors.accent,
-      marginTop: spacing.s2,
+      color: colors.textSecondary,
+      marginTop: spacing.s3,
     },
 
     // ── Error ──
@@ -742,49 +748,110 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderRadius: radius.md,
       padding: spacing.s3,
       marginBottom: spacing.s4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.s2,
     },
     errorBannerText: {
       ...typography.caption,
       color: colors.error,
-      textAlign: 'center',
+      flex: 1,
     },
 
-    // ── Form ──
-    form: {
+    // ── Sections ──
+    sectionLabel: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      letterSpacing: 1,
+      marginTop: spacing.s5,
+      marginBottom: spacing.s2,
+      marginLeft: spacing.s1,
+    },
+    sectionCard: {
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: radius.lg,
+      paddingHorizontal: spacing.s4,
+      paddingVertical: spacing.s4,
       gap: spacing.s4,
+    },
+    fieldSep: {
+      height: 1,
+      backgroundColor: colors.separator,
+      marginHorizontal: -spacing.s4,
     },
     fieldGroup: {
       gap: spacing.s2,
     },
-    inputUnit: {
-      ...typography.body,
-      fontFamily: font.bold,
-      color: colors.textSecondary,
+    transparentInput: {
+      backgroundColor: 'transparent',
     },
-    fieldNote: {
+
+    // ── Date ──
+    dateHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.s2,
+    },
+    dateLabel: {
       ...typography.caption,
-      color: colors.textTertiary,
-      marginTop: spacing.s3,
+      color: colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
     },
-    fieldNoteAccent: {
-      color: colors.accent,
+    dateRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'transparent',
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      minHeight: touchTarget.comfort,
+      paddingHorizontal: spacing.s4,
+      gap: spacing.s1,
+    },
+    dateRowError: {
+      borderColor: colors.error,
+      backgroundColor: `${colors.error}08`,
+    },
+    dateSegment: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    dateYearSegment: {
+      flex: 2,
+    },
+    dateInput: {
+      ...typography.body,
+      textAlign: 'center',
+      paddingVertical: spacing.s3,
+      width: '100%',
+      fontVariant: ['tabular-nums'],
+    },
+    dateSep: {
+      ...typography.body,
+      color: colors.textTertiary,
+    },
+    dateError: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.s1,
+      marginTop: spacing.s1,
+    },
+    dateErrorText: {
+      ...typography.caption,
     },
 
     // ── RulerPicker ──
-    rulerPressable: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    rulerContainer: {
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: radius.md,
-      padding: spacing.s5,
+    rulerWrap: {
       gap: spacing.s4,
+      paddingTop: spacing.s2,
+      backgroundColor: colors.backgroundTertiary,
+      borderRadius: radius.md,
+      padding: spacing.s4,
     },
     rulerDoneBtn: {
       backgroundColor: colors.accent,
-      height: 44,
+      height: touchTarget.min,
       borderRadius: radius.md,
       alignItems: 'center',
       justifyContent: 'center',
@@ -795,38 +862,19 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       color: colors.background,
     },
 
-    // ── Date display ──
-    dateDisplayRow: {
-      // Pressable reprend le style container de inputRecipe — juste curseur implicite
-    },
-    dateValueText: {
-      ...typography.body,
-      color: colors.textPrimary,
-      flex: 1,
-      paddingVertical: spacing.s3,
-    },
-    datePlaceholderText: {
-      ...typography.body,
-      color: colors.textTertiary,
-      flex: 1,
-      paddingVertical: spacing.s3,
-    },
-
     // ── Déconnexion ──
-    deconnexionBtn: {
+    decoBtn: {
       alignItems: 'center',
-      paddingVertical: spacing.s5,
       marginTop: spacing.s8,
-      minHeight: 52,
+      paddingVertical: spacing.s5,
+      minHeight: touchTarget.comfort,
       justifyContent: 'center',
     },
-    deconnexionText: {
+    decoText: {
       ...typography.body,
       color: colors.textTertiary,
     },
 
-    bottomPad: {
-      height: spacing.s12,
-    },
+    bottomPad: { height: spacing.s12 },
   })
 }

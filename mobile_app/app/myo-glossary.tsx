@@ -143,11 +143,13 @@ const FAMILIES: FamilyEntry[] = [
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
-export default function MyoGlossaryScreen(): React.JSX.Element {
+export default function MyoGlossaryScreen({ onClose }: { onClose?: () => void } = {}): React.JSX.Element {
   const { colors } = useTheme()
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const s = buildStyles(colors)
+
+  const handleBack = onClose ?? (() => router.back())
 
   return (
     <View style={[s.root, { paddingTop: insets.top }]}>
@@ -157,7 +159,7 @@ export default function MyoGlossaryScreen(): React.JSX.Element {
       <View style={s.header}>
         <Pressable
           style={s.backBtn}
-          onPress={() => router.back()}
+          onPress={handleBack}
           hitSlop={8}
           accessibilityLabel="Retour"
         >

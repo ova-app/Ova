@@ -315,32 +315,30 @@ sessionSave()    → NotificationFeedbackType.Success
 
 ## Logo Orava — directives
 
-**Design validé (28/05/2026)** : bullseye 6 couches — jaune(48) → noir(32) → jaune(24) → noir(14) → jaune(8) → point noir(4).
+**Design validé (01/06/2026)** : 3 anneaux jaunes concentriques + point central. PNG source : `design/system/orava_logo.png`. Asset intégré : `mobile_app/assets/orava_logo.png`.
 
 Implémentation code (utilisée partout) :
 ```tsx
-// Bullseye 6 couches : jaune(48) → noir(32) → jaune(24) → noir(14) → jaune(8) → point noir(4)
-<View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-  <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' }}>
-    <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' }}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-          <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.background }} />
-        </View>
-      </View>
-    </View>
-  </View>
-</View>
+// Toujours utiliser l'Image PNG — jamais recoder le logo en SVG/View
+import { Image } from 'react-native'
+
+<Image
+  source={require('../../assets/orava_logo.png')}
+  style={{ width: 48, height: 48 }}
+  resizeMode="contain"
+/>
+// Adapter le chemin require() selon la profondeur du fichier :
+// app/index.tsx       → require('../assets/orava_logo.png')
+// app/(tabs)/*.tsx    → require('../../assets/orava_logo.png')
+// app/auth/*.tsx      → require('../../assets/orava_logo.png')
+// app/workout/*.tsx   → require('../../assets/orava_logo.png')
 ```
 
 Règles d'usage :
 - App icon : symbole seul sur fond `#0A0A0F`, sans texte
 - Wordmark : symbole + "ORAVA" en typo bold condensed
-- Couleur symbole : `#FFDD00` sur fond noir — jamais inversé (noir sur blanc)
 - Interactif dans header feed → `/chat` (tap)
 - Non-cliquable pendant séance active
-- Formats à exporter : SVG + PNG 1024×1024 + PNG 512×512
-- Placer dans `design/system/logo/` avant intégration dans `mobile_app/assets/`
 
 ---
 

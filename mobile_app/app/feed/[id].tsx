@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
   Platform,
 } from 'react-native'
+import Animated, { useSharedValue, useAnimatedStyle, useAnimatedReaction, runOnJS, withRepeat, withSequence, withTiming, withDelay, Easing } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Share2, MoreVertical, Heart, MessageCircle, X, Send, HelpCircle } from 'lucide-react-native'
@@ -21,24 +22,20 @@ import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, font, duration } from '@/constants/theme'
 import { prBadgeRecipe, type PrType } from '@/constants/recipes'
 import MyoOrb, { FAMILY_NAMES, SECTOR_COLORS_HEX } from '@/app/workout/myo-orb'
+import MyoGlossaryScreen from '@/app/myo-glossary'
 import { sessionValuesFromSignature } from '@/lib/myo'
 import { Zap, Flame, Dumbbell, Trophy } from 'lucide-react-native'
-import Svg, { Text as SvgText, Defs, LinearGradient, Stop } from 'react-native-svg'
+import Svg, { Text as SvgText, Defs, LinearGradient, Stop, Rect } from 'react-native-svg'
 
-// ─── Score hero avec dégradé arc-en-ciel (interpolation 8 couleurs familles) ──
-function GradientScoreText({ score }: { score: number }) {
-  const size = 80
+// ─── Score dégradé gris→orange→or ──────────────────────────────────────────
+function GradientScoreText({ score, size = 80 }: { score: number; size?: number }) {
   return (
     <Svg width={size} height={size * 0.7} viewBox={`0 0 ${size} ${size * 0.7}`}>
       <Defs>
         <LinearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-          {SECTOR_COLORS_HEX.map((color, i) => (
-            <Stop
-              key={i}
-              offset={`${(i / (SECTOR_COLORS_HEX.length - 1)) * 100}%`}
-              stopColor={color}
-            />
-          ))}
+          <Stop offset="0%" stopColor="#8E8E93" />
+          <Stop offset="50%" stopColor="#D85A30" />
+          <Stop offset="100%" stopColor="#FAC775" />
         </LinearGradient>
       </Defs>
       <SvgText
@@ -494,7 +491,7 @@ export default function FeedDetailScreen(): React.JSX.Element {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { colors } = useTheme()
   const router = useRouter()
-  const { width: screenWidth } = useWindowDimensions()
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions()
   const insets = useSafeAreaInsets()
 
   const [workout, setWorkout] = useState<FeedWorkoutDetail | null>(null)
@@ -510,6 +507,74 @@ export default function FeedDetailScreen(): React.JSX.Element {
   const [newComment, setNewComment] = useState<string>('')
   const [selectedFamily, setSelectedFamily] = useState<number | null>(null)
   const [myoFullscreen, setMyoFullscreen] = useState<boolean>(false)
+  const [myoGlossaryOpen, setMyoGlossaryOpen] = useState<boolean>(false)
+
+  // Animation volume total 0 → valeur finale
+  const volumeAnim = useSharedValue(0)
+  const [displayVolume, setDisplayVolume] = useState<number | null>(null)
+
+  useAnimatedReaction(
+    () => volumeAnim.value,
+    (value) => { runOnJS(setDisplayVolume)(Math.round(value)) }
+  )
+
+  useEffect(() => {
+    if (workout?.total_volume_kg == null) return
+    volumeAnim.value = 0
+    volumeAnim.value = withTiming(workout.total_volume_kg, { duration: 500, easing: Easing.bezier(0.16, 1, 0.3, 1) })
+  }, [workout?.id])
+
+  // Animation hint "GUIDE" sur le bouton HelpCircle
+  const hintOpacity = useSharedValue(0)
+  const hintY = useSharedValue(6)
+
+  useEffect(() => {
+    if (!myoFullscreen) {
+      hintOpacity.value = withTiming(0, { duration: 200 })
+      hintY.value = withTiming(6, { duration: 200 })
+      return
+    }
+    hintOpacity.value = withRepeat(
+      withSequence(
+        withTiming(0, { duration: 0 }),
+        withDelay(900, withTiming(1, { duration: 350, easing: Easing.out(Easing.ease) })),
+        withTiming(1, { duration: 2200 }),
+        withTiming(0, { duration: 450, easing: Easing.in(Easing.ease) }),
+        withTiming(0, { duration: 1800 }),
+      ),
+      -1,
+      false
+    )
+    hintY.value = withRepeat(
+      withSequence(
+        withTiming(6, { duration: 0 }),
+        withDelay(900, withTiming(0, { duration: 350, easing: Easing.out(Easing.ease) })),
+        withTiming(0, { duration: 2200 }),
+        withTiming(-3, { duration: 450, easing: Easing.in(Easing.ease) }),
+        withTiming(6, { duration: 0 }),
+        withTiming(6, { duration: 1800 }),
+      ),
+      -1,
+      false
+    )
+  }, [myoFullscreen])
+
+  const hintAnimStyle = useAnimatedStyle(() => ({
+    opacity: hintOpacity.value,
+    transform: [{ translateY: hintY.value }],
+  }))
+
+  const glossarySlide = useSharedValue(screenHeight)
+
+  useEffect(() => {
+    glossarySlide.value = myoGlossaryOpen
+      ? withTiming(0, { duration: 380, easing: Easing.bezier(0.16, 1, 0.3, 1) })
+      : withTiming(screenHeight, { duration: 280, easing: Easing.bezier(0.4, 0, 1, 1) })
+  }, [myoGlossaryOpen])
+
+  const glossaryAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: glossarySlide.value }],
+  }))
 
   const familyScores = useMemo(() => {
     if (!sessionValues) return new Array(8).fill(0) as number[]
@@ -777,6 +842,7 @@ export default function FeedDetailScreen(): React.JSX.Element {
         style={s.scroll}
         contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
+        decelerationRate={0.96}
       >
       <View>
         {/* ── Header ── */}
@@ -848,7 +914,7 @@ export default function FeedDetailScreen(): React.JSX.Element {
           <Text style={s.heroLabel}>VOLUME TOTAL</Text>
           <View style={s.heroRow}>
             <Text style={[s.heroValue, { color: colors.accent }]} allowFontScaling={false}>
-              {formatVolume(workout.total_volume_kg)}
+              {displayVolume != null ? formatVolume(displayVolume) : formatVolume(workout.total_volume_kg)}
             </Text>
           </View>
           <View style={s.statChips}>
@@ -931,16 +997,23 @@ export default function FeedDetailScreen(): React.JSX.Element {
             <View style={s.myoMiniInfo}>
               <Text style={[s.myoMiniTitle, { color: colors.textPrimary }]}>Signature Myo</Text>
               <Text style={[s.myoMiniSub, { color: colors.textSecondary }]}>8 familles · Tap pour détailler</Text>
-              <View style={s.myoColorStrip}>
-                {SECTOR_COLORS_HEX.map((c, i) => (
-                  <View key={i} style={[s.myoColorSegment, { backgroundColor: c }]} />
-                ))}
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}>
-                <Text style={[s.myoMiniTitle, { color: scoreColor, fontSize: 22, fontVariant: ['tabular-nums'] }]}>
-                  {globalScore}
-                </Text>
-                <Text style={[s.myoMiniSub, { color: colors.textTertiary, fontSize: 11 }]}>/ 100</Text>
+              <View style={{ marginTop: spacing.s2, gap: 6 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <GradientScoreText score={globalScore} size={44} />
+                  <Text style={[s.myoMiniSub, { color: colors.textTertiary, fontSize: 11 }]}>/ 100</Text>
+                </View>
+                <View style={[s.scoreBarTrack, { backgroundColor: colors.backgroundTertiary }]}>
+                  <Svg width={`${globalScore}%`} height={6} style={{ borderRadius: 3 }}>
+                    <Defs>
+                      <LinearGradient id="sbGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <Stop offset="0%" stopColor="#8E8E93" />
+                        <Stop offset="50%" stopColor="#D85A30" />
+                        <Stop offset="100%" stopColor="#FAC775" />
+                      </LinearGradient>
+                    </Defs>
+                    <Rect x={0} y={0} width="100%" height={6} rx={3} fill="url(#sbGrad)" />
+                  </Svg>
+                </View>
               </View>
             </View>
           </Pressable>
@@ -1095,12 +1168,15 @@ export default function FeedDetailScreen(): React.JSX.Element {
         <View style={[s.myoFsContainer, { backgroundColor: colors.background, paddingTop: insets.top }]}>
           <View style={s.myoFsHeader}>
             <Pressable
-              style={({ pressed }) => [s.myoFsClose, pressed && { opacity: 0.6 }]}
-              onPress={() => router.push('/myo-glossary')}
+              style={({ pressed }) => [s.myoFsHelpBtn, pressed && { opacity: 0.6 }]}
+              onPress={() => setMyoGlossaryOpen(true)}
               hitSlop={8}
               accessibilityLabel="Guide des variables Myo"
             >
-              <HelpCircle size={22} color={colors.textSecondary} strokeWidth={1.5} />
+              <HelpCircle size={22} color={colors.textPrimary} />
+              <Animated.Text style={[hintAnimStyle, s.myoFsHelpHint, { color: colors.textSecondary }]}>
+                GUIDE
+              </Animated.Text>
             </Pressable>
             <Text style={[s.myoFsTitle, { color: colors.textPrimary }]}>Signature Myo</Text>
             <Pressable
@@ -1149,6 +1225,14 @@ export default function FeedDetailScreen(): React.JSX.Element {
               <View style={s.myoFsScoreDivider} />
             </View>
           </View>
+
+          {/* ── Glossaire — overlay animé dans le même container ── */}
+          <Animated.View
+            style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.background }, glossaryAnimStyle]}
+            pointerEvents={myoGlossaryOpen ? 'auto' : 'none'}
+          >
+            <MyoGlossaryScreen onClose={() => setMyoGlossaryOpen(false)} />
+          </Animated.View>
         </View>
       </Modal>
 
@@ -1405,15 +1489,14 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     myoMiniSub: {
       ...typography.caption,
     },
-    myoColorStrip: {
-      flexDirection: 'row',
-      height: 4,
-      borderRadius: 2,
+    scoreBarTrack: {
+      height: 6,
+      borderRadius: 3,
       overflow: 'hidden',
-      marginTop: spacing.s2,
     },
-    myoColorSegment: {
-      flex: 1,
+    scoreBarFill: {
+      height: 6,
+      borderRadius: 3,
     },
     myoFsGlobalScoreBlock: {
       paddingHorizontal: spacing.s4,
@@ -1502,6 +1585,19 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       height: 44,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    myoFsHelpBtn: {
+      width: 44,
+      height: 54,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 3,
+    },
+    myoFsHelpHint: {
+      fontSize: 8,
+      fontFamily: font.bold,
+      letterSpacing: 0.9,
+      textTransform: 'uppercase' as const,
     },
     myoFsOrb: {
       flexGrow: 1,

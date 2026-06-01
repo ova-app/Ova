@@ -4,9 +4,10 @@ import {
   Text,
   StyleSheet,
   StatusBar,
+  Image,
 } from 'react-native'
 import { useRouter } from 'expo-router'
-import Svg, { Path, Circle } from 'react-native-svg'
+import Svg, { Path } from 'react-native-svg'
 import Animated, {
   useSharedValue,
   withRepeat,
@@ -19,18 +20,15 @@ import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
 import { spacing, font } from '@/constants/theme'
 
-// ─── Logo Orava — cercle jaune + losange noir intérieur ──────────────────────
+// ─── Logo Orava ───────────────────────────────────────────────────────────────
 
-function LogoOrava({ accentColor }: { accentColor: string; bgColor: string }): React.JSX.Element {
+function LogoOrava(): React.JSX.Element {
   return (
-    <Svg width={72} height={72} viewBox="0 0 100 100">
-      <Circle cx="50" cy="50" r="44"   stroke={accentColor} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="35.5" stroke={accentColor} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="27"   stroke={accentColor} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="18.5" stroke={accentColor} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="10"   stroke={accentColor} strokeWidth="5" fill="none" />
-      <Circle cx="50" cy="50" r="3.5"  fill={accentColor} />
-    </Svg>
+    <Image
+      source={require('../assets/orava_logo.png')}
+      style={{ width: 72, height: 72 }}
+      resizeMode="contain"
+    />
   )
 }
 
@@ -106,7 +104,7 @@ export default function SplashScreen(): React.JSX.Element {
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       {/* Groupe logo + wordmark */}
       <View style={s.logoGroup}>
-        <LogoOrava accentColor={colors.accent} bgColor={colors.background} />
+        <LogoOrava />
         <Text style={s.wordmark}>ORAVA</Text>
       </View>
 
