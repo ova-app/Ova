@@ -1,18 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  AppState,
-  AppStateStatus,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  Vibration,
-  View,
-} from 'react-native'
+import { AppState, AppStateStatus, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { SkipForward } from 'lucide-react-native'
 import { Canvas, Path, Skia } from '@shopify/react-native-skia'
 import { storage } from '@/lib/storage'
+import { refreshHapticsSetting, timerDone } from '@/lib/haptics'
 import Animated, {
   useSharedValue,
   withTiming,
@@ -25,18 +18,18 @@ import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, font } from '@/constants/theme'
 
 const PRESETS = [
-  { label: '30s',  value: 30  },
-  { label: '1min', value: 60  },
-  { label: '1:30', value: 90  },
+  { label: '30s', value: 30 },
+  { label: '1min', value: 60 },
+  { label: '1:30', value: 90 },
   { label: '2min', value: 120 },
   { label: '3min', value: 180 },
 ]
 
-const ARC_DIAMETER  = 260
-const STROKE_WIDTH  = 8
-const RADIUS_CIRCLE = (ARC_DIAMETER / 2) - STROKE_WIDTH
-const ARC_CX        = ARC_DIAMETER / 2
-const ARC_CY        = ARC_DIAMETER / 2
+const ARC_DIAMETER = 260
+const STROKE_WIDTH = 8
+const RADIUS_CIRCLE = ARC_DIAMETER / 2 - STROKE_WIDTH
+const ARC_CX = ARC_DIAMETER / 2
+const ARC_CY = ARC_DIAMETER / 2
 
 // Full-circle track path — static, computed once
 const TRACK_PATH = (() => {
@@ -64,7 +57,8 @@ export default function TimerScreen() {
   const router = useRouter()
   const { colors } = useTheme()
 
-  const DEFAULT_PRESET = PRESETS.find(p => p.value === (storage.getNumber('timer_default_preset') ?? 90))?.value ?? 90
+  const DEFAULT_PRESET =
+    PRESETS.find((p) => p.value === (storage.getNumber('timer_default_preset') ?? 90))?.value ?? 90
 
   const [remaining, setRemaining] = useState<number>(DEFAULT_PRESET)
   const [paused, setPaused] = useState<boolean>(false)
@@ -93,7 +87,9 @@ export default function TimerScreen() {
     setFinished(true)
     clearTick()
     setRemaining(0)
-    try { Vibration.vibrate(400) } catch (_) {}
+    // Haptique central (ORA-041) : respecte le toggle settings_vibration,
+    // contrairement à l'ancien Vibration.vibrate(400) brut.
+    timerDone()
     overlayOpacity.value = withSequence(
       withTiming(1, {
         duration: 300,
@@ -106,23 +102,28 @@ export default function TimerScreen() {
     }, 1500)
   }, [clearTick, overlayOpacity, router])
 
-  const startTick = useCallback((fromRemaining: number) => {
-    clearTick()
-    startTimeRef.current = Date.now()
-    pausedElapsedRef.current = totalRef.current - fromRemaining
+  const startTick = useCallback(
+    (fromRemaining: number) => {
+      clearTick()
+      startTimeRef.current = Date.now()
+      pausedElapsedRef.current = totalRef.current - fromRemaining
 
-    intervalRef.current = setInterval(() => {
-      const elapsed = pausedElapsedRef.current + (Date.now() - startTimeRef.current) / 1000
-      const next = totalRef.current - elapsed
-      if (next <= 0) {
-        triggerFinish()
-      } else {
-        setRemaining(next)
-      }
-    }, 100)
-  }, [clearTick, triggerFinish])
+      intervalRef.current = setInterval(() => {
+        const elapsed = pausedElapsedRef.current + (Date.now() - startTimeRef.current) / 1000
+        const next = totalRef.current - elapsed
+        if (next <= 0) {
+          triggerFinish()
+        } else {
+          setRemaining(next)
+        }
+      }, 100)
+    },
+    [clearTick, triggerFinish]
+  )
 
   useEffect(() => {
+    // Rafraîchit le cache haptique au montage → timerDone() respecte le toggle courant.
+    void refreshHapticsSetting()
     startTick(totalRef.current)
     return () => clearTick()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -166,7 +167,7 @@ export default function TimerScreen() {
     if (progress <= 0) return p
     const N = Math.max(4, Math.round(progress * 80))
     const startRad = -Math.PI / 2
-    const sweepRad  = progress * 2 * Math.PI
+    const sweepRad = progress * 2 * Math.PI
     for (let i = 0; i <= N; i++) {
       const a = startRad + (i / N) * sweepRad
       const x = ARC_CX + RADIUS_CIRCLE * Math.cos(a)
@@ -177,10 +178,7 @@ export default function TimerScreen() {
     return p
   }, [progress])
 
-  const arcColor =
-    progress < 0.15 ? colors.error :
-    progress < 0.30 ? '#FF6B00'    :
-    colors.accent
+  const arcColor = progress < 0.15 ? colors.error : progress < 0.3 ? '#FF6B00' : colors.accent
 
   const handleSubtract = useCallback(() => {
     if (finished) return
@@ -241,16 +239,11 @@ export default function TimerScreen() {
 
           {/* Temps centré dans l'anneau */}
           <View style={styles.arcCenter} pointerEvents="none">
-            <Text
-              style={[styles.timerText, { color: colors.textPrimary }]}
-              suppressHighlighting
-            >
+            <Text style={[styles.timerText, { color: colors.textPrimary }]} suppressHighlighting>
               {formatTime(remaining)}
             </Text>
             {paused && !finished && (
-              <Text style={[styles.pauseLabel, { color: colors.textTertiary }]}>
-                EN PAUSE
-              </Text>
+              <Text style={[styles.pauseLabel, { color: colors.textTertiary }]}>EN PAUSE</Text>
             )}
           </View>
         </TouchableOpacity>
@@ -283,14 +276,9 @@ export default function TimerScreen() {
         </TouchableOpacity>
       </View>
 
-
       {finished && (
         <Animated.View
-          style={[
-            styles.overlay,
-            { backgroundColor: colors.background },
-            overlayStyle,
-          ]}
+          style={[styles.overlay, { backgroundColor: colors.background }, overlayStyle]}
           pointerEvents="none"
         >
           <Text style={[styles.overlayText, { color: colors.accent }]}>REPOS TERMINÉ</Text>

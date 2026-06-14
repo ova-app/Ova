@@ -5,6 +5,7 @@
 
 import { useCallback, useState } from 'react'
 import { useRouter, useFocusEffect } from 'expo-router'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '@/lib/supabase'
 import { groupByMonth, type WorkoutRow, type HistorySection } from '@/lib/hooks/useHistoryData'
 
@@ -114,7 +115,13 @@ export function useProfileData(): ProfileData {
       ])
 
     // Profile
-    if (profileRes.data) setProfile(profileRes.data as UserProfile)
+    if (profileRes.data) {
+      const p = profileRes.data as UserProfile
+      setProfile(p)
+      // Cache local du plan (ORA-063) : session.tsx le lit sans réseau (règle #3)
+      // pour borner le Mode Fantôme (Pro = illimité).
+      void AsyncStorage.setItem('user_plan', p.plan === 'premium' ? 'premium' : 'free')
+    }
 
     // Followers
     setFollowers(followerRes.data?.length ?? 0)

@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS local_sets (
 );
 
 CREATE TABLE IF NOT EXISTS local_sessions (
-  id TEXT NOT NULL,
+  id TEXT PRIMARY KEY,   -- ORA-062 : PK → INSERT OR REPLACE déduplique (plus de doublons)
   total_volume_kg REAL,
   logged_at INTEGER NOT NULL
 );
@@ -164,6 +164,8 @@ CREATE INDEX IF NOT EXISTS idx_sets_exercise ON local_sets(exercise_id, logged_a
 ```
 
 Alimenté en même temps que le save Supabase dans summary.tsx. Utilisé exclusivement par Mode Fantôme et Moteur Prédictif.
+
+**Versioning (ORA-061)** : `initDB()` applique des migrations incrémentales via `PRAGMA user_version` (`migrate()` dans `db.ts`, `SCHEMA_VERSION = 1`). La migration v1 reconstruit `local_sessions` avec PK sur les bases déjà créées (dédup `ORDER BY logged_at ASC` + `INSERT OR REPLACE`). Toute future évolution du schéma local = nouveau bloc `if (version < N)` + bump `SCHEMA_VERSION`.
 
 ---
 

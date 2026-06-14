@@ -23,13 +23,46 @@ export async function initDB(): Promise<void> {
     );
 
     CREATE TABLE IF NOT EXISTS local_sessions (
-      id TEXT NOT NULL,
+      id TEXT PRIMARY KEY,
       total_volume_kg REAL,
       logged_at INTEGER NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_sets_exercise ON local_sets(exercise_id, logged_at DESC);
   `)
+  await migrate(_db)
+}
+
+// ─── Versioning du schéma local (ORA-061) ─────────────────────────────────────
+// `CREATE TABLE IF NOT EXISTS` est un no-op sur une base existante → toute évolution
+// de schéma resterait inappliquée sur les installs déjà créés. On versionne via
+// `PRAGMA user_version` et on applique des migrations incrémentales idempotentes
+// (forward-only : on ne redescend jamais la version d'une base plus récente).
+// Future migration = nouveau bloc `if (version < N) { … ; version = N }`.
+async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
+  const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version')
+  let version = row?.user_version ?? 0
+
+  // v1 — ORA-062 : `local_sessions` n'avait pas de PRIMARY KEY → `INSERT OR REPLACE`
+  // se comportait comme un simple INSERT (doublons à chaque re-save / backfill). On
+  // reconstruit la table avec `id TEXT PRIMARY KEY` en dédupliquant : ORDER BY
+  // logged_at ASC + INSERT OR REPLACE → la ligne la plus récente l'emporte.
+  if (version < 1) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS local_sessions_v1 (
+        id TEXT PRIMARY KEY,
+        total_volume_kg REAL,
+        logged_at INTEGER NOT NULL
+      );
+      INSERT OR REPLACE INTO local_sessions_v1 (id, total_volume_kg, logged_at)
+        SELECT id, total_volume_kg, logged_at FROM local_sessions ORDER BY logged_at ASC;
+      DROP TABLE local_sessions;
+      ALTER TABLE local_sessions_v1 RENAME TO local_sessions;
+    `)
+    version = 1
+  }
+
+  await db.execAsync(`PRAGMA user_version = ${version}`)
 }
 
 export async function insertLocalSet(params: {

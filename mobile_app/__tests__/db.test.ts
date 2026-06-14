@@ -21,22 +21,17 @@ jest.mock('expo-sqlite', () => ({
 
 // ─── Imports après mock ───────────────────────────────────────────────────────
 
-import {
-  initDB,
-  insertLocalSet,
-  insertLocalSession,
-  getLastLocalSet,
-} from '../lib/db'
+import { initDB, insertLocalSet, insertLocalSession, getLastLocalSet } from '../lib/db'
 
 // ─── Reset DB singleton entre tests ──────────────────────────────────────────
 
 beforeEach(async () => {
-  mockRunAsync      = jest.fn().mockResolvedValue(undefined)
+  mockRunAsync = jest.fn().mockResolvedValue(undefined)
   mockGetFirstAsync = jest.fn().mockResolvedValue(null)
-  mockExecAsync     = jest.fn().mockResolvedValue(undefined)
+  mockExecAsync = jest.fn().mockResolvedValue(undefined)
   mockOpenDatabaseAsync = jest.fn().mockResolvedValue({
-    execAsync:     mockExecAsync,
-    runAsync:      mockRunAsync,
+    execAsync: mockExecAsync,
+    runAsync: mockRunAsync,
     getFirstAsync: mockGetFirstAsync,
   })
 
@@ -57,6 +52,38 @@ describe('getDB — protection singleton', () => {
       const { getDB } = require('../lib/db') as typeof import('../lib/db')
       expect(() => getDB()).toThrow('DB not initialized')
     })
+  })
+})
+
+// ─── initDB — schéma & versioning (ORA-061 / ORA-062) ─────────────────────────
+
+describe('initDB — schéma & migration', () => {
+  it('crée local_sessions avec PRIMARY KEY (ORA-062)', async () => {
+    await initDB()
+    const execSql = (mockExecAsync.mock.calls as unknown[][]).map((c) => c[0] as string).join('\n')
+    expect(execSql).toMatch(/local_sessions[\s\S]*id TEXT PRIMARY KEY/)
+  })
+
+  it('lit puis écrit PRAGMA user_version (ORA-061)', async () => {
+    await initDB()
+    expect(mockGetFirstAsync).toHaveBeenCalledWith('PRAGMA user_version')
+    const execSql = (mockExecAsync.mock.calls as unknown[][]).map((c) => c[0] as string).join('\n')
+    expect(execSql).toMatch(/PRAGMA user_version =/)
+  })
+
+  it('reconstruit local_sessions en migration v1 si base < v1', async () => {
+    mockGetFirstAsync.mockResolvedValueOnce({ user_version: 0 })
+    await initDB()
+    const execSql = (mockExecAsync.mock.calls as unknown[][]).map((c) => c[0] as string).join('\n')
+    expect(execSql).toMatch(/local_sessions_v1/)
+    expect(execSql).toMatch(/RENAME TO local_sessions/)
+  })
+
+  it('ne re-migre pas une base déjà en v1', async () => {
+    mockGetFirstAsync.mockResolvedValueOnce({ user_version: 1 })
+    await initDB()
+    const execSql = (mockExecAsync.mock.calls as unknown[][]).map((c) => c[0] as string).join('\n')
+    expect(execSql).not.toMatch(/local_sessions_v1/)
   })
 })
 
@@ -123,7 +150,7 @@ describe('insertLocalSet', () => {
     expect(params).toContain('ex-curl')
     expect(params).toContain(20)
     expect(params).toContain(12)
-    expect(params).toContain(240)  // volume = 20 × 12
+    expect(params).toContain(240) // volume = 20 × 12
     expect(params).toContain('session-99')
     expect(params).toContain(1_700_000_000_999)
   })
@@ -191,6 +218,9 @@ describe('insertLocalSession', () => {
 describe('getLastLocalSet', () => {
   beforeEach(async () => {
     await initDB()
+    // initDB lit `PRAGMA user_version` (migrate) → on repart d'un historique propre
+    // pour que mock.calls[0] soit bien la requête getLastLocalSet.
+    mockGetFirstAsync.mockClear()
   })
 
   it('retourne null si aucun set pour cet exercice', async () => {
@@ -224,7 +254,7 @@ describe('getLastLocalSet', () => {
     expect(sql).toMatch(/ORDER BY logged_at DESC/i)
   })
 
-  it('passe l\'exerciseId comme paramètre SQL', async () => {
+  it("passe l'exerciseId comme paramètre SQL", async () => {
     mockGetFirstAsync.mockResolvedValue(null)
     await getLastLocalSet('ex-squat')
     const params = mockGetFirstAsync.mock.calls[0] as unknown[]

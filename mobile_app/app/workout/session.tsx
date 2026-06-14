@@ -758,6 +758,9 @@ export default function SessionScreen() {
   const [ghostRef, setGhostRef] = useState<GhostSet | null>(null)
   const [ghostEnabled, setGhostEnabled] = useState(true)
   const [vibrationEnabled, setVibrationEnabled] = useState(true)
+  // Fenêtre Fantôme : Free = 30j, Pro = illimité (ORA-063). Plan lu depuis le cache
+  // local `user_plan` (alimenté par profile/settings) → zéro réseau en séance (règle #3).
+  const [ghostLimitDays, setGhostLimitDays] = useState(30)
   const prevGhostBeatenRef = useRef(false)
 
   // ── Load ghost settings once ──
@@ -765,9 +768,11 @@ export default function SessionScreen() {
     void Promise.all([
       AsyncStorage.getItem('settings_ghost'),
       AsyncStorage.getItem('settings_vibration'),
-    ]).then(([ghost, vibration]) => {
+      AsyncStorage.getItem('user_plan'),
+    ]).then(([ghost, vibration, plan]) => {
       setGhostEnabled(ghost !== 'false')
       setVibrationEnabled(vibration !== 'false')
+      setGhostLimitDays(plan === 'premium' ? 99999 : 30)
     })
   }, [])
 
@@ -778,8 +783,8 @@ export default function SessionScreen() {
       setGhostRef(null)
       return
     }
-    void getGhostReference(currentExerciseId, 30).then(setGhostRef)
-  }, [currentExerciseId, ghostEnabled])
+    void getGhostReference(currentExerciseId, ghostLimitDays).then(setGhostRef)
+  }, [currentExerciseId, ghostEnabled, ghostLimitDays])
 
   // ── Status done redirect ──
   useEffect(() => {
