@@ -1,10 +1,14 @@
 name: EAS Build
 
+# Build natif cloud — déclenchement MANUEL uniquement (Actions → EAS Build → Run).
+# Volontairement pas sur push/PR : chaque build consomme des crédits EAS et
+# échoue tant que les EXPO_PUBLIC_* ne sont pas injectés (cf. BACKLOG ORA-004).
+# Pour réactiver l'auto-build sur main une fois `eas secret:create` fait,
+# décommenter le bloc `push` ci-dessous.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
 
 jobs:
   build-ios:
