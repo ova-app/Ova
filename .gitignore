@@ -1,1 +1,4 @@
 .claude/worktrees/
+
+# Claude Code — permissions locales par développeur (jamais partagées)
+.claude/settings.local.json
