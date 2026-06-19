@@ -169,6 +169,12 @@ Alimenté en même temps que le save Supabase dans summary.tsx. Utilisé exclusi
 
 ## Migrations Supabase planifiées (à appliquer quand nécessaire)
 
+> 📦 **SQL exécutable** : ces blocs sont désormais versionnés en fichiers dans
+> [`supabase/migrations/`](../../supabase/migrations/) (appliquées) et
+> [`supabase/planned/`](../../supabase/planned/) (futures). Voir
+> [`supabase/README.md`](../../supabase/README.md) pour l'état et le workflow CLI.
+> Cette section reste la **référence documentée** — garder les deux synchronisés.
+
 ### [Phase 0] Myo Famille 6 — 17 dims musculaires
 ```sql
 -- 1. Corriger muscle_group incorrects

@@ -1,0 +1,76 @@
+# Base de données Supabase — Orava
+
+Projet Supabase : **ORAVA** (région Frankfurt `eu-central-1`).
+Référence schéma complète (14 tables, RPCs, RLS, vocabulaire contrôlé) :
+[`.claude/rules/database.md`](../.claude/rules/database.md).
+
+---
+
+## ⚠️ État de la reproductibilité (à lire)
+
+Le schéma de base (14 tables + RPCs `get_*`) a été créé **manuellement dans le
+dashboard Supabase** à l'époque du v1 — il **n'existe pas encore de dump baseline**.
+Conséquence : `supabase db reset` sur une base vide **ne reconstruit pas** tout le
+schéma à partir de ce dossier tant que le baseline n'est pas généré (voir plus bas).
+
+Les fichiers de `migrations/` ci-dessous sont les **changements incrémentaux documentés**.
+
+| Migration | Contenu | Statut prod |
+|---|---|---|
+| `20260519120000_exercise_muscles_mapping.sql` | 113 exercices × mappings muscles/fascicules | ✅ appliquée |
+| `20260519130000_myo_famille6_dims.sql` | Myo Famille 6 — 17 dims + `myo_muscle_dims` | ✅ appliquée |
+| `20260614120000_create_workout_rpc.sql` | RPC transactionnelle `create_workout` | ⚠️ **NON appliquée** |
+
+> `planned/` = migrations Phase 3 (ADN, marketplace) — **pas** dans `migrations/`,
+> donc jamais exécutées par le CLI. Les déplacer dans `migrations/` (avec préfixe
+> timestamp) le jour de leur implémentation.
+
+---
+
+## Appliquer la migration en attente
+
+`create_workout` doit être appliquée pour que le save de séance fonctionne.
+Le plus simple aujourd'hui : copier le contenu de
+`migrations/20260614120000_create_workout_rpc.sql` dans le **SQL Editor** du
+dashboard Supabase et exécuter.
+
+---
+
+## Mettre en place un workflow reproductible (recommandé)
+
+Une seule fois, pour que la base soit reconstructible et que les futures
+migrations passent par le CLI :
+
+```bash
+# 1. Installer le CLI Supabase
+winget install Supabase.CLI        # Windows
+#   ou : scoop install supabase / brew install supabase/tap/supabase
+
+# 2. Se connecter + lier le projet distant (ref dans l'URL du dashboard)
+supabase login
+supabase link --project-ref <PROJECT_REF>
+
+# 3. Générer le BASELINE depuis la base de prod (capture les 14 tables + RPCs
+#    créés à la main). Le préfixe 00000000000000 le fait passer en premier.
+supabase db dump --schema public -f supabase/migrations/00000000000000_baseline.sql
+
+# 4. Marquer les migrations déjà appliquées comme telles (évite de les rejouer)
+supabase migration repair --status applied 20260519120000
+supabase migration repair --status applied 20260519130000
+```
+
+Après ça :
+```bash
+supabase db push      # applique les migrations en attente (create_workout) sur le distant
+supabase db reset     # reconstruit une base locale identique (dev)
+supabase migration new <nom>   # créer une nouvelle migration
+```
+
+---
+
+## Règle d'équipe
+
+- **Toute modif de schéma = un fichier dans `migrations/`** (jamais uniquement dans le dashboard).
+- Documenter la migration dans `.claude/rules/database.md` **avant** de coder le client.
+- Ne jamais éditer une migration déjà appliquée — en créer une nouvelle.
+- Clé `service_role` : **jamais** dans le repo ni dans l'app mobile.
