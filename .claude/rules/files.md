@@ -72,6 +72,7 @@ lib/
 ├── storage.ts               — AsyncStorage + cache mémoire in-process (API type MMKV)
 ├── analytics.ts             — PostHog EU + Events const (22 événements taxonomie)
 ├── ghost.ts                 — getGhostReference(exerciseId, limitDays) → SQLite
+├── plan.ts                  — cache RAM du plan (cacheUserPlan/getCachedPlan/ghostLimitDays) — ORA-063, gating offline
 ├── predictor.ts             — computePrediction(exerciseId) → régression linéaire pondérée on-device
 └── utils.ts                 — formatVolume(n) → "12 450" (espace milliers)
 

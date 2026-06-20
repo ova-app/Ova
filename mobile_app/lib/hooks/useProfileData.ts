@@ -6,6 +6,7 @@
 import { useCallback, useState } from 'react'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { supabase } from '@/lib/supabase'
+import { cacheUserPlan } from '@/lib/plan'
 import { groupByMonth, type WorkoutRow, type HistorySection } from '@/lib/hooks/useHistoryData'
 
 export interface UserProfile {
@@ -114,7 +115,10 @@ export function useProfileData(): ProfileData {
       ])
 
     // Profile
-    if (profileRes.data) setProfile(profileRes.data as UserProfile)
+    if (profileRes.data) {
+      setProfile(profileRes.data as UserProfile)
+      cacheUserPlan((profileRes.data as UserProfile).plan) // ORA-063 — cache plan offline
+    }
 
     // Followers
     setFollowers(followerRes.data?.length ?? 0)
