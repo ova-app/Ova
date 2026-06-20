@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -7,11 +7,15 @@ import {
   Pressable,
   StyleSheet,
   ActivityIndicator,
+  Alert,
   SectionList,
+  ScrollView,
   TouchableOpacity,
   RefreshControl,
   useWindowDimensions,
 } from 'react-native'
+import * as ImagePicker from 'expo-image-picker'
+import { BlurView } from 'expo-blur'
 import Animated, {
   useSharedValue,
   useAnimatedReaction,
@@ -32,14 +36,17 @@ import {
   TrendingUp,
   Settings,
   Dumbbell,
-  Camera,
+  Image as ImageIcon,
   Lock,
   Target,
   Plus,
   Crown,
   Flame,
   RotateCcw,
+  Trash2,
   X,
+  CalendarDays,
+  ChevronLeft,
 } from 'lucide-react-native'
 import Svg, { Path as SvgPath, Circle, Defs, LinearGradient, Stop } from 'react-native-svg'
 import { supabase } from '@/lib/supabase'
@@ -53,10 +60,12 @@ import {
   type UserProfile,
   type DayActivity,
   type WeekVolume,
+  type SessionDay,
   type PhotoItem,
 } from '@/lib/hooks/useProfileData'
 import { createClaim, nearMissGap, type Claim, type ClaimVoteCounts } from '@/lib/claims'
 import { type FeaturedPr } from '@/lib/featuredPr'
+import { uploadProfilePhoto, deleteProfilePhoto } from '@/lib/profilePhotos'
 import { resolveDisplayName } from '@/lib/displayName'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -77,6 +86,21 @@ const MONTHS_FR = [
   'nov.',
   'déc.',
 ]
+const MONTHS_FULL_FR = [
+  'Janvier',
+  'Février',
+  'Mars',
+  'Avril',
+  'Mai',
+  'Juin',
+  'Juillet',
+  'Août',
+  'Septembre',
+  'Octobre',
+  'Novembre',
+  'Décembre',
+]
+const WEEK_HEADER_FR = ['L', 'M', 'M', 'J', 'V', 'S', 'D'] // lundi → dimanche
 
 function dayTitle(ms: number): string {
   const d = new Date(ms)
@@ -513,6 +537,187 @@ function WeekCalendar({
   )
 }
 
+// ─── Calendrier mensuel (modal, même style que la semaine) ─────────────────────
+
+type MonthCell = {
+  day: number
+  ts: number
+  hasSession: boolean
+  volumeKg: number
+  isToday: boolean
+}
+
+function MonthCalendar({
+  visible,
+  sessions,
+  colors,
+  onClose,
+}: {
+  visible: boolean
+  sessions: SessionDay[]
+  colors: ReturnType<typeof useTheme>['colors']
+  onClose: () => void
+}) {
+  const s = buildStyles(colors)
+  const [offset, setOffset] = useState(0) // 0 = mois courant ; négatif = passé
+  const [sel, setSel] = useState<MonthCell | null>(null)
+
+  // Réinitialise au mois courant à chaque ouverture
+  useEffect(() => {
+    if (visible) {
+      setOffset(0)
+      setSel(null)
+    }
+  }, [visible])
+
+  const dayVolume = useMemo(() => {
+    const m = new Map<number, number>()
+    for (const d of sessions) m.set(d.date, d.volumeKg)
+    return m
+  }, [sessions])
+
+  const { title, weeks } = useMemo(() => {
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    const todayTs = now.getTime()
+    const base = new Date(now.getFullYear(), now.getMonth() + offset, 1)
+    const year = base.getFullYear()
+    const month = base.getMonth()
+    const firstDow = (new Date(year, month, 1).getDay() + 6) % 7 // 0 = lundi
+    const nbDays = new Date(year, month + 1, 0).getDate()
+
+    const cells: (MonthCell | null)[] = []
+    for (let i = 0; i < firstDow; i++) cells.push(null)
+    for (let day = 1; day <= nbDays; day++) {
+      const ts = new Date(year, month, day).getTime()
+      cells.push({
+        day,
+        ts,
+        hasSession: dayVolume.has(ts),
+        volumeKg: dayVolume.get(ts) ?? 0,
+        isToday: ts === todayTs,
+      })
+    }
+    while (cells.length % 7 !== 0) cells.push(null)
+    const rows: (MonthCell | null)[][] = []
+    for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7))
+
+    return { title: `${MONTHS_FULL_FR[month]} ${year}`, weeks: rows }
+  }, [offset, dayVolume])
+
+  const canGoNext = offset < 0
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={s.monthBackdrop} onPress={onClose}>
+        <Pressable style={s.monthCard} onPress={() => {}}>
+          {/* En-tête : navigation mois */}
+          <View style={s.monthHeader}>
+            <Pressable
+              onPress={() => {
+                setOffset((o) => o - 1)
+                setSel(null)
+              }}
+              hitSlop={10}
+              style={s.monthNavBtn}
+              accessibilityLabel="Mois précédent"
+            >
+              <ChevronLeft size={20} color={colors.textSecondary} strokeWidth={2.5} />
+            </Pressable>
+            <Text style={s.monthTitle}>{title}</Text>
+            <Pressable
+              onPress={() => {
+                if (canGoNext) {
+                  setOffset((o) => o + 1)
+                  setSel(null)
+                }
+              }}
+              hitSlop={10}
+              disabled={!canGoNext}
+              style={s.monthNavBtn}
+              accessibilityLabel="Mois suivant"
+            >
+              <ChevronRight
+                size={20}
+                color={canGoNext ? colors.textSecondary : colors.textTertiary}
+                strokeWidth={2.5}
+              />
+            </Pressable>
+          </View>
+
+          {/* En-tête jours */}
+          <View style={s.monthDowRow}>
+            {WEEK_HEADER_FR.map((l, i) => (
+              <View key={i} style={s.monthDowCol}>
+                <Text style={s.weekLabel}>{l}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Grille */}
+          {weeks.map((row, ri) => (
+            <View key={ri} style={s.monthWeekRow}>
+              {row.map((cell, ci) => (
+                <View key={ci} style={s.monthDowCol}>
+                  {cell ? (
+                    <Pressable
+                      onPress={() => setSel((prev) => (prev?.ts === cell.ts ? null : cell))}
+                      hitSlop={2}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${cell.day} — ${
+                        cell.hasSession ? `${Math.round(cell.volumeKg)} kg` : 'repos'
+                      }`}
+                    >
+                      <View
+                        style={[
+                          s.weekCell,
+                          cell.hasSession && s.weekCellActive,
+                          cell.isToday && !cell.hasSession && s.weekCellToday,
+                          sel?.ts === cell.ts && s.weekCellSelected,
+                        ]}
+                      >
+                        {cell.hasSession ? (
+                          <Dumbbell size={15} color={colors.background} strokeWidth={2.5} />
+                        ) : (
+                          <Text style={[s.weekDayNum, cell.isToday && s.weekDayNumToday]}>
+                            {cell.day}
+                          </Text>
+                        )}
+                      </View>
+                    </Pressable>
+                  ) : (
+                    <View style={s.weekCell} />
+                  )}
+                </View>
+              ))}
+            </View>
+          ))}
+
+          {/* Détail du jour sélectionné */}
+          <View style={s.monthDetail}>
+            {sel ? (
+              <Text style={s.monthDetailText} allowFontScaling={false}>
+                {dayTitle(sel.ts)}
+                {sel.hasSession ? (
+                  <Text
+                    style={{ color: colors.prGold }}
+                  >{`  ·  ${formatVolume(sel.volumeKg)} kg`}</Text>
+                ) : (
+                  <Text style={{ color: colors.textTertiary }}>{'  ·  Repos'}</Text>
+                )}
+              </Text>
+            ) : (
+              <Text style={[s.monthDetailText, { color: colors.textTertiary }]}>
+                Touche un jour pour le détail
+              </Text>
+            )}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  )
+}
+
 // ─── Graph volume hebdomadaire (interactif, axe Y discret) ─────────────────────
 
 // Courbe lissée (Catmull-Rom → cubiques Bézier). Élégant, jamais de cassure dure.
@@ -666,103 +871,294 @@ function WeeklyVolumeChart({
   )
 }
 
-// ─── Galerie photos ────────────────────────────────────────────────────────────
+// ─── Vitrine — pile compacte (aperçu profil) ───────────────────────────────────
+// Aperçu empilé des photos postées. Tap → ouvre le modal vitrine plein écran.
+// Aucune photo → icône par défaut (toujours tappable : invite à en ajouter).
 
-function PhotoGallery({
+const STACK_MAX = 4 // vignettes affichées dans la pile avant le badge « +N »
+
+function PhotoStack({
   photos,
   colors,
-  onOpenSession,
+  onOpen,
 }: {
   photos: PhotoItem[]
   colors: ReturnType<typeof useTheme>['colors']
+  onOpen: () => void
+}) {
+  const s = buildStyles(colors)
+  const mount = useSharedValue(0)
+  useEffect(() => {
+    mount.value = withDelay(160, withSpring(1, spring.standard))
+  }, [])
+  const mountStyle = useAnimatedStyle(() => ({
+    opacity: mount.value,
+    transform: [{ scale: 0.94 + mount.value * 0.06 }],
+  }))
+
+  const shown = photos.slice(0, STACK_MAX)
+  const extra = photos.length - shown.length
+  const countLabel =
+    photos.length > 0 ? `${photos.length} photo${photos.length > 1 ? 's' : ''}` : 'Aucune photo'
+
+  return (
+    <Animated.View style={[s.vitrineWrap, mountStyle]}>
+      <Pressable
+        style={({ pressed }) => [s.vitrineBtn, pressed && { opacity: 0.7 }]}
+        onPress={onOpen}
+        accessibilityRole="button"
+        accessibilityLabel={`Vitrine — ${countLabel}`}
+      >
+        {photos.length === 0 ? (
+          // Aucune photo → pile de cartes vides empilées (même langage visuel que l'aperçu réel)
+          <View style={s.vitrineThumbs}>
+            {[0, 1, 2].map((i) => (
+              <View
+                key={i}
+                style={[
+                  s.vitrineThumb,
+                  s.vitrineThumbEmpty,
+                  { marginLeft: i === 0 ? 0 : -13, zIndex: 3 - i },
+                ]}
+              >
+                {i === 0 && <ImageIcon size={15} color={colors.textTertiary} strokeWidth={1.75} />}
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={s.vitrineThumbs}>
+            {shown.map((p, i) => (
+              <ExpoImage
+                key={p.id}
+                source={{ uri: p.photoUrl }}
+                style={[s.vitrineThumb, { marginLeft: i === 0 ? 0 : -13, zIndex: STACK_MAX - i }]}
+                contentFit="cover"
+                transition={120}
+                cachePolicy="memory-disk"
+              />
+            ))}
+            {extra > 0 && (
+              <View style={[s.vitrineThumb, s.vitrineMore, { marginLeft: -13, zIndex: 0 }]}>
+                <Text style={s.vitrineMoreText} allowFontScaling={false}>
+                  +{extra}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+      </Pressable>
+    </Animated.View>
+  )
+}
+
+// ─── Vitrine — modal plein écran (grille + zoom) ────────────────────────────────
+// Overlay transparent glassy au-dessus du profil. Grille 3 colonnes de toutes les
+// photos ; tap sur une vignette → zoom plein écran. Zoom rendu en couche absolue
+// (pas de Modal imbriqué → robuste Android).
+
+function VitrineModal({
+  visible,
+  photos,
+  colors,
+  onClose,
+  onOpenSession,
+  onChanged,
+}: {
+  visible: boolean
+  photos: PhotoItem[]
+  colors: ReturnType<typeof useTheme>['colors']
+  onClose: () => void
   onOpenSession: (workoutId: string) => void
+  onChanged: () => void // refetch après ajout / suppression (la BDD reste source de vérité)
 }) {
   const s = buildStyles(colors)
   const { width } = useWindowDimensions()
-  const [lightbox, setLightbox] = useState<PhotoItem | null>(null)
+  const [zoom, setZoom] = useState<PhotoItem | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  if (photos.length === 0) {
-    return (
-      <View style={s.galleryEmpty}>
-        <Camera size={28} color={colors.textTertiary} strokeWidth={1.5} />
-        <Text style={s.galleryEmptyText}>
-          Aucune photo. Ajoute une photo à ta prochaine séance.
-        </Text>
-      </View>
-    )
-  }
-
-  // Grille 3 colonnes — largeur écran moins padding header (s5×2) moins 2 gaps (s2).
+  // Grille 3 colonnes — largeur écran moins padding (s5×2) moins 2 gaps (s2).
   const tileSize = Math.floor((width - spacing.s5 * 2 - spacing.s2 * 2) / 3)
 
-  return (
-    <>
-      <View style={s.galleryGrid}>
-        {photos.map((p) => (
-          <Pressable
-            key={p.workoutId}
-            onPress={() => setLightbox(p)}
-            style={({ pressed }) => (pressed ? { opacity: 0.75 } : null)}
-            accessibilityRole="imagebutton"
-            accessibilityLabel="Voir la photo de séance"
-          >
-            <ExpoImage
-              source={{ uri: p.photoUrl }}
-              style={[s.galleryTile, { width: tileSize, height: tileSize }]}
-              contentFit="cover"
-              transition={180}
-              cachePolicy="memory-disk"
-            />
-            {!p.isPublic && (
-              <View style={s.galleryPrivateBadge}>
-                <Lock size={11} color={colors.textPrimary} strokeWidth={2.5} />
-              </View>
-            )}
-          </Pressable>
-        ))}
-      </View>
+  function handleClose(): void {
+    setZoom(null)
+    onClose()
+  }
 
-      <Modal
-        visible={lightbox !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setLightbox(null)}
+  // Ajout d'une photo à la vitrine (hors séance) → picker → upload → refetch.
+  async function handleAdd(): Promise<void> {
+    if (busy) return
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (!perm.granted) {
+      Alert.alert('Accès refusé', "Autorise l'accès aux photos pour en ajouter à ta vitrine.")
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    })
+    if (result.canceled || !result.assets?.[0]) return
+    setBusy(true)
+    const created = await uploadProfilePhoto(result.assets[0].uri)
+    setBusy(false)
+    if (created) onChanged()
+    else Alert.alert('Échec', "Impossible d'ajouter la photo. Réessaie.")
+  }
+
+  // Suppression d'une photo de profil (source 'profile' uniquement).
+  function handleDelete(photo: PhotoItem): void {
+    Alert.alert('Supprimer la photo', 'Cette photo sera retirée de ta vitrine.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setBusy(true)
+            const ok = await deleteProfilePhoto(photo.id)
+            setBusy(false)
+            setZoom(null)
+            if (ok) onChanged()
+            else Alert.alert('Échec', 'Impossible de supprimer la photo. Réessaie.')
+          })()
+        },
+      },
+    ])
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+      <BlurView
+        intensity={40}
+        tint="dark"
+        experimentalBlurMethod="dimezisBlurView"
+        style={s.flexOne}
       >
-        <Pressable style={s.lightboxBackdrop} onPress={() => setLightbox(null)}>
-          {lightbox && (
-            <ExpoImage
-              source={{ uri: lightbox.photoUrl }}
-              style={s.lightboxImage}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-            />
-          )}
-          <Pressable
-            style={s.lightboxClose}
-            onPress={() => setLightbox(null)}
-            hitSlop={12}
-            accessibilityLabel="Fermer"
-          >
-            <X size={24} color={colors.textPrimary} strokeWidth={2} />
-          </Pressable>
-          {lightbox && (
-            <Pressable
-              style={s.lightboxCta}
-              onPress={() => {
-                const id = lightbox.workoutId
-                setLightbox(null)
-                onOpenSession(id)
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Voir la séance"
+        <View style={s.vitrineModalBackdrop}>
+          <SafeAreaView style={s.flexOne} edges={['top', 'bottom']}>
+            <View style={s.vitrineModalHeader}>
+              <Text style={s.vitrineModalTitle}>VITRINE</Text>
+              <Pressable
+                onPress={handleClose}
+                hitSlop={12}
+                style={s.vitrineModalClose}
+                accessibilityRole="button"
+                accessibilityLabel="Fermer la vitrine"
+              >
+                <X size={22} color={colors.textPrimary} strokeWidth={2} />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              contentContainerStyle={s.vitrineModalScroll}
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={s.lightboxCtaText}>Voir la séance</Text>
-              <ChevronRight size={16} color={colors.background} strokeWidth={2.5} />
+              <View style={s.galleryGrid}>
+                {/* Tuile d'ajout — toujours en tête (visible même vitrine vide) */}
+                <Pressable
+                  onPress={() => void handleAdd()}
+                  disabled={busy}
+                  style={({ pressed }) => [
+                    s.galleryAddTile,
+                    { width: tileSize, height: tileSize },
+                    pressed && !busy ? { opacity: 0.7 } : null,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ajouter une photo à la vitrine"
+                >
+                  {busy ? (
+                    <ActivityIndicator color={colors.accent} size="small" />
+                  ) : (
+                    <>
+                      <Plus size={24} color={colors.accent} strokeWidth={2} />
+                      <Text style={s.galleryAddLabel}>Ajouter</Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {photos.map((p) => (
+                  <Pressable
+                    key={p.id}
+                    onPress={() => setZoom(p)}
+                    style={({ pressed }) => (pressed ? { opacity: 0.75 } : null)}
+                    accessibilityRole="imagebutton"
+                    accessibilityLabel="Zoomer la photo"
+                  >
+                    <ExpoImage
+                      source={{ uri: p.photoUrl }}
+                      style={[s.galleryTile, { width: tileSize, height: tileSize }]}
+                      contentFit="cover"
+                      transition={180}
+                      cachePolicy="memory-disk"
+                    />
+                    {!p.isPublic && (
+                      <View style={s.galleryPrivateBadge}>
+                        <Lock size={11} color={colors.textPrimary} strokeWidth={2.5} />
+                      </View>
+                    )}
+                  </Pressable>
+                ))}
+              </View>
+
+              {photos.length === 0 && (
+                <Text style={[s.galleryEmptyText, s.vitrineModalHint]}>
+                  Ajoute une photo, ou prends-en une pendant une séance.
+                </Text>
+              )}
+            </ScrollView>
+          </SafeAreaView>
+
+          {/* Zoom plein écran — couche absolue au-dessus de la grille */}
+          {zoom && (
+            <Pressable
+              style={[StyleSheet.absoluteFill, s.lightboxBackdrop]}
+              onPress={() => setZoom(null)}
+            >
+              <ExpoImage
+                source={{ uri: zoom.photoUrl }}
+                style={s.lightboxImage}
+                contentFit="contain"
+                cachePolicy="memory-disk"
+              />
+              <Pressable
+                style={s.lightboxClose}
+                onPress={() => setZoom(null)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="Fermer le zoom"
+              >
+                <X size={24} color={colors.textPrimary} strokeWidth={2} />
+              </Pressable>
+
+              {zoom.source === 'workout' && zoom.workoutId ? (
+                <Pressable
+                  style={s.lightboxCta}
+                  onPress={() => {
+                    const id = zoom.workoutId as string
+                    handleClose()
+                    onOpenSession(id)
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Voir la séance"
+                >
+                  <Text style={s.lightboxCtaText}>Voir la séance</Text>
+                  <ChevronRight size={16} color={colors.background} strokeWidth={2.5} />
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={s.lightboxDeleteBtn}
+                  onPress={() => handleDelete(zoom)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Supprimer la photo"
+                >
+                  <Trash2 size={16} color={colors.error} strokeWidth={2} />
+                  <Text style={s.lightboxDeleteText}>Supprimer</Text>
+                </Pressable>
+              )}
             </Pressable>
           )}
-        </Pressable>
-      </Modal>
-    </>
+        </View>
+      </BlurView>
+    </Modal>
   )
 }
 
@@ -926,6 +1322,7 @@ export default function ProfileScreen(): React.JSX.Element {
     follows,
     weekActivity,
     weeklyVolume,
+    monthSessions,
     photoGallery,
     historySections,
     featuredPr,
@@ -939,6 +1336,8 @@ export default function ProfileScreen(): React.JSX.Element {
 
   const [deconnexionLoading, setDeconnexionLoading] = useState<boolean>(false)
   const [lightboxOpen, setLightboxOpen] = useState<boolean>(false)
+  const [vitrineOpen, setVitrineOpen] = useState<boolean>(false)
+  const [monthOpen, setMonthOpen] = useState<boolean>(false)
 
   // Re-claim 1 tap (ORA-081) : réannonce le même objectif (createClaim expire l'ancien actif
   // s'il existe) puis refetch → la bande repasse en « claim actif ».
@@ -1066,6 +1465,9 @@ export default function ProfileScreen(): React.JSX.Element {
               </Text>
             )}
 
+            {/* Vitrine — pile photos (entre stats sociales et calendrier) */}
+            <PhotoStack photos={photoGallery} colors={colors} onOpen={() => setVitrineOpen(true)} />
+
             {/* Streak + calendrier 7 jours + volume hebdo (haut du profil) */}
             <View style={s.statsCard}>
               {stats.streakSemaines > 0 && (
@@ -1085,7 +1487,18 @@ export default function ProfileScreen(): React.JSX.Element {
                 </>
               )}
               <View style={s.weekInCard}>
-                <Text style={s.sectionLabel}>7 DERNIERS JOURS</Text>
+                <View style={s.weekHeaderRow}>
+                  <Text style={[s.sectionLabel, { marginBottom: 0 }]}>CETTE SEMAINE</Text>
+                  <Pressable
+                    onPress={() => setMonthOpen(true)}
+                    hitSlop={10}
+                    style={s.monthTriggerBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Voir le calendrier du mois"
+                  >
+                    <CalendarDays size={18} color={colors.textSecondary} strokeWidth={2} />
+                  </Pressable>
+                </View>
                 <WeekCalendar days={weekActivity} colors={colors} />
                 {weeklyVolume.some((w) => w.volumeKg > 0) && (
                   <>
@@ -1109,16 +1522,6 @@ export default function ProfileScreen(): React.JSX.Element {
 
             {/* PR VEDETTE — preuve (passé) */}
             <PrVedetteCard pr={featuredPr} colors={colors} onPress={() => router.push('/prs')} />
-
-            {/* Galerie photos */}
-            <View style={s.gallerySection}>
-              <Text style={s.sectionLabel}>VITRINE</Text>
-              <PhotoGallery
-                photos={photoGallery}
-                colors={colors}
-                onOpenSession={(id) => router.push(`/history/${id}` as const)}
-              />
-            </View>
 
             {/* Historique title */}
             <Text style={[s.sectionTitle, { marginTop: spacing.s4, marginBottom: spacing.s4 }]}>
@@ -1153,6 +1556,24 @@ export default function ProfileScreen(): React.JSX.Element {
             </Pressable>
           </View>
         )}
+      />
+
+      {/* Calendrier du mois (même style que la semaine) */}
+      <MonthCalendar
+        visible={monthOpen}
+        sessions={monthSessions}
+        colors={colors}
+        onClose={() => setMonthOpen(false)}
+      />
+
+      {/* Vitrine plein écran (grille + zoom) */}
+      <VitrineModal
+        visible={vitrineOpen}
+        photos={photoGallery}
+        colors={colors}
+        onClose={() => setVitrineOpen(false)}
+        onOpenSession={(id) => router.push(`/history/${id}` as const)}
+        onChanged={onRefresh}
       />
 
       {/* Lightbox photo de profil */}
@@ -1747,6 +2168,19 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     weekInCard: {
       paddingTop: spacing.s1,
     },
+    weekHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: spacing.s3,
+    },
+    monthTriggerBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: radius.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     calWrap: {
       position: 'relative',
     },
@@ -1798,6 +2232,65 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       fontVariant: ['tabular-nums'],
     },
 
+    // ── Calendrier mensuel (modal) ──
+    monthBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: spacing.s5,
+    },
+    monthCard: {
+      width: '100%',
+      maxWidth: 380,
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: radius.xl,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.s5,
+    },
+    monthHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: spacing.s5,
+    },
+    monthNavBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.backgroundTertiary,
+    },
+    monthTitle: {
+      ...typography.subtitle,
+      color: colors.textPrimary,
+    },
+    monthDowRow: {
+      flexDirection: 'row',
+      marginBottom: spacing.s2,
+    },
+    monthDowCol: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    monthWeekRow: {
+      flexDirection: 'row',
+      marginBottom: spacing.s2,
+    },
+    monthDetail: {
+      marginTop: spacing.s3,
+      alignItems: 'center',
+      minHeight: 20,
+    },
+    monthDetailText: {
+      ...typography.body,
+      fontSize: 13,
+      color: colors.textSecondary,
+      fontVariant: ['tabular-nums'],
+    },
+
     // ── Volume hebdomadaire (graph interactif + axe Y discret) ──
     volTopGap: {
       height: spacing.s4,
@@ -1842,10 +2335,81 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       zIndex: 5,
     },
 
-    // ── Galerie photos ──
-    gallerySection: {
-      marginBottom: spacing.s6,
+    // ── Vitrine — pile compacte (aperçu profil) ──
+    vitrineWrap: {
+      alignItems: 'flex-end',
+      marginTop: spacing.s1,
+      marginBottom: spacing.s2,
     },
+    vitrineBtn: {
+      paddingVertical: spacing.s1,
+      paddingHorizontal: spacing.s2,
+    },
+    vitrineThumbs: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    vitrineThumb: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.sm,
+      backgroundColor: colors.backgroundTertiary,
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+    vitrineMore: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    vitrineMoreText: {
+      fontSize: 11,
+      fontFamily: font.bold,
+      color: colors.textSecondary,
+      fontVariant: ['tabular-nums'],
+    },
+    vitrineThumbEmpty: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderColor: colors.border,
+    },
+
+    // ── Vitrine — modal plein écran ──
+    vitrineModalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(10,10,15,0.35)',
+    },
+    vitrineModalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.s5,
+      paddingTop: spacing.s4,
+      paddingBottom: spacing.s4,
+    },
+    vitrineModalTitle: {
+      ...typography.subtitle,
+      color: colors.textPrimary,
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      fontFamily: font.bold,
+    },
+    vitrineModalClose: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: -spacing.s2,
+    },
+    vitrineModalScroll: {
+      paddingHorizontal: spacing.s5,
+      paddingBottom: spacing.s8,
+    },
+    vitrineModalHint: {
+      marginTop: spacing.s5,
+      paddingHorizontal: spacing.s6,
+    },
+
+    // ── Grille photos (modal) ──
     galleryGrid: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -1854,6 +2418,21 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
     galleryTile: {
       borderRadius: radius.md,
       backgroundColor: colors.backgroundTertiary,
+    },
+    galleryAddTile: {
+      borderRadius: radius.md,
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderStyle: 'dashed',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.s1,
+    },
+    galleryAddLabel: {
+      ...typography.caption,
+      color: colors.accent,
+      fontFamily: font.bold,
     },
     galleryPrivateBadge: {
       position: 'absolute',
@@ -1865,14 +2444,6 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       backgroundColor: 'rgba(10,10,15,0.6)',
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    galleryEmpty: {
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: radius.lg,
-      paddingVertical: spacing.s8,
-      paddingHorizontal: spacing.s5,
-      alignItems: 'center',
-      gap: spacing.s3,
     },
     galleryEmptyText: {
       ...typography.caption,
@@ -1946,6 +2517,25 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       fontFamily: font.bold,
       fontSize: 14,
       color: colors.background,
+    },
+    lightboxDeleteBtn: {
+      position: 'absolute',
+      bottom: 56,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.s2,
+      backgroundColor: colors.backgroundTertiary,
+      borderRadius: radius.full,
+      borderWidth: 1,
+      borderColor: `${colors.error}40`,
+      paddingHorizontal: spacing.s5,
+      height: touchTarget.min,
+    },
+    lightboxDeleteText: {
+      ...typography.body,
+      fontFamily: font.bold,
+      fontSize: 14,
+      color: colors.error,
     },
   })
 }

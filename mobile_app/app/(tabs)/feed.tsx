@@ -1484,7 +1484,7 @@ function TrendArrow({
   })
 
   return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
+    <Svg width={14} height={14} viewBox="0 0 24 24">
       {up ? (
         <>
           {/* polyligne : 1,17 → 9,9 → 14,14 → 23,5 */}
@@ -1580,7 +1580,7 @@ function MapPinIcon({
   })
 
   return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
+    <Svg width={14} height={14} viewBox="0 0 24 24">
       <AnimatedPath
         d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"
         stroke={color}
@@ -1644,7 +1644,7 @@ function DumbbellIcon({
   })
 
   return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
+    <Svg width={14} height={14} viewBox="0 0 24 24">
       <AnimatedPath
         d="M9.6 14.4 L14.4 9.6"
         stroke={color}
@@ -1709,7 +1709,7 @@ function ActivityWaveIcon({
     return { strokeDashoffset: L * (1 - drawProgress.value) }
   })
   return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
+    <Svg width={14} height={14} viewBox="0 0 24 24">
       <AnimatedPath
         d="M2 12 L6 12 L8 6 L10 18 L12 12 L22 12"
         stroke={color}
@@ -1752,7 +1752,7 @@ function TrophyDrawIcon({
   })
 
   return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
+    <Svg width={14} height={14} viewBox="0 0 24 24">
       <AnimatedPath
         d="M6 2 L18 2 L18 9 A6 6 0 0 1 6 9 Z"
         stroke={color}
@@ -1809,7 +1809,7 @@ function ClockDrawIcon({
   })
 
   return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
+    <Svg width={14} height={14} viewBox="0 0 24 24">
       <AnimatedPath
         d="M12 2 A10 10 0 0 1 22 12 A10 10 0 0 1 12 22 A10 10 0 0 1 2 12 A10 10 0 0 1 12 2"
         stroke={color}
@@ -1924,7 +1924,10 @@ function KPIBandeau({
         >
           <MapPinIcon color={colors.textSecondary} drawProgress={drawMapPin} />
           <Text
-            style={[typography.caption, { color: colors.textSecondary, textAlign: 'center' }]}
+            style={[
+              typography.caption,
+              { color: colors.textSecondary, textAlign: 'center', fontSize: 9 },
+            ]}
             numberOfLines={1}
           >
             Voir les salles
@@ -1942,6 +1945,7 @@ function KPIBandeau({
                   fontFamily: 'Barlow_700Bold',
                   fontVariant: ['tabular-nums'],
                   textAlign: 'center',
+                  fontSize: 11,
                 },
               ]}
             >
@@ -1949,7 +1953,10 @@ function KPIBandeau({
             </Text>
           </Animated.View>
           <Text
-            style={[typography.caption, { color: colors.textSecondary, textAlign: 'center' }]}
+            style={[
+              typography.caption,
+              { color: colors.textSecondary, textAlign: 'center', fontSize: 9 },
+            ]}
             numberOfLines={1}
           >
             Séances
@@ -1967,6 +1974,7 @@ function KPIBandeau({
                   fontFamily: 'Barlow_700Bold',
                   fontVariant: ['tabular-nums'],
                   textAlign: 'center',
+                  fontSize: 11,
                 },
               ]}
             >
@@ -1975,7 +1983,10 @@ function KPIBandeau({
             </Text>
           </Animated.View>
           <Text
-            style={[typography.caption, { color: colors.textSecondary, textAlign: 'center' }]}
+            style={[
+              typography.caption,
+              { color: colors.textSecondary, textAlign: 'center', fontSize: 9 },
+            ]}
             numberOfLines={1}
           >
             Tendance
@@ -2001,6 +2012,7 @@ function KPIBandeau({
                   fontFamily: 'Barlow_700Bold',
                   fontVariant: ['tabular-nums'],
                   textAlign: 'center',
+                  fontSize: 11,
                 },
               ]}
             >
@@ -2008,7 +2020,10 @@ function KPIBandeau({
             </Text>
           </Animated.View>
           <Text
-            style={[typography.caption, { color: colors.textSecondary, textAlign: 'center' }]}
+            style={[
+              typography.caption,
+              { color: colors.textSecondary, textAlign: 'center', fontSize: 9 },
+            ]}
             numberOfLines={1}
           >
             Volume
@@ -2026,6 +2041,7 @@ function KPIBandeau({
                   fontFamily: 'Barlow_700Bold',
                   fontVariant: ['tabular-nums'],
                   textAlign: 'center',
+                  fontSize: 11,
                 },
               ]}
             >
@@ -2033,7 +2049,10 @@ function KPIBandeau({
             </Text>
           </Animated.View>
           <Text
-            style={[typography.caption, { color: colors.textSecondary, textAlign: 'center' }]}
+            style={[
+              typography.caption,
+              { color: colors.textSecondary, textAlign: 'center', fontSize: 9 },
+            ]}
             numberOfLines={1}
           >
             PRs
@@ -2051,6 +2070,7 @@ function KPIBandeau({
                   fontFamily: 'Barlow_700Bold',
                   fontVariant: ['tabular-nums'],
                   textAlign: 'center',
+                  fontSize: 11,
                 },
               ]}
             >
@@ -2058,7 +2078,10 @@ function KPIBandeau({
             </Text>
           </Animated.View>
           <Text
-            style={[typography.caption, { color: colors.textSecondary, textAlign: 'center' }]}
+            style={[
+              typography.caption,
+              { color: colors.textSecondary, textAlign: 'center', fontSize: 9 },
+            ]}
             numberOfLines={1}
           >
             Durée moy.
@@ -2548,12 +2571,12 @@ const styles = StyleSheet.create({
   kpiItem: {
     flex: 1,
     borderRadius: radius.md,
-    paddingVertical: spacing.s3,
+    paddingVertical: spacing.s2,
     paddingHorizontal: spacing.s2,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.s1,
-    minHeight: 100,
+    minHeight: 72,
   },
   refreshIndicator: {
     flexDirection: 'row',

@@ -18,6 +18,7 @@ import {
   type TrackRecord,
 } from '@/lib/claims'
 import { getAutoFeaturedPr, getManualFeaturedPr, type FeaturedPr } from '@/lib/featuredPr'
+import { getProfilePhotos } from '@/lib/profilePhotos'
 import { getProfileNameFields, type NameDisplay } from '@/lib/displayName'
 import { groupByMonth, type WorkoutRow, type HistorySection } from '@/lib/hooks/useHistoryData'
 
@@ -47,15 +48,22 @@ export interface DayActivity {
 }
 
 export interface PhotoItem {
-  workoutId: string
+  id: string // clé unique : workout id (séance) ou profile_photo id (ajout manuel)
   photoUrl: string
   date: number // UNIX ms
   isPublic: boolean // false → badge « privé » sur la vignette (visible par soi seul)
+  source: 'workout' | 'profile' // 'workout' → lien séance ; 'profile' → photo ajoutée à la vitrine
+  workoutId: string | null // lien séance (source 'workout' uniquement)
 }
 
 export interface WeekVolume {
   weekStart: number // UNIX ms — lundi 00:00 de la semaine
   volumeKg: number
+}
+
+export interface SessionDay {
+  date: number // UNIX ms — début du jour
+  volumeKg: number // volume soulevé ce jour
 }
 
 export interface ProfileData {
@@ -65,6 +73,7 @@ export interface ProfileData {
   follows: number
   weekActivity: DayActivity[]
   weeklyVolume: WeekVolume[]
+  monthSessions: SessionDay[]
   photoGallery: PhotoItem[]
   historySections: HistorySection[]
   featuredPr: FeaturedPr | null
@@ -87,6 +96,7 @@ export function useProfileData(): ProfileData {
   const [follows, setFollows] = useState<number>(0)
   const [weekActivity, setWeekActivity] = useState<DayActivity[]>([])
   const [weeklyVolume, setWeeklyVolume] = useState<WeekVolume[]>([])
+  const [monthSessions, setMonthSessions] = useState<SessionDay[]>([])
   const [photoGallery, setPhotoGallery] = useState<PhotoItem[]>([])
   const [historySections, setHistorySections] = useState<HistorySection[]>([])
   const [featuredPr, setFeaturedPr] = useState<FeaturedPr | null>(null)
@@ -143,14 +153,15 @@ export function useProfileData(): ProfileData {
           .order('started_at', { ascending: false })
           .limit(50),
         // Vitrine — requête dédiée photos, indépendante des 50 dernières séances : récupère
-        // les 9 séances les plus récentes AVEC photo + is_public (badge « privé »).
+        // les séances AVEC photo + is_public (badge « privé »). La pile profil n'affiche qu'un
+        // aperçu ; le modal vitrine montre toutes ces photos → limite large.
         supabase
           .from('workouts')
           .select('id, photo_url, started_at, is_public')
           .eq('user_id', uid)
           .not('photo_url', 'is', null)
           .order('started_at', { ascending: false })
-          .limit(9),
+          .limit(60),
       ])
 
     // Profile (name_display par défaut → 'full_name' ; affiné par la lecture isolée ci-dessous)
@@ -166,14 +177,16 @@ export function useProfileData(): ProfileData {
     // ── Vitrine sociale : claim actif + pronostics + track record + PR vedette ──
     // Best-effort : un échec ici n'altère pas le reste du profil.
     await expireOverdueClaims(uid) // résout les claims 'week' dont l'échéance est passée
-    const [claim, record, autoPr, recentFailed, manualPr, nameFields] = await Promise.all([
-      getActiveClaim(uid),
-      getTrackRecord(uid),
-      getAutoFeaturedPr(uid),
-      getRecentFailedClaim(uid), // near-miss privé (ORA-081), affiché si pas de claim actif
-      getManualFeaturedPr(uid), // ORA-076 — pin manuel (lecture isolée, no-op pré-migration)
-      getProfileNameFields(uid), // préférence d'affichage du nom (lecture isolée, no-op pré-migration)
-    ])
+    const [claim, record, autoPr, recentFailed, manualPr, nameFields, profilePhotos] =
+      await Promise.all([
+        getActiveClaim(uid),
+        getTrackRecord(uid),
+        getAutoFeaturedPr(uid),
+        getRecentFailedClaim(uid), // near-miss privé (ORA-081), affiché si pas de claim actif
+        getManualFeaturedPr(uid), // ORA-076 — pin manuel (lecture isolée, no-op pré-migration)
+        getProfileNameFields(uid), // préférence d'affichage du nom (lecture isolée, no-op pré-migration)
+        getProfilePhotos(uid), // vitrine — photos ajoutées à la main (lecture isolée, [] pré-migration)
+      ])
     // Préférence d'affichage : merge dans le profil déjà posé (défaut 'full_name' pré-migration).
     if (nameFields) {
       setProfile((prev) => (prev ? { ...prev, name_display: nameFields.name_display } : prev))
@@ -230,9 +243,10 @@ export function useProfileData(): ProfileData {
       }))
       setHistorySections(groupByMonth(rows))
 
-      // Calendrier 7 derniers jours — set des jours avec séance
+      // Jours avec séance — set + volume cumulé par jour (alimente calendrier semaine + mois)
       const today = new Date()
       today.setHours(0, 0, 0, 0)
+      const todayTs = today.getTime()
       const sessionDays = new Set<number>()
       const dayVolume = new Map<number, number>()
       for (const w of raw) {
@@ -242,21 +256,29 @@ export function useProfileData(): ProfileData {
         sessionDays.add(ts)
         dayVolume.set(ts, (dayVolume.get(ts) ?? 0) + (w.total_volume_kg ?? 0))
       }
+
+      // Calendrier — semaine en cours, lundi → dimanche
+      const dowToday = (today.getDay() + 6) % 7 // 0 = lundi
+      const monday = new Date(today)
+      monday.setDate(today.getDate() - dowToday)
       const week: DayActivity[] = []
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(today)
-        d.setDate(today.getDate() - i)
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(monday)
+        d.setDate(monday.getDate() + i)
         const ts = d.getTime()
         week.push({
           date: ts,
           label: DAY_LABELS[d.getDay()],
           dayNum: d.getDate(),
           hasSession: sessionDays.has(ts),
-          isToday: i === 0,
+          isToday: ts === todayTs,
           volumeKg: dayVolume.get(ts) ?? 0,
         })
       }
       setWeekActivity(week)
+
+      // Jours de séance (toutes dates dispo) → alimente le calendrier mois
+      setMonthSessions(Array.from(dayVolume, ([date, volumeKg]) => ({ date, volumeKg })))
 
       // Volume hebdomadaire — 12 dernières semaines (lundi → dimanche), depuis les workouts récents.
       // Bucket par lundi 00:00 ; un graph fin du volume soulevé par semaine sous le calendrier.
@@ -284,26 +306,36 @@ export function useProfileData(): ProfileData {
       setWeeklyVolume(weekly)
     }
 
-    // Vitrine photos — alimentée par la requête dédiée (indépendante de l'historique limité
-    // à 50, donc les vieilles photos ne disparaissent pas). is_public → badge « privé ».
-    if (photosRes.data) {
-      const photoRows = photosRes.data as Array<{
+    // Vitrine photos — fusion de deux sources, triées par date décroissante :
+    //   • séances avec photo (requête dédiée, indépendante de l'historique limité à 50)
+    //   • photos ajoutées à la main à la vitrine (profile_photos, [] pré-migration)
+    // is_public → badge « privé » sur la vignette.
+    const sessionPhotos: PhotoItem[] = (
+      (photosRes.data ?? []) as Array<{
         id: string
         photo_url: string | null
         started_at: string
         is_public: boolean | null
       }>
-      setPhotoGallery(
-        photoRows
-          .filter((w) => !!w.photo_url)
-          .map((w) => ({
-            workoutId: w.id,
-            photoUrl: w.photo_url as string,
-            date: new Date(w.started_at).getTime(),
-            isPublic: w.is_public ?? false,
-          }))
-      )
-    }
+    )
+      .filter((w) => !!w.photo_url)
+      .map((w) => ({
+        id: w.id,
+        photoUrl: w.photo_url as string,
+        date: new Date(w.started_at).getTime(),
+        isPublic: w.is_public ?? false,
+        source: 'workout' as const,
+        workoutId: w.id,
+      }))
+    const manualPhotos: PhotoItem[] = profilePhotos.map((p) => ({
+      id: p.id,
+      photoUrl: p.photoUrl,
+      date: p.date,
+      isPublic: p.isPublic,
+      source: 'profile' as const,
+      workoutId: null,
+    }))
+    setPhotoGallery([...sessionPhotos, ...manualPhotos].sort((a, b) => b.date - a.date))
   }, [router])
 
   useFocusEffect(
@@ -324,6 +356,7 @@ export function useProfileData(): ProfileData {
     follows,
     weekActivity,
     weeklyVolume,
+    monthSessions,
     photoGallery,
     historySections,
     featuredPr,
