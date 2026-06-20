@@ -95,9 +95,11 @@ Requête : meilleur set (max volume, puis max weight à volume égal) pour cet e
 - Animation "fantôme battu" : barre vire gold + `expo-haptics` pulse doux
 - Edge cases : 1re séance exercice → ghost = null → pas d'affichage
 
-**Versions :**
+**Versions (ORA-063) :** `session.tsx` passe `ghostLimitDays()` (`lib/plan.ts`), pas une constante.
 - Free : `limitDays = 30`
 - Pro : `limitDays = 99999`
+
+Le plan est lu en RAM (`getCachedPlan()`), alimenté depuis Supabase aux écrans profil/settings et réhydraté au boot par `hydrateStorage()` → **zéro réseau pendant la séance** (règle #3). Fallback `'free'` (30 j) tant qu'aucun profil n'a été chargé.
 
 ---
 

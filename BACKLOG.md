@@ -11,7 +11,7 @@
 Vagues 0 → 1 → 2 + cœur de la Definition of Done faites. **20 tickets faits ont été retirés** de ce backlog (trace : journal daté dans « Plan de correction » ci-dessous ; détail dans l'historique git). Les blockers qui *corrompaient les données* (predictor mort, snapshot crash-safe factice, save non transactionnel, normalisation Myo divergente) sont résolus.
 
 **Reste à faire :**
-- **Dev** : `ORA-026` (baseline Myo encore mockée — le moat) · `ORA-038` (a11y retrofit, partiel).
+- **Dev** : `ORA-026` (baseline Myo encore mockée — le moat) · `ORA-038` (a11y retrofit — **session + library faits le 20/06**, reste `feed`).
 - **Pré-lancement** : conformité/RGPD, monétisation, sécurité prod, perf scaling, i18n, tests e2e — catalogue P0/P1/P2 ci-dessous.
 
 ---
@@ -85,7 +85,12 @@ Vagues 0 → 1 → 2 + cœur de la Definition of Done faites. **20 tickets faits
 ### Definition of Done — 🟡 cœur fait, a11y restant
 - ✅ **ORA-040** — tokens couleurs ajoutés (`avatarColors`, `scrim`, `score`…) + hex remplacés dans feed / feed[id] / summary. *Résiduel non bloquant* : blancs alpha décoratifs des charts Skia (dark-only) non tokenisés.
 - ✅ **ORA-037** — likes (détail + feed) persistés Supabase + revert sur erreur.
-- 🟡 **ORA-038** — a11y amorcée (bouton like `feed/[id]`). **Reste** : rétrofit `session/feed/library` → seul item DoD encore ouvert (voir P1).
+- 🟡 **ORA-038** — a11y : `feed/[id]` (bouton like) + **`session.tsx` et `library.tsx` faits le 20/06** (role + label + state sur 100 % des touchables du chemin de log). **Reste** : `feed.tsx` (~31 touchables). *Résiduel connu :* la suppression de série par swipe n'a pas encore d'alternative `accessibilityActions` (le bouton corbeille existe mais derrière le geste).
+
+### Sécurité / gating / a11y — lot du 20/06/2026 — ✅ FAIT
+- ✅ **ORA-063** — `lib/plan.ts` : cache RAM du plan (`cacheUserPlan`/`getCachedPlan`/`ghostLimitDays`), alimenté aux écrans profil (`useProfileData`) + settings, réhydraté au boot. `session.tsx` lit `ghostLimitDays()` (Free 30 j / Pro 99999) → **zéro réseau séance** (règle #3). 8 tests `plan.test.ts`.
+- 🟡 **ORA-038 (partiel)** — a11y `session.tsx` + `library.tsx` (cf. DoD ci-dessus).
+- 🟡 **ORA-020** — migration `supabase/planned/ora020_rls_write_hardening.sql` écrite : policies d'écriture STRICTES (`WITH CHECK`/`USING` = `auth.uid()` propriétaire) sur 11 tables, purge dynamique des policies d'écriture pré-existantes, SELECT non touché, signal des `FOR ALL`. **À appliquer après revue** (diagnostic `pg_policies` inclus dans le fichier) — voir `supabase/README.md`.
 
 ### Reporté (post-développement, avant lancement)
 RevenueCat (ORA-010), suppression compte (ORA-001), RGPD UI (ORA-003), service_role (ORA-002), push (ORA-042), i18n (ORA-039), OTA (ORA-043), EAS secrets / CI (ORA-004 / ORA-008-CI), pagination feed (ORA-030), Sentry / monitoring prod (ORA-011-prod), conformité store (ORA-072), Apple Sign-In (ORA-046).
@@ -125,7 +130,7 @@ RevenueCat (ORA-010), suppression compte (ORA-001), RGPD UI (ORA-003), service_r
 
 ### Sécurité & données
 
-- **ORA-020 · [SÉCURITÉ] RLS = seule barrière sur toutes les écritures client.** `feed.tsx:2058,919,626`, `edit-profile.tsx:241`, `summary.tsx:756` — `user_id` fourni par le client sur tous les INSERT ; `delete comment` filtré par `id` seul (`feed.tsx:640`). Non vérifiable dans le repo (SQL DB). **Action :** auditer/durcir RLS sur chaque table en écriture (`WITH CHECK (auth.uid() = user_id)` INSERT, `USING` UPDATE/DELETE).
+- 🟡 **ORA-020 · [SÉCURITÉ] RLS = seule barrière sur toutes les écritures client.** `feed.tsx:2058,919,626`, `edit-profile.tsx:241`, `summary.tsx:756` — `user_id` fourni par le client sur tous les INSERT ; `delete comment` filtré par `id` seul (`feed.tsx:640`). Non vérifiable dans le repo (SQL DB). **Action :** auditer/durcir RLS sur chaque table en écriture (`WITH CHECK (auth.uid() = user_id)` INSERT, `USING` UPDATE/DELETE). → **migration écrite** `supabase/planned/ora020_rls_write_hardening.sql` (11 tables, purge des policies d'écriture pré-existantes, SELECT préservé). **À APPLIQUER APRÈS REVUE** du diagnostic `pg_policies` (manuel — pas de DB dans le repo).
 - **ORA-021 · [SÉCURITÉ] Buckets Storage publics + URLs devinables.** `edit-profile.tsx:87`, `summary.tsx:773` — `getPublicUrl()` sur `${user.id}/…` ; photo de séance accessible même si `is_public=false`. **Action :** buckets privés + `createSignedUrl()` ; aligner la visibilité photo sur `is_public` ; policies Storage `${auth.uid()}/`.
 - **ORA-022 · [SÉCURITÉ] Données de santé en clair dans AsyncStorage.** `lib/storage.ts:9`, `session.tsx:187` — `snapshotToMMKV()` (nom trompeur, MMKV non utilisé) persiste le brouillon de séance en clair ; idem `predictions_cache`. **Action :** chiffrer au repos (MMKV `encryptionKey` ou SecureStore) ; renommer.
 
@@ -140,7 +145,7 @@ RevenueCat (ORA-010), suppression compte (ORA-001), RGPD UI (ORA-003), service_r
 
 ### Accessibilité, i18n & DS
 
-- **ORA-038 · [A11Y] Couverture a11y quasi nulle sur les écrans cœur.** 🟡 *Amorcé (bouton like `feed/[id]`).* 332 touchables, ~89 props d'a11y concentrées sur auth/settings/edit-profile. **Zéro** label sur `session.tsx` (47), `feed.tsx` (31), `feed/[id].tsx` (40 restants), `library.tsx` (14), `profile.tsx` (23). Logger une série en VoiceOver/TalkBack = impossible. **Action :** `accessibilityRole` + `accessibilityLabel` sur 100 % des touchables, priorité session/feed/library.
+- **ORA-038 · [A11Y] Couverture a11y quasi nulle sur les écrans cœur.** 🟡 *En cours : `feed/[id]` (like) + **`session.tsx` et `library.tsx` faits le 20/06** (role + label + `accessibilityState` sur tous les touchables du chemin de log : pickers poids/reps, LOG SET, tabs exercices, chips, favoris, recherche).* Restait 332 touchables, ~89 props d'a11y concentrées sur auth/settings/edit-profile. **Reste :** `feed.tsx` (31), `feed/[id].tsx` (40 restants), `profile.tsx` (23) + alternative `accessibilityActions` au swipe-delete de série. **Action :** `accessibilityRole` + `accessibilityLabel` sur 100 % des touchables, priorité feed.
 - **ORA-039 · [I18N] Aucune infrastructure i18n.** Pas de `expo-localization`/`i18next` ; 100 % FR hardcodé ; `users.locale` inutilisé. Internationalisation impossible sans refactor — bloquant pour scaler comme Strava. **Action :** `i18next` + `expo-localization`, externaliser les strings, brancher `users.locale`.
 
 ### Produit & tests
@@ -154,7 +159,7 @@ RevenueCat (ORA-010), suppression compte (ORA-001), RGPD UI (ORA-003), service_r
 
 ## P2 — MINEURS / DETTE
 
-- **ORA-063 · [DATA] Ghost codé en dur à 30 j.** `session.tsx:820` — `getGhostReference(id, 30)`, la branche Pro illimitée n'est jamais utilisée. **Action :** `plan === 'premium' ? 99999 : 30`.
+- ✅ **ORA-063 · [DATA] Ghost codé en dur à 30 j.** `session.tsx` lit désormais `ghostLimitDays()` (`lib/plan.ts`) → Free 30 j / Pro 99999. Plan caché en RAM (alimenté profil/settings, réhydraté au boot) = zéro réseau pendant la séance. Fait le 20/06/2026.
 - **ORA-064 · [A11Y] Contraste `textTertiary` 2,6:1 < WCAG AA.** `#4A4A5A` sur `#0A0A0F`, utilisé 143× dont du contenu réel (`library.tsx:417`). **Action :** réserver au décoratif ou éclaircir le token. **⛔ Décision design requise** : `textTertiary` est un token Figma validé — l'éclaircir change toute la hiérarchie « off » de l'app. À trancher avec le designer (éclaircir le token vs le réserver au décoratif + nouveau token AA pour le contenu). Non modifié unilatéralement (règle #1 — autorité Figma).
 - **ORA-069 · [SÉCURITÉ] Politique mot de passe faible.** `register.tsx:82-83` — min 8, aucune autre exigence. **Action :** activer la protection « leaked password » Supabase (HIBP).
 - **ORA-072 · [PRODUIT/CONFORMITÉ] App Privacy labels + compte de test à préparer.** Pour le review Apple/Google : déclarer collecte santé/localisation/photos, fournir un compte de test.

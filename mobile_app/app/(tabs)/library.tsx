@@ -114,7 +114,14 @@ function ExerciseRow({ item, isFavorite, onPress, onToggleFavorite }: ExerciseRo
   }
 
   return (
-    <TouchableOpacity activeOpacity={0.75} onPress={onPress} style={[styles.exerciseRow]}>
+    <TouchableOpacity
+      activeOpacity={0.75}
+      onPress={onPress}
+      style={[styles.exerciseRow]}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.name_fr}, ${subtitle}`}
+      accessibilityHint="Voir la fiche de l'exercice"
+    >
       <View style={{ flex: 1, gap: spacing.s1 }}>
         <Text
           style={[typography.body, { color: colors.textPrimary, fontFamily: font.bold }]}
@@ -131,6 +138,9 @@ function ExerciseRow({ item, isFavorite, onPress, onToggleFavorite }: ExerciseRo
         onPress={handleToggleFavorite}
         hitSlop={12}
         style={{ marginRight: spacing.s2 }}
+        accessibilityRole="button"
+        accessibilityState={{ selected: isFavorite }}
+        accessibilityLabel={isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
       >
         <Animated.View style={starAnimStyle}>
           <Star
@@ -326,6 +336,7 @@ export default function LibraryScreen() {
           clearButtonMode="while-editing"
           autoCorrect={false}
           autoCapitalize="none"
+          accessibilityLabel="Rechercher un exercice"
         />
       </View>
 
@@ -335,6 +346,9 @@ export default function LibraryScreen() {
         <TouchableOpacity
           activeOpacity={0.75}
           onPress={() => setActiveGroup(null)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: activeGroup == null }}
+          accessibilityLabel="Filtre Tous"
           style={[
             styles.chip,
             {
@@ -361,6 +375,9 @@ export default function LibraryScreen() {
               key={group}
               activeOpacity={0.75}
               onPress={() => setActiveGroup(isActive ? null : group)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isActive }}
+              accessibilityLabel={`Filtre ${MUSCLE_GROUP_LABELS[group] ?? group}`}
               style={[
                 styles.chip,
                 {

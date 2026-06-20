@@ -21,9 +21,15 @@ Les fichiers de `migrations/` ci-dessous sont les **changements incrémentaux do
 | `20260519130000_myo_famille6_dims.sql` | Myo Famille 6 — 17 dims + `myo_muscle_dims` | ✅ appliquée |
 | `20260614120000_create_workout_rpc.sql` | RPC transactionnelle `create_workout` | ⚠️ **NON appliquée** |
 
-> `planned/` = migrations Phase 3 (ADN, marketplace) — **pas** dans `migrations/`,
-> donc jamais exécutées par le CLI. Les déplacer dans `migrations/` (avec préfixe
-> timestamp) le jour de leur implémentation.
+> `planned/` = migrations **rédigées mais non encore appliquées** — **pas** dans
+> `migrations/`, donc jamais exécutées par le CLI. Les déplacer dans `migrations/`
+> (avec préfixe timestamp) le jour de leur application.
+
+| Planned | Contenu | À faire |
+|---|---|---|
+| `ora020_rls_write_hardening.sql` | Durcissement RLS écritures (11 tables, WITH CHECK/USING) | ⚠️ **À appliquer APRÈS revue** du diagnostic `pg_policies` (en bas du fichier) |
+| `ora023_comment_length_check.sql` | CHECK `comments.content` ≤ 500 | ⚠️ À appliquer |
+| `phase3_athletic_dna.sql` · `phase3_programs_marketplace.sql` | Phase 3 (ADN, marketplace) | ⏳ à l'implémentation |
 
 ---
 

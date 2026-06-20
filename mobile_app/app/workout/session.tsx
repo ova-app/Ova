@@ -62,6 +62,7 @@ import {
 } from '@/constants/recipes'
 import { storage } from '@/lib/storage'
 import { getGhostReference, type GhostSet } from '@/lib/ghost'
+import { ghostLimitDays } from '@/lib/plan'
 import { useExerciseLibrary, MUSCLE_LABELS, type ExerciseRow } from '@/lib/hooks/useExerciseLibrary'
 import { getLastLocalSet } from '@/lib/db'
 import { REPS_VALUES, getWeightValues } from '@/lib/weights'
@@ -290,6 +291,8 @@ function SetRow({ set, onDelete, colors, ghostVolume }: SetRowProps) {
         style={[styles.setRowDeleteBg, { backgroundColor: colors.error }]}
         onPress={handleDeleteConfirm}
         activeOpacity={0.75}
+        accessibilityRole="button"
+        accessibilityLabel="Supprimer la série"
       >
         <Trash2 size={16} color="#fff" />
       </TouchableOpacity>
@@ -421,11 +424,14 @@ function ExerciseModal({ visible, onClose, onSelect, addedIds, colors }: Exercis
             onChangeText={setSearch}
             autoCapitalize="none"
             returnKeyType="search"
+            accessibilityLabel="Rechercher un exercice"
           />
           {search.length > 0 && (
             <TouchableOpacity
               onPress={() => setSearch('')}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Effacer la recherche"
             >
               <X size={14} color={colors.textSecondary} />
             </TouchableOpacity>
@@ -447,6 +453,9 @@ function ExerciseModal({ visible, onClose, onSelect, addedIds, colors }: Exercis
                 ]}
                 onPress={() => setFilter(key)}
                 activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Filtre ${label}`}
               >
                 <Text
                   style={[
@@ -491,6 +500,10 @@ function ExerciseModal({ visible, onClose, onSelect, addedIds, colors }: Exercis
                   Keyboard.dismiss()
                 }}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isAdded }}
+                accessibilityLabel={`${ex.name_fr}${sub ? `, ${sub}` : ''}${isAdded ? ', ajouté à la séance' : ''}`}
+                accessibilityHint={isAdded ? 'Retirer de la séance' : 'Ajouter à la séance'}
               >
                 <View style={styles.exerciseRowInfo}>
                   <Text
@@ -778,7 +791,8 @@ export default function SessionScreen() {
       setGhostRef(null)
       return
     }
-    void getGhostReference(currentExerciseId, 30).then(setGhostRef)
+    // ORA-063 — fenêtre selon le plan (cache RAM, zéro réseau séance)
+    void getGhostReference(currentExerciseId, ghostLimitDays()).then(setGhostRef)
   }, [currentExerciseId, ghostEnabled])
 
   // ── Status done redirect ──
@@ -931,6 +945,8 @@ export default function SessionScreen() {
           style={[styles.idleBackBtn, { top: insets.top + spacing.s4 }]}
           onPress={handleIdleBack}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Retour"
         >
           <ChevronLeft size={24} color={colors.textSecondary} strokeWidth={2} />
         </TouchableOpacity>
@@ -945,6 +961,8 @@ export default function SessionScreen() {
             style={[styles.startButton, { backgroundColor: colors.accent }]}
             onPress={startWorkout}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Démarrer une séance"
           >
             <Text style={[styles.startButtonText, { color: colors.background }]}>
               DÉMARRER UNE SÉANCE
@@ -972,6 +990,8 @@ export default function SessionScreen() {
               }}
               activeOpacity={0.7}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Quitter la séance"
             >
               <ChevronLeft size={28} color={colors.textPrimary} />
             </TouchableOpacity>
@@ -987,6 +1007,7 @@ export default function SessionScreen() {
                 letterSpacing: -0.5,
                 fontVariant: ['tabular-nums'],
               }}
+              accessibilityLabel={`Durée de la séance : ${Math.floor(elapsedSeconds / 60)} minutes`}
             >
               {(() => {
                 const h = Math.floor(elapsedSeconds / 3600)
@@ -1006,6 +1027,8 @@ export default function SessionScreen() {
               ]}
               onPress={finishWorkout}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Terminer la séance"
             >
               <Text style={[styles.finishText, { color: colors.textPrimary }]}>TERMINER</Text>
             </TouchableOpacity>
@@ -1033,6 +1056,9 @@ export default function SessionScreen() {
               ]}
               onPress={() => setCurrentIndex(idx)}
               activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: idx === currentIndex }}
+              accessibilityLabel={ex.name}
             >
               <Text
                 style={[
@@ -1049,6 +1075,8 @@ export default function SessionScreen() {
             style={styles.tabAdd}
             onPress={() => setModalVisible(true)}
             hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel="Ajouter un exercice"
           >
             <Plus size={18} color={colors.accent} />
             <Text style={[styles.tabAddText, { color: colors.accent }]}>Exercice</Text>
@@ -1069,6 +1097,8 @@ export default function SessionScreen() {
             ]}
             onPress={() => setModalVisible(true)}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Ajouter un exercice"
           >
             <Plus size={20} color={colors.accent} />
             <Text style={[styles.addFirstText, { color: colors.textPrimary }]}>
@@ -1094,6 +1124,8 @@ export default function SessionScreen() {
                 onPress={() => handleRemoveExercise(currentIndex)}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 style={styles.removeExButton}
+                accessibilityRole="button"
+                accessibilityLabel="Retirer cet exercice de la séance"
               >
                 <Trash2 size={16} color={colors.textTertiary} />
               </TouchableOpacity>
@@ -1126,6 +1158,9 @@ export default function SessionScreen() {
                 style={styles.pickerButton}
                 onPress={() => setWheelPickerVisible(true)}
                 activeOpacity={0.7}
+                accessibilityRole="adjustable"
+                accessibilityLabel={`Poids : ${draftWeight > 0 ? draftWeight : 0} kilos`}
+                accessibilityHint="Ouvre le sélecteur de poids"
               >
                 <Text style={[styles.pickerButtonValue, { color: colors.textPrimary }]}>
                   {draftWeight > 0 ? draftWeight : '�'}
@@ -1136,6 +1171,9 @@ export default function SessionScreen() {
                 style={styles.pickerButton}
                 onPress={() => setWheelPickerVisible(true)}
                 activeOpacity={0.7}
+                accessibilityRole="adjustable"
+                accessibilityLabel={`Répétitions : ${draftReps}`}
+                accessibilityHint="Ouvre le sélecteur de répétitions"
               >
                 <Text style={[styles.pickerButtonValue, { color: colors.textPrimary }]}>
                   {draftReps}
@@ -1164,6 +1202,8 @@ export default function SessionScreen() {
               style={[styles.logSetButton, { backgroundColor: colors.accent }]}
               onPress={handleValidate}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={`Valider la série : ${draftWeight > 0 ? draftWeight : 0} kilos, ${draftReps} répétitions`}
             >
               <Text style={[styles.logSetText, { color: colors.background }]}>LOG SET</Text>
             </TouchableOpacity>

@@ -1,18 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import {
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  StatusBar,
-  ViewStyle,
-} from 'react-native'
-import Animated, {
-  useSharedValue,
-  withSpring,
-  useAnimatedStyle,
-} from 'react-native-reanimated'
+import { View, Text, Pressable, ScrollView, StyleSheet, StatusBar, ViewStyle } from 'react-native'
+import Animated, { useSharedValue, withSpring, useAnimatedStyle } from 'react-native-reanimated'
 import { useRouter } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ChevronLeft, ChevronRight } from 'lucide-react-native'
@@ -20,6 +8,7 @@ import { useTheme } from '@/context/ThemeContext'
 import { spacing, radius, typography, spring, font } from '@/constants/theme'
 import { toggleRecipe } from '@/constants/recipes'
 import { supabase } from '@/lib/supabase'
+import { cacheUserPlan } from '@/lib/plan'
 
 // ─── ToggleRow (inline) ──────────────────────────────────────────────────────
 // Custom toggle wired via toggleRecipe + Reanimated spring (snappy).
@@ -127,7 +116,7 @@ export default function SettingsScreen(): React.JSX.Element {
           AsyncStorage.getItem(STORAGE_KEYS.ghost),
         ])
 
-        setSettings(prev => ({
+        setSettings((prev) => ({
           ...prev,
           weightUnit: (unit === 'lbs' ? 'lbs' : 'kg') as WeightUnit,
           vibrationEnabled: vibration !== 'false',
@@ -142,14 +131,13 @@ export default function SettingsScreen(): React.JSX.Element {
 
     async function loadPlan(): Promise<void> {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
         if (!user) return
-        const { data } = await supabase
-          .from('users')
-          .select('plan')
-          .eq('id', user.id)
-          .single()
+        const { data } = await supabase.from('users').select('plan').eq('id', user.id).single()
         if (data?.plan === 'premium') setUserPlan('premium')
+        cacheUserPlan(data?.plan) // ORA-063 — cache plan offline (fenêtre ghost)
       } catch {
         // Silent fail — plan reste 'free'
       }
@@ -162,22 +150,22 @@ export default function SettingsScreen(): React.JSX.Element {
   // ─── Persistance save ─────────────────────────────────────────────────────
 
   async function setWeightUnit(unit: WeightUnit): Promise<void> {
-    setSettings(prev => ({ ...prev, weightUnit: unit }))
+    setSettings((prev) => ({ ...prev, weightUnit: unit }))
     await AsyncStorage.setItem(STORAGE_KEYS.weightUnit, unit)
   }
 
   async function setVibration(enabled: boolean): Promise<void> {
-    setSettings(prev => ({ ...prev, vibrationEnabled: enabled }))
+    setSettings((prev) => ({ ...prev, vibrationEnabled: enabled }))
     await AsyncStorage.setItem(STORAGE_KEYS.vibration, String(enabled))
   }
 
   async function setPublicWorkouts(enabled: boolean): Promise<void> {
-    setSettings(prev => ({ ...prev, publicWorkoutsByDefault: enabled }))
+    setSettings((prev) => ({ ...prev, publicWorkoutsByDefault: enabled }))
     await AsyncStorage.setItem(STORAGE_KEYS.publicWorkouts, String(enabled))
   }
 
   async function setGhostEnabled(enabled: boolean): Promise<void> {
-    setSettings(prev => ({ ...prev, ghostEnabled: enabled }))
+    setSettings((prev) => ({ ...prev, ghostEnabled: enabled }))
     await AsyncStorage.setItem(STORAGE_KEYS.ghost, String(enabled))
   }
 
@@ -206,7 +194,6 @@ export default function SettingsScreen(): React.JSX.Element {
         contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-
         {/* GROUPE UNITÉS */}
         <Text style={s.groupLabel}>UNITÉS</Text>
         <View style={s.group}>
@@ -299,14 +286,20 @@ export default function SettingsScreen(): React.JSX.Element {
         <Text style={s.groupLabel}>MYO</Text>
         <View style={s.group}>
           <Pressable
-            style={[s.row, s.rowPressable, { height: undefined, minHeight: 56, paddingVertical: spacing.s3 }]}
+            style={[
+              s.row,
+              s.rowPressable,
+              { height: undefined, minHeight: 56, paddingVertical: spacing.s3 },
+            ]}
             onPress={() => router.push('/myo-glossary')}
             accessibilityRole="button"
             accessibilityLabel="Guide des variables Myo"
           >
             <View style={{ flex: 1 }}>
               <Text style={s.rowLabel}>Guide des variables</Text>
-              <Text style={[s.rowSubtitle, { color: colors.textSecondary }]}>53 variables · 8 familles</Text>
+              <Text style={[s.rowSubtitle, { color: colors.textSecondary }]}>
+                53 variables · 8 familles
+              </Text>
             </View>
             <ChevronRight size={16} color={colors.textTertiary} strokeWidth={2} />
           </Pressable>
