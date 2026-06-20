@@ -92,8 +92,11 @@ Vagues 0 → 1 → 2 + cœur de la Definition of Done faites. **20 tickets faits
 - 🟡 **ORA-038 (partiel)** — a11y `session.tsx` + `library.tsx` (cf. DoD ci-dessus).
 - 🟡 **ORA-020** — migration `supabase/planned/ora020_rls_write_hardening.sql` écrite : policies d'écriture STRICTES (`WITH CHECK`/`USING` = `auth.uid()` propriétaire) sur 11 tables, purge dynamique des policies d'écriture pré-existantes, SELECT non touché, signal des `FOR ALL`. **À appliquer après revue** (diagnostic `pg_policies` inclus dans le fichier) — voir `supabase/README.md`.
 
+### Devops / CI — lot du 20/06/2026 — ✅ FAIT
+- ✅ **ORA-074** — **Coverage gate Jest** (cliquet, même logique qu'ORA-044). `package.json` → `coverageThreshold` : plancher global (stmts 15 / branch 15 / func 12 / lines 16, = valeurs réelles avec marge) **+ verrou 100 %** sur les 4 modules de logique pure testés par import réel (`lib/ghost.ts`, `lib/plan.ts`, `lib/utils.ts`, `constants/theme.ts`) → toute régression de couverture sur ces modules casse la CI. `ci.yml` lance désormais `npm test -- --ci --coverage`. *Effet de bord utile :* le rapport **confirme ORA-045** — `predictor.ts` à 12 % et les tests qui recopient la fonction (prsBuildPodium, sessionUx) ne couvrent pas le prod (n'apparaissent pas dans le rapport). *Résiduel :* descendre les modules partiels (`predictor.ts` 12 %, `db.ts` 38 %, `storage.ts` 32 %) en remontant le plancher au fil de l'eau.
+
 ### Reporté (post-développement, avant lancement)
-RevenueCat (ORA-010), suppression compte (ORA-001), RGPD UI (ORA-003), service_role (ORA-002), push (ORA-042), i18n (ORA-039), OTA (ORA-043), EAS secrets / CI (ORA-004 / ORA-008-CI), pagination feed (ORA-030), Sentry / monitoring prod (ORA-011-prod), conformité store (ORA-072), Apple Sign-In (ORA-046).
+RevenueCat (ORA-010), suppression compte (ORA-001), RGPD UI (ORA-003), service_role (ORA-002), push (ORA-042), i18n (ORA-039), OTA (ORA-043), EAS secrets / CI (ORA-004 / ORA-008-CI), **EAS preview build on PR (ORA-073)**, pagination feed (ORA-030), Sentry / monitoring prod (ORA-011-prod), conformité store (ORA-072), Apple Sign-In (ORA-046).
 
 ---
 
@@ -152,7 +155,8 @@ RevenueCat (ORA-010), suppression compte (ORA-001), RGPD UI (ORA-003), service_r
 
 - **ORA-042 · [PRODUIT] Aucune boucle de ré-engagement.** `expo-notifications` absent → pas de push (« PR prédit », « streak en danger ») ; partage Stories 9:16 annoncé non codé ; pas de deep links de partage. Rétention J30 plancher. **Action :** push + export Stories (`makeImageSnapshot` + Share Sheet) + deep links.
 - **ORA-043 · [DEVOPS] Pas d'OTA (`expo-updates` absent).** Chaque hotfix passe par les stores (24-72 h). **Action :** `expo-updates` + channels EAS (déjà configurés).
-- **ORA-045 · [TESTS] 0 % composant / intégration / e2e.** `__tests__/` = tests de logique pure, dont certains **recopient** la fonction testée (`prsBuildPodium.test.ts:12-127`, `sessionUx.test.ts:34-58`) → testent une copie, pas le prod. `@testing-library/react-native`, Detox/Maestro absents. **Action :** render tests sur session/summary + smoke e2e Maestro (login → log set → save) ; tester le code importé.
+- **ORA-073 · [DEVOPS] La CI ne valide que la logique pure — aucun build natif avant merge.** `ci.yml` = lint + tsc + tests (+ coverage depuis ORA-074), tout mocké. Un crash natif au runtime, un breaking change de package Expo ou un build EAS cassé ne sont **pas** détectés au merge (« marche en local »). **Action :** job EAS `preview` déclenché sur PR (profil `preview` d'`eas.json`, artefact installable sur device) → tester sur device réel avant merge. **Dépend d'ORA-004** (sans les `EXPO_PUBLIC_*` en EAS Secret, le preview build crash à l'auth — même cause racine). Faire ORA-004 puis ORA-073 avant la première beta.
+- **ORA-045 · [TESTS] 0 % composant / intégration / e2e.** `__tests__/` = tests de logique pure, dont certains **recopient** la fonction testée (`prsBuildPodium.test.ts:12-127`, `sessionUx.test.ts:34-58`) → testent une copie, pas le prod. `@testing-library/react-native`, Detox/Maestro absents. **Action :** render tests sur session/summary + smoke e2e Maestro (login → log set → save) ; tester le code importé. *→ Confirmé empiriquement par le coverage gate (ORA-074) : les tests recopiés n'apparaissent pas dans le rapport ; `predictor.ts` à 12 %.*
 - **ORA-046 · [PRODUIT] Apple/Google Sign-In absents.** Seul email/password. Attendu sur une app sociale grand public. **Action :** ajouter Apple Sign In (obligatoire dès qu'un autre social login existe).
 
 ---
@@ -187,7 +191,7 @@ RevenueCat (ORA-010), suppression compte (ORA-001), RGPD UI (ORA-003), service_r
 
 **Phase pré-lancement** — ordre indicatif :
 1. **Conformité/sécurité (déblocage store)** : ORA-001, 002, 003, 072 + ORA-021/022.
-2. **Fiabilité release** : ORA-004, 008 (CI), 011 (Sentry/monitoring prod), 043.
+2. **Fiabilité release** : ORA-004 → 073 (EAS preview-on-PR), 011 (Sentry/monitoring prod), 043 (OTA). *(ORA-008 CI + ORA-074 coverage gate faits.)*
 3. **Monétisation + rétention** : ORA-010, 042, 046.
 4. **Perf feed + scaling** : ORA-030 (+ ORA-032 images).
 5. **a11y + i18n (rétrofit du legacy)** : ORA-038, 039.

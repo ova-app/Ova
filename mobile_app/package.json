@@ -32,6 +32,18 @@
     ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/$1"
+    },
+    "coverageThreshold": {
+      "global": {
+        "statements": 15,
+        "branches": 15,
+        "functions": 12,
+        "lines": 16
+      },
+      "./lib/ghost.ts": { "statements": 100, "branches": 100, "functions": 100, "lines": 100 },
+      "./lib/plan.ts": { "statements": 100, "branches": 100, "functions": 100, "lines": 100 },
+      "./lib/utils.ts": { "statements": 100, "branches": 100, "functions": 100, "lines": 100 },
+      "./constants/theme.ts": { "statements": 100, "branches": 100, "functions": 100, "lines": 100 }
     }
   },
   "lint-staged": {

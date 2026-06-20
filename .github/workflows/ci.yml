@@ -36,4 +36,4 @@ jobs:
 
       - name: Tests
         working-directory: mobile_app
-        run: npm test -- --ci
+        run: npm test -- --ci --coverage
