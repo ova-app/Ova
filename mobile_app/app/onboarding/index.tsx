@@ -1,12 +1,5 @@
 import React from 'react'
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  SafeAreaView,
-  Dimensions,
-} from 'react-native'
+import { View, Text, Pressable, StyleSheet, SafeAreaView, Dimensions } from 'react-native'
 import { useRouter } from 'expo-router'
 import Svg, { Circle, Path } from 'react-native-svg'
 import { useTheme } from '@/context/ThemeContext'
@@ -32,7 +25,7 @@ function PlaceholderMyo(): React.JSX.Element {
         fill="none"
         strokeLinecap="round"
       />
-      {/* Arc famille INTENSITÉ #ef4444 — arc ~180° */}
+      {/* Arc famille CHARGE #ef4444 — arc ~180° */}
       <Path
         d="M 100,28 A 72,72 0 1 1 28,100"
         stroke="#ef4444"
@@ -117,9 +110,7 @@ export default function OnboardingIndexScreen(): React.JSX.Element {
 
       {/* Bas — contenu texte + actions */}
       <View style={styles.zoneContenu}>
-        <Text style={styles.titre}>
-          Chaque séance{'\n'}devient une œuvre.
-        </Text>
+        <Text style={styles.titre}>Chaque séance{'\n'}devient une œuvre.</Text>
         <Text style={styles.sousTitre}>
           Visualise tes entraînements comme jamais. Analyse. Progresse.
         </Text>

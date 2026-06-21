@@ -11,8 +11,8 @@ import {
 import { useRouter } from 'expo-router'
 import { ChevronLeft, Dumbbell, TrendingUp, Zap, Target } from 'lucide-react-native'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography, font } from '@/constants/theme'
-import { formatVolume } from '@/lib/utils'
 import { useAnalyticsData } from '@/lib/hooks/useAnalyticsData'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -81,6 +81,7 @@ function AnimatedCounter({
 
 export default function AnalyticsScreen(): React.JSX.Element {
   const { colors } = useTheme()
+  const { unit: weightUnit, toDisplay, formatVolume: formatVolumeU } = useWeightUnit()
   const router = useRouter()
 
   const {
@@ -150,9 +151,9 @@ export default function AnalyticsScreen(): React.JSX.Element {
               duration={1400}
               delay={120}
               style={s.heroValuePrimary}
-              formatter={formatVolume}
+              formatter={formatVolumeU}
             />
-            <Text style={s.heroLabel}>KG TOTAL 90J</Text>
+            <Text style={s.heroLabel}>{weightUnit.toUpperCase()} TOTAL 90J</Text>
           </View>
         </View>
 
@@ -186,9 +187,9 @@ export default function AnalyticsScreen(): React.JSX.Element {
                     duration={1200}
                     delay={0}
                     style={s.rollingValueAccent}
-                    formatter={formatVolume}
+                    formatter={formatVolumeU}
                   />
-                  <Text style={s.rollingUnit}> kg</Text>
+                  <Text style={s.rollingUnit}> {weightUnit}</Text>
                 </View>
               </View>
 
@@ -203,9 +204,9 @@ export default function AnalyticsScreen(): React.JSX.Element {
                     duration={1200}
                     delay={80}
                     style={s.rollingValuePrimary}
-                    formatter={formatVolume}
+                    formatter={formatVolumeU}
                   />
-                  <Text style={s.rollingUnit}> kg</Text>
+                  <Text style={s.rollingUnit}> {weightUnit}</Text>
                 </View>
               </View>
 
@@ -220,9 +221,9 @@ export default function AnalyticsScreen(): React.JSX.Element {
                     duration={1200}
                     delay={160}
                     style={s.rollingValuePrimary}
-                    formatter={formatVolume}
+                    formatter={formatVolumeU}
                   />
-                  <Text style={s.rollingUnit}> kg</Text>
+                  <Text style={s.rollingUnit}> {weightUnit}</Text>
                 </View>
               </View>
 
@@ -279,8 +280,8 @@ export default function AnalyticsScreen(): React.JSX.Element {
                   </View>
 
                   <Text style={s.muscleVolume}>
-                    {formatVolume(bar.volKg)}
-                    <Text style={s.muscleVolumeUnit}> kg</Text>
+                    {formatVolumeU(bar.volKg)}
+                    <Text style={s.muscleVolumeUnit}> {weightUnit}</Text>
                   </Text>
                 </View>
               ))}
@@ -317,8 +318,8 @@ export default function AnalyticsScreen(): React.JSX.Element {
 
                       {/* Valeur */}
                       <Text style={[s.prValue, { color: levelColor }]}>
-                        {pr.value}
-                        <Text style={s.prUnit}> {pr.unit}</Text>
+                        {Math.round(toDisplay(pr.value))}
+                        <Text style={s.prUnit}> {weightUnit}</Text>
                       </Text>
 
                       {/* Date */}
@@ -373,7 +374,7 @@ export default function AnalyticsScreen(): React.JSX.Element {
                       })
                     }
                     accessibilityRole="button"
-                    accessibilityLabel={`Claimer ${pred.predictedPR} kg sur ${pred.exerciseName}`}
+                    accessibilityLabel={`Claimer ${Math.round(toDisplay(pred.predictedPR))} ${weightUnit} sur ${pred.exerciseName}`}
                   >
                     <View style={[s.predAccentBar, { backgroundColor: colors.accent }]} />
                     <View style={s.predContent}>
@@ -382,11 +383,13 @@ export default function AnalyticsScreen(): React.JSX.Element {
                       </Text>
                       <View style={s.predValueRow}>
                         <Text style={[s.predValue, { color: colors.accent }]}>
-                          {pred.predictedPR}
+                          {Math.round(toDisplay(pred.predictedPR))}
                         </Text>
-                        <Text style={s.predUnit}> kg</Text>
+                        <Text style={s.predUnit}> {weightUnit}</Text>
                       </View>
-                      <Text style={s.predDelta}>+{pred.delta} kg vs actuel</Text>
+                      <Text style={s.predDelta}>
+                        +{Math.round(toDisplay(pred.delta))} {weightUnit} vs actuel
+                      </Text>
                       <View style={s.predFooter}>
                         <Text style={s.predDays}>
                           {pred.daysUntilPR === 1 ? 'Demain' : `Dans ${pred.daysUntilPR}j`}

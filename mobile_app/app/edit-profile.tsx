@@ -36,6 +36,7 @@ import {
 } from '@/lib/displayName'
 import { getProfileBio, saveProfileBio, BIO_MAX } from '@/lib/profileBio'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography, font, touchTarget } from '@/constants/theme'
 import { inputRecipe, InputState } from '@/constants/recipes'
 import RulerPicker from '@/components/RulerPicker'
@@ -124,6 +125,7 @@ async function uploadAvatarToStorage(localUri: string, uid: string): Promise<str
 
 export default function EditProfileScreen(): React.JSX.Element {
   const { colors } = useTheme()
+  const { unit: weightUnit, toKg, toDisplay } = useWeightUnit()
   const router = useRouter()
 
   const dayRef = useRef<TextInput>(null)
@@ -813,12 +815,22 @@ export default function EditProfileScreen(): React.JSX.Element {
                 {showPoidsRuler ? (
                   <View style={s.rulerWrap}>
                     <RulerPicker
-                      value={form.poidsKg ? parseFloat(form.poidsKg) : 70}
-                      min={20}
-                      max={200}
-                      step={0.5}
-                      unit="kg"
-                      onChange={(v) => setForm((f) => ({ ...f, poidsKg: String(v) }))}
+                      value={
+                        form.poidsKg
+                          ? Math.round(toDisplay(parseFloat(form.poidsKg)) * 2) / 2
+                          : Math.round(toDisplay(70))
+                      }
+                      min={weightUnit === 'lbs' ? 45 : 20}
+                      max={weightUnit === 'lbs' ? 440 : 200}
+                      step={weightUnit === 'lbs' ? 1 : 0.5}
+                      unit={weightUnit}
+                      onChange={(v) =>
+                        setForm((f) => ({
+                          ...f,
+                          // Saisie dans l'unité d'affichage → stockée en kg (1 décimale).
+                          poidsKg: String(Math.round(toKg(v) * 10) / 10),
+                        }))
+                      }
                       colors={colors}
                     />
                     <Pressable style={s.rulerDoneBtn} onPress={() => setShowPoidsRuler(false)}>
@@ -838,7 +850,9 @@ export default function EditProfileScreen(): React.JSX.Element {
                         { color: form.poidsKg ? colors.textPrimary : colors.textTertiary },
                       ]}
                     >
-                      {form.poidsKg ? `${form.poidsKg} kg` : 'Non renseigné'}
+                      {form.poidsKg
+                        ? `${Math.round(toDisplay(parseFloat(form.poidsKg)) * 2) / 2} ${weightUnit}`
+                        : 'Non renseigné'}
                     </Text>
                   </Pressable>
                 )}

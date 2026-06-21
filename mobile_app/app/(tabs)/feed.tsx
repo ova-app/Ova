@@ -59,12 +59,13 @@ import {
   Flag,
 } from 'lucide-react-native'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { useRouter } from 'expo-router'
 import { useFocusEffect } from '@react-navigation/core'
 import { spacing, typography, radius, dark, avatarColors, scrim } from '@/constants/theme'
 import { emptyStateRecipe } from '@/constants/recipes'
 import { supabase } from '@/lib/supabase'
-import { formatVolume, formatDuration } from '@/lib/utils'
+import { formatDuration } from '@/lib/utils'
 import oravaLogo from '@/assets/orava_logo.png'
 import {
   useFeedData,
@@ -841,6 +842,7 @@ interface FeedItemProps {
 function FeedItemBase({ item, currentUserId, onLike, onNavigateDetail }: FeedItemProps) {
   const sessionValues = item.sessionValues
   const { colors } = useTheme()
+  const { unit: weightUnit, formatVolume: formatVolumeU } = useWeightUnit()
   const screenW = SCREEN_WIDTH
   const [likesModalVisible, setLikesModalVisible] = useState(false)
   const [commentsModalVisible, setCommentsModalVisible] = useState(false)
@@ -854,7 +856,7 @@ function FeedItemBase({ item, currentUserId, onLike, onNavigateDetail }: FeedIte
     .map((p: string) => p.charAt(0).toUpperCase())
     .join('')
   const bgColor = avatarColor(item.user.id || item.id)
-  const volumeStr = formatVolume(item.total_volume_kg)
+  const volumeStr = formatVolumeU(item.total_volume_kg)
   const durationStr = formatDuration(
     item.ended_at
       ? (new Date(item.ended_at).getTime() - new Date(item.started_at).getTime()) / 1000
@@ -1073,7 +1075,7 @@ function FeedItemBase({ item, currentUserId, onLike, onNavigateDetail }: FeedIte
               >
                 {volumeStr}
                 {volumeStr !== '—' && (
-                  <Text style={{ fontSize: 12, color: colors.textSecondary }}> kg</Text>
+                  <Text style={{ fontSize: 12, color: colors.textSecondary }}> {weightUnit}</Text>
                 )}
               </Text>
             </View>
@@ -1293,10 +1295,15 @@ function FeedClaimCardBase({
   onLike: (claimId: string, hasLiked: boolean) => void
 }) {
   const { colors } = useTheme()
+  const { unit: weightUnit, toDisplay } = useWeightUnit()
   const [likesModalVisible, setLikesModalVisible] = useState(false)
   const [commentsModalVisible, setCommentsModalVisible] = useState(false)
   const [likes, setLikes] = useState<Like[]>([])
   const [comments, setComments] = useState<Comment[]>([])
+
+  // Claims poids : target/resolved stockés en kg (unit 'kg') → afficher dans l'unité.
+  const fmtClaimVal = (val: number): string =>
+    claim.unit === 'kg' ? `${Math.round(toDisplay(val))} ${weightUnit}` : `${val} ${claim.unit}`
 
   // Commentaires d'un claim → forme Comment (likes par commentaire absents : 0/false).
   const fetchComments = async () => {
@@ -1335,7 +1342,7 @@ function FeedClaimCardBase({
   const resolved = claim.status === 'succeeded'
   const failed = claim.status === 'failed'
   const isResolved = resolved || failed
-  const targetLabel = `${claim.target_value} ${claim.unit}`
+  const targetLabel = fmtClaimVal(claim.target_value)
   // Écart d'un claim raté (sobre, sans drama) : « manqué à X près ».
   const missGap =
     failed && claim.resolved_value != null
@@ -1449,7 +1456,7 @@ function FeedClaimCardBase({
           <View style={[claimStyles.resolvedHeadRow, claimStyles.resolvedNote]}>
             <Text style={[typography.caption, claimStyles.resolvedNoteText, mutedDyn]}>
               {missGap != null && missGap > 0
-                ? `Manqué à ${missGap} ${claim.unit} près. Prochaine fois.`
+                ? `Manqué à ${fmtClaimVal(missGap)} près. Prochaine fois.`
                 : 'Pas cette fois. Prochaine fois.'}
             </Text>
             <Text style={[typography.caption, claimStyles.announced, mutedDyn]}>
@@ -2063,6 +2070,7 @@ function KPIBandeau({
   drawDuration,
 }: KPIBandeauProps) {
   const { colors } = useTheme()
+  const { unit: weightUnit, toDisplay } = useWeightUnit()
   const router = useRouter()
 
   const seancesStyle = useAnimatedStyle(() => ({ transform: [{ scale: scaleSeances.value }] }))
@@ -2077,8 +2085,11 @@ function KPIBandeau({
   const showArrow = trendPercent > 5 || trendPercent < -5
   const arrowUp = trendPercent > 5
 
+  const volDisplay = Math.round(toDisplay(volumeThisMonth))
   const volumeStr =
-    volumeThisMonth >= 1000 ? `${(volumeThisMonth / 1000).toFixed(1)}T` : `${volumeThisMonth} kg`
+    volDisplay >= 1000
+      ? `${(volDisplay / 1000).toFixed(1)}${weightUnit === 'kg' ? 'T' : 'k'}`
+      : `${volDisplay} ${weightUnit}`
 
   const durationStr =
     avgDurationMin >= 60

@@ -43,6 +43,8 @@ import {
 } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
+import { convertFromKg, formatWeight, WeightUnit } from '@/lib/weights'
 import {
   spacing,
   radius,
@@ -53,7 +55,7 @@ import {
   scrim,
   scrimStrong,
 } from '@/constants/theme'
-import { prBadgeRecipe, type PrType } from '@/constants/recipes'
+import { type PrType } from '@/constants/recipes'
 import MyoChart, {
   FAMILY_NAMES,
   FAMILY_NAMES_SHORT,
@@ -61,7 +63,7 @@ import MyoChart, {
 } from '@/app/workout/myo-chart'
 import MyoGlossaryScreen from '@/app/myo-glossary'
 import { sessionValuesFromSignature } from '@/lib/myo'
-import { formatDuration, formatVolumeKg } from '@/lib/utils'
+import { formatDuration } from '@/lib/utils'
 import { MUSCLE_LABELS } from '@/lib/muscles'
 import { Zap, Flame, Dumbbell, Trophy } from 'lucide-react-native'
 import Svg, { Text as SvgText, Defs, LinearGradient, Stop, Rect } from 'react-native-svg'
@@ -98,28 +100,6 @@ const PR_ICON: Record<PrType, React.ComponentType<{ size?: number; color?: strin
   serie: Flame,
   exercice: Dumbbell,
   seance: Trophy,
-}
-
-function PrBadge({
-  level,
-  type,
-  label,
-  size = 14,
-}: {
-  level: 'gold' | 'silver' | 'bronze'
-  type: PrType
-  label: string
-  size?: number
-}) {
-  const { colors } = useTheme()
-  const r = prBadgeRecipe(level, type, colors)
-  const Icon = PR_ICON[type]
-  return (
-    <View style={r.container}>
-      <Icon size={size} color={r.iconColor} />
-      <Text style={r.label}>{label}</Text>
-    </View>
-  )
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -229,10 +209,17 @@ function formatRestTime(sec: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`
 }
 
-function formatExVol(kg: number): string {
-  const r = Math.round(kg)
-  if (r >= 1000) return `${Math.floor(r / 1000)} ${String(r % 1000).padStart(3, '0')} kg`
-  return `${r} kg`
+function formatExVol(kg: number, unit: WeightUnit): string {
+  const r = Math.round(convertFromKg(kg, unit))
+  if (r >= 1000) return `${Math.floor(r / 1000)} ${String(r % 1000).padStart(3, '0')} ${unit}`
+  return `${r} ${unit}`
+}
+
+const SET_TYPE_LABEL: Record<string, string> = {
+  warmup: 'Échauff.',
+  working: 'Working',
+  dropset: 'Dropset',
+  failure: 'Échec',
 }
 
 function RecapSection({
@@ -242,9 +229,21 @@ function RecapSection({
   exercises: ExerciseWithSets[]
   colors: ReturnType<typeof useTheme>['colors']
 }) {
+  const { unit, formatWeight: fmtW } = useWeightUnit()
+  const setPrColor = (lvl: PrLevel): string | null =>
+    lvl === 'gold'
+      ? colors.prGold
+      : lvl === 'silver'
+        ? colors.prSilver
+        : lvl === 'bronze'
+          ? colors.prBronze
+          : null
+
   return (
     <View style={recapS.wrapper}>
-      <Text style={[recapS.sectionTitle, { color: colors.textTertiary }]}>RÉCAP SÉANCE</Text>
+      <Text style={[recapS.sectionTitle, { color: colors.textTertiary }]}>
+        DÉTAIL DES EXOS & SÉRIES
+      </Text>
       {exercises.map((ex, idx) => {
         const workingSets = ex.sets.filter((s) => s.set_type !== 'warmup')
         const totalVol = workingSets.reduce(
@@ -307,7 +306,7 @@ function RecapSection({
                   style={[recapS.statValue, { color: colors.textPrimary }]}
                   allowFontScaling={false}
                 >
-                  {totalVol > 0 ? formatExVol(totalVol) : '—'}
+                  {totalVol > 0 ? formatExVol(totalVol, unit) : '—'}
                 </Text>
                 <Text style={[recapS.statLabel, { color: colors.textTertiary }]}>VOLUME</Text>
               </View>
@@ -337,7 +336,7 @@ function RecapSection({
                   style={[recapS.statValue, { color: colors.textPrimary }]}
                   allowFontScaling={false}
                 >
-                  {maxWeight > 0 ? `${maxWeight} kg` : '—'}
+                  {maxWeight > 0 ? fmtW(maxWeight) : '—'}
                 </Text>
                 <Text style={[recapS.statLabel, { color: colors.textTertiary }]}>MAX</Text>
               </View>
@@ -355,8 +354,54 @@ function RecapSection({
                     style={[recapS.bestValue, { color: colors.accent }]}
                     allowFontScaling={false}
                   >
-                    {bestSet.reps} reps × {bestSet.weight_kg} kg
+                    {bestSet.reps} reps × {fmtW(bestSet.weight_kg ?? 0)}
                   </Text>
+                </View>
+              </>
+            )}
+
+            {/* Détail des séries */}
+            {ex.sets.length > 0 && (
+              <>
+                <View style={[recapS.sep, { backgroundColor: colors.separator }]} />
+                <View style={recapS.seriesList}>
+                  {ex.sets.map((set) => {
+                    const chColor = setPrColor(set.pr_charge)
+                    const seColor = setPrColor(set.pr_serie)
+                    const isWarm = set.set_type === 'warmup'
+                    return (
+                      <View key={set.id} style={recapS.seriesRow}>
+                        <Text style={[recapS.seriesNum, { color: colors.textTertiary }]}>
+                          {String(set.set_number).padStart(2, '0')}
+                        </Text>
+                        <View
+                          style={[recapS.typeChip, { backgroundColor: colors.backgroundTertiary }]}
+                        >
+                          <Text
+                            style={[
+                              recapS.typeChipTxt,
+                              { color: isWarm ? colors.textTertiary : colors.textSecondary },
+                            ]}
+                          >
+                            {SET_TYPE_LABEL[set.set_type] ?? set.set_type}
+                          </Text>
+                        </View>
+                        <Text
+                          style={[
+                            recapS.seriesVal,
+                            { color: isWarm ? colors.textTertiary : colors.textPrimary },
+                          ]}
+                          allowFontScaling={false}
+                        >
+                          {set.reps ?? 0} × {fmtW(set.weight_kg ?? 0)}
+                        </Text>
+                        <View style={recapS.seriesPrs}>
+                          {chColor && <Zap size={12} color={chColor} />}
+                          {seColor && <Flame size={12} color={seColor} />}
+                        </View>
+                      </View>
+                    )
+                  })}
                 </View>
               </>
             )}
@@ -468,6 +513,257 @@ const recapS = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     letterSpacing: -0.2,
   },
+  seriesList: {
+    paddingHorizontal: spacing.s3,
+    paddingVertical: spacing.s2,
+    gap: 2,
+  },
+  seriesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    gap: spacing.s3,
+  },
+  seriesNum: {
+    fontSize: 11,
+    fontFamily: font.bold,
+    fontVariant: ['tabular-nums'],
+    width: 20,
+  },
+  typeChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+    minWidth: 62,
+    alignItems: 'center',
+  },
+  typeChipTxt: {
+    fontSize: 9,
+    fontFamily: font.bold,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  seriesVal: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: font.bold,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -0.2,
+  },
+  seriesPrs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 14,
+    justifyContent: 'flex-end',
+  },
+})
+
+// ─── PRs réalisés ──────────────────────────────────────────────────────────────
+
+const PR_TYPE_LABEL: Record<PrType, string> = {
+  charge: 'PR Charge',
+  serie: 'PR Série',
+  exercice: 'PR Exercice',
+  seance: 'PR Séance',
+}
+
+const PR_LEVEL_SHORT: Record<'gold' | 'silver' | 'bronze', string> = {
+  gold: 'OR',
+  silver: 'ARGENT',
+  bronze: 'BRONZE',
+}
+
+interface PrEntry {
+  key: string
+  type: PrType
+  level: 'gold' | 'silver' | 'bronze'
+  title: string
+  detail: string
+}
+
+const LEVEL_RANK: Record<'gold' | 'silver' | 'bronze', number> = { gold: 0, silver: 1, bronze: 2 }
+
+function collectPrs(
+  workout: FeedWorkoutDetail,
+  exercises: ExerciseWithSets[],
+  unit: WeightUnit
+): PrEntry[] {
+  const out: PrEntry[] = []
+
+  if (workout.pr_seance) {
+    out.push({
+      key: 'seance',
+      type: 'seance',
+      level: workout.pr_seance,
+      title: 'Séance complète',
+      detail: workout.total_volume_kg != null ? formatExVol(workout.total_volume_kg, unit) : '',
+    })
+  }
+
+  for (const ex of exercises) {
+    if (ex.pr_exercice) {
+      const vol = ex.sets
+        .filter((s) => s.set_type !== 'warmup')
+        .reduce((sum, s) => sum + (s.weight_kg ?? 0) * (s.reps ?? 0), 0)
+      out.push({
+        key: `ex-${ex.workoutExerciseId}`,
+        type: 'exercice',
+        level: ex.pr_exercice,
+        title: ex.nameFr,
+        detail: vol > 0 ? formatExVol(vol, unit) : '',
+      })
+    }
+    for (const set of ex.sets) {
+      if (set.pr_charge) {
+        out.push({
+          key: `ch-${set.id}`,
+          type: 'charge',
+          level: set.pr_charge,
+          title: ex.nameFr,
+          detail: `${formatWeight(set.weight_kg ?? 0, unit)} × ${set.reps ?? 0}`,
+        })
+      }
+      if (set.pr_serie) {
+        out.push({
+          key: `se-${set.id}`,
+          type: 'serie',
+          level: set.pr_serie,
+          title: ex.nameFr,
+          detail: `${set.reps ?? 0} reps × ${formatWeight(set.weight_kg ?? 0, unit)}`,
+        })
+      }
+    }
+  }
+
+  return out.sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level])
+}
+
+function PrsSection({
+  workout,
+  exercises,
+  colors,
+}: {
+  workout: FeedWorkoutDetail
+  exercises: ExerciseWithSets[]
+  colors: ReturnType<typeof useTheme>['colors']
+}) {
+  const { unit } = useWeightUnit()
+  const prs = collectPrs(workout, exercises, unit)
+  if (prs.length === 0) return null
+
+  const levelColor = (lvl: 'gold' | 'silver' | 'bronze'): string =>
+    lvl === 'gold' ? colors.prGold : lvl === 'silver' ? colors.prSilver : colors.prBronze
+
+  return (
+    <View style={prsS.wrapper}>
+      <Text style={[prsS.sectionTitle, { color: colors.textTertiary }]}>
+        {`PRs RÉALISÉS · ${prs.length}`}
+      </Text>
+      {prs.map((pr) => {
+        const Icon = PR_ICON[pr.type]
+        const lc = levelColor(pr.level)
+        return (
+          <View key={pr.key} style={[prsS.card, { backgroundColor: colors.backgroundSecondary }]}>
+            <View style={[prsS.iconWrap, { backgroundColor: `${lc}1F` }]}>
+              <Icon size={16} color={lc} />
+            </View>
+            <View style={prsS.body}>
+              <Text style={[prsS.title, { color: colors.textPrimary }]} numberOfLines={1}>
+                {pr.title}
+              </Text>
+              <Text style={[prsS.type, { color: colors.textTertiary }]}>
+                {PR_TYPE_LABEL[pr.type]}
+              </Text>
+            </View>
+            <View style={prsS.right}>
+              {pr.detail !== '' && (
+                <Text
+                  style={[prsS.detail, { color: colors.textSecondary }]}
+                  allowFontScaling={false}
+                  numberOfLines={1}
+                >
+                  {pr.detail}
+                </Text>
+              )}
+              <View style={[prsS.medal, { backgroundColor: lc }]}>
+                <Text style={[prsS.medalTxt, { color: colors.background }]}>
+                  {PR_LEVEL_SHORT[pr.level]}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )
+      })}
+    </View>
+  )
+}
+
+const prsS = StyleSheet.create({
+  wrapper: {
+    paddingHorizontal: spacing.s4,
+    marginBottom: spacing.s6,
+  },
+  sectionTitle: {
+    ...typography.caption,
+    fontFamily: font.bold,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: spacing.s4,
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: radius.md,
+    padding: spacing.s3,
+    marginBottom: spacing.s2,
+    gap: spacing.s3,
+  },
+  iconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  body: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  title: {
+    fontSize: 14,
+    fontFamily: font.bold,
+    letterSpacing: -0.2,
+  },
+  type: {
+    fontSize: 9,
+    fontFamily: font.medium,
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
+  right: {
+    alignItems: 'flex-end',
+    gap: 4,
+    flexShrink: 0,
+  },
+  detail: {
+    fontSize: 12,
+    fontFamily: font.bold,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -0.2,
+  },
+  medal: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+  },
+  medalTxt: {
+    fontSize: 8,
+    fontFamily: font.bold,
+    letterSpacing: 0.6,
+  },
 })
 
 // ─── Chip famille ────────────────────────────────────────────────────────────
@@ -526,6 +822,7 @@ function FamilyChip({
 export default function FeedDetailScreen(): React.JSX.Element {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { colors } = useTheme()
+  const { formatVolume: formatVolumeU } = useWeightUnit()
   const router = useRouter()
   const { width: screenWidth, height: screenHeight } = useWindowDimensions()
   const insets = useSafeAreaInsets()
@@ -724,17 +1021,23 @@ export default function FeedDetailScreen(): React.JSX.Element {
     setWorkout(workoutData)
 
     // Exercises + sets
-    const { data: weData } = await supabase
+    // ⚠️ Pas d'embed `exercises!inner(...)` : aucune FK workout_exercises→exercises
+    // dans le cache PostgREST (PGRST200) → l'embed faisait échouer toute la requête.
+    // Les noms d'exos sont récupérés dans une requête séparée par exercise_id.
+    const { data: weData, error: weError } = await supabase
       .from('workout_exercises')
       .select(
         `
         id, exercise_id, order_index, pr_exercice,
-        exercises!inner(name_fr),
         workout_sets(id, set_number, set_type, reps, weight_kg, rest_seconds, pr_charge, pr_serie)
       `
       )
       .eq('workout_id', id)
       .order('order_index')
+
+    if (weError) {
+      log.error('fetchWorkout workout_exercises error:', weError)
+    }
 
     if (weData) {
       type WeRow = {
@@ -742,16 +1045,28 @@ export default function FeedDetailScreen(): React.JSX.Element {
         exercise_id: string
         order_index: number
         pr_exercice: string | null
-        exercises: { name_fr: string }[] | { name_fr: string }
         workout_sets: SetRow[] | null
       }
-      const exs: ExerciseWithSets[] = (weData as WeRow[]).map((we) => {
-        const exRaw = we.exercises
-        const exObj = Array.isArray(exRaw) ? exRaw[0] : exRaw
+      const weRows = weData as WeRow[]
+
+      // Noms d'exos — requête séparée (pas de FK pour l'embed PostgREST)
+      const nameById = new Map<string, string>()
+      const distinctIds = [...new Set(weRows.map((we) => we.exercise_id))]
+      if (distinctIds.length > 0) {
+        const { data: exData } = await supabase
+          .from('exercises')
+          .select('id, name_fr')
+          .in('id', distinctIds)
+        for (const ex of (exData ?? []) as Array<{ id: string; name_fr: string }>) {
+          nameById.set(ex.id, ex.name_fr)
+        }
+      }
+
+      const exs: ExerciseWithSets[] = weRows.map((we) => {
         return {
           workoutExerciseId: we.id,
           exerciseId: we.exercise_id,
-          nameFr: exObj.name_fr,
+          nameFr: nameById.get(we.exercise_id) ?? 'Exercice',
           orderIndex: we.order_index,
           pr_exercice: (we.pr_exercice as PrLevel) ?? null,
           sets: ((we.workout_sets ?? []) as SetRow[]).sort((a, b) => a.set_number - b.set_number),
@@ -903,7 +1218,10 @@ export default function FeedDetailScreen(): React.JSX.Element {
 
   const handleShare = useCallback(async () => {
     const title = workout?.title ?? 'Séance'
-    const vol = workout?.total_volume_kg != null ? `${Math.round(workout.total_volume_kg)} kg` : ''
+    const vol =
+      workout?.total_volume_kg != null
+        ? formatVolumeU(workout.total_volume_kg, { suffix: true })
+        : ''
     const date = workout ? formatDate(workout.started_at) : ''
     try {
       await Share.share({
@@ -951,24 +1269,6 @@ export default function FeedDetailScreen(): React.JSX.Element {
   }
 
   const nSets = totalSets(exercises)
-
-  // PR badges
-  const hasPrSeance = workout.pr_seance != null
-  const prExercises = exercises.filter((ex) => ex.pr_exercice != null)
-  const prChargeEx = exercises.find((ex) => ex.sets.some((s) => s.pr_charge != null))
-  const prSerieEx = exercises.find((ex) => ex.sets.some((s) => s.pr_serie != null))
-
-  const bestLevel = (
-    vals: Array<'gold' | 'silver' | 'bronze' | null>
-  ): 'gold' | 'silver' | 'bronze' | null => {
-    if (vals.includes('gold')) return 'gold'
-    if (vals.includes('silver')) return 'silver'
-    if (vals.includes('bronze')) return 'bronze'
-    return null
-  }
-
-  const prChargeLevel = prChargeEx ? bestLevel(prChargeEx.sets.map((s) => s.pr_charge)) : null
-  const prSerieLevel = prSerieEx ? bestLevel(prSerieEx.sets.map((s) => s.pr_serie)) : null
 
   return (
     <View style={s.container}>
@@ -1047,8 +1347,8 @@ export default function FeedDetailScreen(): React.JSX.Element {
             <View style={s.heroRow}>
               <Text style={[s.heroValue, { color: colors.accent }]} allowFontScaling={false}>
                 {volumeReady
-                  ? formatVolumeKg(displayVolume)
-                  : formatVolumeKg(workout.total_volume_kg)}
+                  ? formatVolumeU(displayVolume, { suffix: true })
+                  : formatVolumeU(workout.total_volume_kg, { suffix: true })}
               </Text>
             </View>
             <View style={s.statChips}>
@@ -1070,31 +1370,6 @@ export default function FeedDetailScreen(): React.JSX.Element {
               </View>
             </View>
           </View>
-
-          {/* ── PRs — toujours visibles ── */}
-          {(hasPrSeance || prChargeEx != null || prSerieEx != null) && (
-            <View style={s.prsBlock}>
-              {hasPrSeance && workout.pr_seance && (
-                <PrBadge level={workout.pr_seance} type="seance" label="PR Séance" size={13} />
-              )}
-              {prChargeEx != null && prChargeLevel && (
-                <PrBadge
-                  level={prChargeLevel}
-                  type="charge"
-                  label={`Charge · ${prChargeEx.nameFr}`}
-                  size={13}
-                />
-              )}
-              {prSerieEx != null && prSerieEx !== prChargeEx && prSerieLevel && (
-                <PrBadge
-                  level={prSerieLevel}
-                  type="serie"
-                  label={`Série · ${prSerieEx.nameFr}`}
-                  size={13}
-                />
-              )}
-            </View>
-          )}
 
           {/* ── Note ── */}
           {workout.note && (
@@ -1193,7 +1468,10 @@ export default function FeedDetailScreen(): React.JSX.Element {
             </View>
           )}
 
-          {/* ── Récap séance ── */}
+          {/* ── PRs réalisés ── */}
+          <PrsSection workout={workout} exercises={exercises} colors={colors} />
+
+          {/* ── Détail des exos & séries ── */}
           {exercises.length > 0 && <RecapSection exercises={exercises} colors={colors} />}
         </View>
       </ScrollView>
@@ -1586,15 +1864,6 @@ function buildStyles(colors: ReturnType<typeof useTheme>['colors']) {
       letterSpacing: 0.8,
       textTransform: 'uppercase',
       marginTop: 1,
-    },
-
-    // PRs block
-    prsBlock: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.s2,
-      paddingHorizontal: spacing.s4,
-      marginBottom: spacing.s5,
     },
 
     // Note

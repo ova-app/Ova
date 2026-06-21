@@ -17,6 +17,7 @@ import { X, Dumbbell, CalendarDays, Search, Check, Target } from 'lucide-react-n
 import { log } from '@/lib/logger'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography, font, touchTarget } from '@/constants/theme'
 import { createClaim, type ClaimScope, type ClaimType } from '@/lib/claims'
 import { muscleGroupLabel } from '@/lib/muscles'
@@ -58,6 +59,7 @@ function customDeadlineMs(day: string, month: string, year: string): number | nu
 
 export default function NewClaimScreen(): React.JSX.Element {
   const { colors } = useTheme()
+  const { unit: weightUnit, toKg, toDisplay } = useWeightUnit()
   const router = useRouter()
   const s = buildStyles(colors)
 
@@ -113,6 +115,14 @@ export default function NewClaimScreen(): React.JSX.Element {
     })()
   }, [params.exerciseId])
 
+  // Préremplissage prédictif : params.target est en kg → afficher dans l'unité courante.
+  useEffect(() => {
+    if (typeof params.target === 'string' && params.target) {
+      setWeightTarget(String(Math.round(toDisplay(Number(params.target)))))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.target, weightUnit])
+
   const filteredExercises = useMemo(() => {
     if (!search.trim()) return exercises.slice(0, 30)
     const q = normalize(search)
@@ -141,7 +151,8 @@ export default function NewClaimScreen(): React.JSX.Element {
             type: 'weight',
             exerciseId: selectedExercise!.id,
             exerciseName: selectedExercise!.name_fr,
-            targetValue: Number(weightTarget),
+            // Saisie dans l'unité d'affichage → stockée en kg (unité canonique).
+            targetValue: toKg(Number(weightTarget)),
             scope,
             customDeadlineMs: scope === 'custom' ? customMs : null,
             isPublic,
@@ -294,7 +305,7 @@ export default function NewClaimScreen(): React.JSX.Element {
                       keyboardType="numeric"
                       style={s.weightInput}
                     />
-                    <Text style={s.weightUnit}>kg</Text>
+                    <Text style={s.weightUnit}>{weightUnit}</Text>
                   </View>
 
                   <Text style={[s.sectionLabel, { marginTop: spacing.s6 }]}>MOMENT</Text>

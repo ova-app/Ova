@@ -65,7 +65,8 @@ import { getGhostReference, type GhostSet } from '@/lib/ghost'
 import { ghostLimitDays } from '@/lib/plan'
 import { useExerciseLibrary, MUSCLE_LABELS, type ExerciseRow } from '@/lib/hooks/useExerciseLibrary'
 import { getLastLocalSet } from '@/lib/db'
-import { REPS_VALUES, getWeightValues } from '@/lib/weights'
+import { getWeightValues, convertFromKg, WeightUnit } from '@/lib/weights'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import WheelPickerModal from './wheel-picker-modal'
 import oravaLogo from '@/assets/orava_logo.png'
 
@@ -77,10 +78,13 @@ function GhostCompareBar({
   ghostWeight,
   currentWeight,
   ghostBeaten,
+  unit,
 }: {
+  // ghostWeight + currentWeight déjà dans l'unité d'affichage.
   ghostWeight: number
   currentWeight: number
   ghostBeaten: boolean
+  unit: WeightUnit
 }) {
   const W = SCREEN_W - spacing.s4 * 2
   const H = 4
@@ -167,10 +171,10 @@ function GhostCompareBar({
         }}
       >
         {delta > 0
-          ? `↑ +${delta} kg vs fantôme`
+          ? `↑ +${delta} ${unit} vs fantôme`
           : delta < 0
-            ? `↓ ${Math.abs(delta)} kg vs fantôme`
-            : `= fantôme · ${ghostWeight} kg`}
+            ? `↓ ${Math.abs(delta)} ${unit} vs fantôme`
+            : `= fantôme · ${ghostWeight} ${unit}`}
       </Text>
     </View>
   )
@@ -236,6 +240,7 @@ interface SetRowProps {
 }
 
 function SetRow({ set, onDelete, colors, ghostVolume }: SetRowProps) {
+  const { formatWeight } = useWeightUnit()
   const translateX = useSharedValue(0)
   const baseOffset = useSharedValue(0)
   const rowHeight = useSharedValue<number>(touchTarget.comfort)
@@ -308,7 +313,9 @@ function SetRow({ set, onDelete, colors, ghostVolume }: SetRowProps) {
             Set {set.set_number}
           </Text>
           <Text style={[styles.setRowValue, { color: colors.textPrimary }]} numberOfLines={1}>
-            {set.weight_kg > 0 ? `${set.weight_kg} kg × ${set.reps}` : `${set.reps} reps`}
+            {set.weight_kg > 0
+              ? `${formatWeight(set.weight_kg)} × ${set.reps}`
+              : `${set.reps} reps`}
           </Text>
           {prLevel !== null && (
             <View style={[styles.prBadge, { borderColor: prColor }]}>
@@ -715,15 +722,18 @@ function buildPrEvents(
   prCharge: PrLevel,
   prSerie: PrLevel,
   weight: number,
-  reps: number
+  reps: number,
+  unit: WeightUnit
 ): PrEvent[] {
+  // weight est en kg (canonique) → afficher dans l'unité courante.
+  const w = unit === 'lbs' ? Math.round(convertFromKg(weight, 'lbs')) : weight
   const out: PrEvent[] = []
   if (prCharge !== null) {
     out.push({
       type: 'charge',
       level: prCharge,
       title: 'RECORD CHARGE',
-      value: `${formatKg(weight)} kg`,
+      value: `${formatKg(w)} ${unit}`,
       subtitle: levelSubtitle(prCharge, 'charge'),
     })
   }
@@ -732,7 +742,7 @@ function buildPrEvents(
       type: 'serie',
       level: prSerie,
       title: 'RECORD SÉRIE',
-      value: `${formatKg(weight)} kg × ${reps}`,
+      value: `${formatKg(w)} ${unit} × ${reps}`,
       subtitle: levelSubtitle(prSerie, 'serie'),
     })
   }
@@ -743,6 +753,7 @@ function buildPrEvents(
 
 export default function SessionScreen() {
   const { colors } = useTheme()
+  const { unit: weightUnit } = useWeightUnit()
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const {
@@ -845,6 +856,9 @@ export default function SessionScreen() {
 
   const draftWeight = draftSet?.weight_kg ?? weightValues[0] ?? 0
   const draftReps = draftSet?.reps ?? 1
+  // draftWeight est en kg (canonique) → valeur affichée sur le bouton picker.
+  const draftWeightDisplay =
+    weightUnit === 'lbs' ? Math.round(convertFromKg(draftWeight, 'lbs')) : draftWeight
 
   // Set number being prepared
   const nextSetNumber = validatedSets.length + 1
@@ -905,7 +919,7 @@ export default function SessionScreen() {
     const { prCharge, prSerie } = validateSet(currentIndex)
     snapshotToMMKV(exercises, currentIndex, startedAt)
 
-    const events = buildPrEvents(prCharge, prSerie, draftWeight, draftReps)
+    const events = buildPrEvents(prCharge, prSerie, draftWeight, draftReps, weightUnit)
     if (events.length > 0) {
       setPrFlash(events)
       setTimeout(() => router.push('/workout/timer'), 1500)
@@ -1163,9 +1177,11 @@ export default function SessionScreen() {
                 accessibilityHint="Ouvre le sélecteur de poids"
               >
                 <Text style={[styles.pickerButtonValue, { color: colors.textPrimary }]}>
-                  {draftWeight > 0 ? draftWeight : '�'}
+                  {draftWeight > 0 ? draftWeightDisplay : '—'}
                 </Text>
-                <Text style={[styles.pickerButtonLabel, { color: colors.textSecondary }]}>KG</Text>
+                <Text style={[styles.pickerButtonLabel, { color: colors.textSecondary }]}>
+                  {weightUnit.toUpperCase()}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.pickerButton}
@@ -1188,9 +1204,10 @@ export default function SessionScreen() {
           {/* Ghost compare bar */}
           {ghostEnabled && ghostRef !== null && (
             <GhostCompareBar
-              ghostWeight={ghostRef.weight_kg}
-              currentWeight={draftWeight}
+              ghostWeight={convertFromKg(ghostRef.weight_kg, weightUnit)}
+              currentWeight={convertFromKg(draftWeight, weightUnit)}
               ghostBeaten={ghostBeaten}
+              unit={weightUnit}
             />
           )}
 

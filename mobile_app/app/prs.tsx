@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router'
 import { ChevronLeft, Zap, Flame, Shield, Pin } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography, font, touchTarget } from '@/constants/theme'
 import { emptyStateRecipe } from '@/constants/recipes'
 import { muscleGroupLabel } from '@/lib/muscles'
@@ -226,6 +227,7 @@ interface PodiumStepProps {
 }
 
 function PodiumStep({ slot, level, colors }: PodiumStepProps): React.JSX.Element {
+  const { unit, toDisplay } = useWeightUnit()
   const c = levelColorOf(level, colors)
   const isGold = level === 'gold'
 
@@ -253,10 +255,10 @@ function PodiumStep({ slot, level, colors }: PodiumStepProps): React.JSX.Element
       <View style={podSt.metric}>
         <Text
           style={[podSt.weight, isGold && podSt.weightGold, { color: c }]}
-          accessibilityLabel={`${slot.weight_kg} kilogrammes`}
+          accessibilityLabel={`${Math.round(toDisplay(slot.weight_kg))} ${unit}`}
         >
-          {slot.weight_kg}
-          <Text style={[podSt.unit, { color: c }]}> kg</Text>
+          {Math.round(toDisplay(slot.weight_kg))}
+          <Text style={[podSt.unit, { color: c }]}> {unit}</Text>
         </Text>
         {slot.reps !== null && slot.reps > 0 && (
           <Text style={[podSt.reps, { color: colors.textTertiary }]}>× {slot.reps}</Text>
@@ -381,6 +383,7 @@ interface ExerciseCardProps {
 }
 
 function ExerciseCard({ item, colors, onPin, isPinned }: ExerciseCardProps): React.JSX.Element {
+  const { unit, toDisplay } = useWeightUnit()
   const hasCharge = item.podiumCharge.length > 0
   const hasSerie = item.podiumSerie.length > 0
   const hasGold = item.podiumCharge.some((s) => s.level === 'gold')
@@ -449,8 +452,8 @@ function ExerciseCard({ item, colors, onPin, isPinned }: ExerciseCardProps): Rea
             <Text style={[cardSt.serieLabel, { color: colors.textTertiary }]}>MEILLEURE SÉRIE</Text>
           </View>
           <Text style={[cardSt.serieValue, { color: colors.textSecondary }]}>
-            {bestSerie.weight_kg}
-            <Text style={cardSt.serieUnit}> kg</Text>
+            {Math.round(toDisplay(bestSerie.weight_kg))}
+            <Text style={cardSt.serieUnit}> {unit}</Text>
             {bestSerie.reps !== null && bestSerie.reps > 0 && (
               <Text style={{ color: colors.textTertiary }}> × {bestSerie.reps}</Text>
             )}

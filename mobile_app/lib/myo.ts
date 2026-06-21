@@ -149,7 +149,7 @@ const POP_STD: MyoRaw = {
 
 const DIM_LABELS: Record<keyof MyoRaw, string> = {
   volume_kg: 'volume',
-  densite: 'intensité',
+  densite: 'densité',
   nb_series: 'structure',
   recuperation: 'récupération',
   nb_pr: 'performance',
@@ -297,6 +297,25 @@ function rCountTrue(obj: Record<string, boolean> | null | undefined): number {
 function hhiScore(obj: Record<string, number> | null | undefined, total: number): number {
   if (!total) return 0.25
   return rVals(obj).reduce((s, v) => s + (v / total) ** 2, 0)
+}
+
+// ─── Score séance discriminant (ORA-086) ──────────────────────────────────────
+// La moyenne des ~41 z-scores tend vers 0 (variance ÷ √N) → score figé ~50.
+// On n'agrège que quelques dims à fort signal, pondérées, centrées sur
+// 50 = « ta séance type ». >66 = grosse séance, <33 = jour léger.
+export function computeSessionScore(z: {
+  volume_kg: number
+  densite: number
+  charge_relative: number
+  nb_pr: number
+  mean_evolution_1rm: number
+}): number {
+  const mean = (vals: number[]) => vals.reduce((a, b) => a + b, 0) / vals.length
+  const effortZ = mean([z.volume_kg, z.densite, z.charge_relative])
+  const outputZ = mean([z.nb_pr, z.mean_evolution_1rm])
+  const scoreZ = 0.6 * effortZ + 0.4 * outputZ
+  const clamped = Math.max(-2.5, Math.min(2.5, scoreZ)) // ±2.5σ → bornes 0/100
+  return Math.round(Math.max(0, Math.min(100, 50 + 20 * clamped)))
 }
 function parseHour(isoStr: string): number {
   const d = new Date(isoStr)
@@ -750,9 +769,14 @@ export async function saveMyoSignature(p: SaveMyoParams): Promise<number[][] | n
     )
   }
 
-  const allZ = Object.values(zAll)
-  const avg = allZ.reduce((a, b) => a + b, 0) / allZ.length
-  const score = Math.round(((avg + 3) / 6) * 100)
+  // Score séance discriminant (ORA-086) — vs ta norme perso, pas une moyenne plate.
+  const score = computeSessionScore({
+    volume_kg: zAll.volume_kg,
+    densite: zAll.densite,
+    charge_relative: zAll.charge_relative,
+    nb_pr: zAll.nb_pr,
+    mean_evolution_1rm: zAll.mean_evolution_1rm,
+  })
 
   const sortedZ = keys.map((k) => `${k}:${zAll[k].toFixed(3)}`).join('|')
   const payload = `${p.workoutId}|${sortedZ}|${score}`
@@ -762,7 +786,7 @@ export async function saveMyoSignature(p: SaveMyoParams): Promise<number[][] | n
 
   const anomalyDims = keys.filter((k) => Math.abs(zAll[k]) >= 2.9).map((k) => DIM_LABELS[k])
 
-  log.info('[MYO] inserting score=', score, 'dims=', allZ.length, 'hash=', hash.slice(0, 16))
+  log.info('[MYO] inserting score=', score, 'dims=', keys.length, 'hash=', hash.slice(0, 16))
   const { error } = await supabase.from('myo_signatures').insert({
     workout_id: p.workoutId,
     user_id: p.userId,

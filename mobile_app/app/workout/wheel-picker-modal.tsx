@@ -17,8 +17,16 @@ import {
   vec,
 } from '@shopify/react-native-skia'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography, touchTarget, spring } from '@/constants/theme'
-import { REPS_VALUES, getWeightValues } from '@/lib/weights'
+import { REPS_VALUES, getWeightValuesForUnit, convertFromKg, WeightUnit } from '@/lib/weights'
+
+// Snappe une valeur sur l'entrée la plus proche de la granulométrie (utile en lbs
+// où le poids kg stocké ne tombe pas pile sur un cran de la liste impériale).
+function snapToNearest(value: number, values: number[]): number {
+  if (values.length === 0) return value
+  return values.reduce((best, v) => (Math.abs(v - value) < Math.abs(best - value) ? v : best))
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -174,10 +182,13 @@ const GHOST_CH = 20
 function GhostWeightBar({
   currentWeight,
   ghostValue,
+  unit,
   colors,
 }: {
+  // currentWeight + ghostValue sont déjà dans l'unité d'affichage (kg ou lbs).
   currentWeight: number
   ghostValue: number
+  unit: WeightUnit
   colors: ReturnType<typeof useTheme>['colors']
 }) {
   const maxWeight = ghostValue * 1.5
@@ -228,10 +239,10 @@ function GhostWeightBar({
           ]}
         >
           {beaten
-            ? `+${delta.toFixed(1)} kg`
+            ? `+${delta.toFixed(1)} ${unit}`
             : delta < 0
-              ? `${Math.abs(delta).toFixed(1)} kg en dessous`
-              : `${ghostValue} kg cible`}
+              ? `${Math.abs(delta).toFixed(1)} ${unit} en dessous`
+              : `${ghostValue} ${unit} cible`}
         </Text>
       </View>
       <Canvas style={{ width: GHOST_W, height: GHOST_CH }}>
@@ -308,17 +319,22 @@ export default function WheelPickerModal({
   ghostBeaten = false,
 }: WheelPickerModalProps) {
   const { colors } = useTheme()
+  const { unit, toKg } = useWeightUnit()
   const insets = useSafeAreaInsets()
   const slideValue = useSharedValue(Dimensions.get('window').height)
   const backdropOpacity = useSharedValue(0)
   const [mounted, setMounted] = React.useState(isVisible)
 
-  const [state, setState] = React.useState<WheelState>({
-    weight: currentWeight,
-    reps: currentReps,
-  })
+  const weightValues = useMemo(
+    () => getWeightValuesForUnit(equipmentType, unit),
+    [equipmentType, unit]
+  )
 
-  const weightValues = useMemo(() => getWeightValues(equipmentType), [equipmentType])
+  // state.weight est dans l'unité d'affichage. currentWeight (prop) est en kg.
+  const [state, setState] = React.useState<WheelState>(() => ({
+    weight: snapToNearest(convertFromKg(currentWeight, unit), weightValues),
+    reps: currentReps,
+  }))
 
   const slideStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: slideValue.value }],
@@ -330,6 +346,11 @@ export default function WheelPickerModal({
   useEffect(() => {
     if (isVisible) {
       setMounted(true)
+      // Resynchronise les roues sur le set courant (+ unité courante) à chaque ouverture.
+      setState({
+        weight: snapToNearest(convertFromKg(currentWeight, unit), weightValues),
+        reps: currentReps,
+      })
       slideValue.value = withTiming(0, { duration: 320, easing: Easing.bezier(0.16, 1, 0.3, 1) })
       backdropOpacity.value = withTiming(1, { duration: 200 })
     } else {
@@ -342,7 +363,8 @@ export default function WheelPickerModal({
   }, [isVisible])
 
   function handleValidate() {
-    onValidate(state.weight, state.reps)
+    // state.weight est dans l'unité d'affichage → reconvertir en kg pour le stockage.
+    onValidate(toKg(state.weight), state.reps)
     onClose()
   }
 
@@ -380,14 +402,14 @@ export default function WheelPickerModal({
               values={weightValues}
               selectedValue={state.weight}
               onValueChange={(w) => setState((s) => ({ ...s, weight: w }))}
-              label="KG"
+              label={unit.toUpperCase()}
             />
           ) : (
             <SingleWheel
               values={[]}
               selectedValue={0}
               onValueChange={() => {}}
-              label="KG"
+              label={unit.toUpperCase()}
               isEmpty
             />
           )}
@@ -401,7 +423,12 @@ export default function WheelPickerModal({
 
         {/* Ghost weight bar */}
         {ghostValue !== undefined && weightValues.length > 0 && (
-          <GhostWeightBar currentWeight={state.weight} ghostValue={ghostValue} colors={colors} />
+          <GhostWeightBar
+            currentWeight={state.weight}
+            ghostValue={convertFromKg(ghostValue, unit)}
+            unit={unit}
+            colors={colors}
+          />
         )}
 
         {/* Bottom buttons */}

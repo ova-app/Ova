@@ -35,9 +35,10 @@ describe('computePodium', () => {
 
   // ─── Top3 vide / partiellement rempli ────────────────────────────────────────
 
-  it('should return null when top3 is empty (pr1 = 0)', () => {
-    // pr1 <= 0 → null (même si value > 0)
-    expect(computePodium(100, { pr1: 0, pr2: null, pr3: null })).toBeNull()
+  it('should return gold on first ever attempt (pr1 = 0, value > 0)', () => {
+    // cause 2 — aucun historique → 1er passage = record absolu de fait → gold
+    expect(computePodium(100, { pr1: 0, pr2: null, pr3: null })).toBe('gold')
+    expect(computePodium(1, { pr1: 0, pr2: null, pr3: null })).toBe('gold')
   })
 
   it('should return null when value is 0', () => {

@@ -11,9 +11,10 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { ChevronRight, Dumbbell, Trophy } from 'lucide-react-native'
 import { useRouter } from 'expo-router'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography } from '@/constants/theme'
 import { emptyStateRecipe } from '@/constants/recipes'
-import { formatVolume, formatDuration } from '@/lib/utils'
+import { formatDuration } from '@/lib/utils'
 import { useHistoryData, type WorkoutRow } from '@/lib/hooks/useHistoryData'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -88,11 +89,12 @@ interface HistoryRowProps {
 
 function HistoryRow({ item, onPress }: HistoryRowProps) {
   const { colors } = useTheme()
+  const { unit: weightUnit, formatVolume: formatVolumeU } = useWeightUnit()
   const d = new Date(item.started_at)
   const day = d.getDate().toString() // pas de zéro devant
   const weekday = DAYS_FR[d.getDay()]
 
-  const volumeStr = formatVolume(item.total_volume_kg)
+  const volumeStr = formatVolumeU(item.total_volume_kg)
 
   const subtitleParts = [
     `${item.total_sets} série${item.total_sets > 1 ? 's' : ''}`,
@@ -176,7 +178,7 @@ function HistoryRow({ item, onPress }: HistoryRowProps) {
                   fontSize: 12,
                 }}
               >
-                kg
+                {weightUnit}
               </Text>
             </Text>
           </View>

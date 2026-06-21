@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { storage } from '../lib/storage'
-import { getExercisePrTop3 } from '../lib/db'
+import { getExercisePrTop3, whenBackfillSettled } from '../lib/db'
 
 const DRAFT_KEY = 'workout_session_draft'
 
@@ -63,15 +63,32 @@ export function computePodium(
   value: number,
   top3: { pr1: number; pr2: number | null; pr3: number | null }
 ): PrLevel {
-  if (value <= 0 || top3.pr1 <= 0) return null
+  if (value <= 0) return null
+  // Aucun historique (pr1 = 0) → 1er passage de l'exo = record absolu de fait → gold.
+  // (cause 2 : avant, la 1re séance d'un exo ne flaggait jamais de PR.)
+  if (top3.pr1 <= 0) return 'gold'
   if (value > top3.pr1) return 'gold'
   if (top3.pr2 !== null && value > top3.pr2) return 'silver'
   if (top3.pr3 !== null && value > top3.pr3) return 'bronze'
   return null
 }
 
+type Top3 = { pr1: number; pr2: number | null; pr3: number | null }
+
 function emptyTop3() {
-  return { pr1: 0, pr2: null, pr3: null } as { pr1: number; pr2: number | null; pr3: number | null }
+  return { pr1: 0, pr2: null, pr3: null } as Top3
+}
+
+// Insère `value` dans un top3 (valeurs distinctes, décroissant), renvoie un nouvel objet.
+// Sert à intégrer les sets de la séance EN COURS dans le top3 figé à l'ajout d'exo :
+// sans ça, sur un exo sans historique, chaque set serait gold (pr1 reste 0). cf. cause 2.
+function foldTop3(top3: Top3, value: number): Top3 {
+  if (value <= 0) return top3
+  const vals = [top3.pr1, top3.pr2 ?? 0, top3.pr3 ?? 0].filter((v) => v > 0)
+  if (vals.includes(value)) return top3 // DISTINCT (cohérent avec le SQL du top3)
+  vals.push(value)
+  vals.sort((a, b) => b - a)
+  return { pr1: vals[0] ?? 0, pr2: vals[1] ?? null, pr3: vals[2] ?? null }
 }
 
 function lastDraftIndex(sets: WorkoutSet[]): number {
@@ -189,7 +206,14 @@ export function WorkoutProvider({ children }: { children: React.ReactNode }) {
     let pr_top3_exercice = emptyTop3()
 
     try {
-      const top3 = await getExercisePrTop3(id)
+      let top3 = await getExercisePrTop3(id)
+      // Cause 3 — top3 vide alors qu'un backfill de boot tourne peut-être encore : on l'attend
+      // (whenBackfillSettled n'EN LANCE PAS de nouveau → zéro réseau initié en séance, règle #3)
+      // puis on relit une fois. No-op si aucun backfill en cours.
+      if (top3.charge.pr1 <= 0 && top3.serie.pr1 <= 0 && top3.exercice.pr1 <= 0) {
+        await whenBackfillSettled()
+        top3 = await getExercisePrTop3(id)
+      }
       pr_top3_charge = top3.charge
       pr_top3_serie = top3.serie
       pr_top3_exercice = top3.exercice
@@ -267,6 +291,11 @@ export function WorkoutProvider({ children }: { children: React.ReactNode }) {
         rest_seconds,
         validated_at: now,
       }
+
+      // Replie ce set dans le top3 figé → le set suivant se compare aussi à la séance en cours
+      // (sinon : 1er exo sans historique = chaque set gold ; et over-detection sur exos connus).
+      exCopy.pr_top3_charge = foldTop3(exCopy.pr_top3_charge, draft.weight_kg)
+      exCopy.pr_top3_serie = foldTop3(exCopy.pr_top3_serie, draft.weight_kg * draft.reps)
 
       const validatedCount = exCopy.sets.filter((s) => s.validated).length
       exCopy.sets.push(makeDraft(validatedCount + 1, draft.weight_kg, draft.reps))

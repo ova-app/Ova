@@ -7,7 +7,9 @@ import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { hydrateStorage } from '@/lib/storage'
 import { initDB, backfillLocalFromSupabase } from '@/lib/db'
+import { supabase } from '@/lib/supabase'
 import { ThemeProvider } from '@/context/ThemeContext'
+import { WeightUnitProvider } from '@/context/WeightUnitContext'
 import { WorkoutProvider } from '@/context/WorkoutContext'
 import { dark, radius, spacing, typography } from '@/constants/theme'
 import { useFonts } from 'expo-font'
@@ -102,7 +104,8 @@ export default function RootLayout() {
       try {
         await hydrateStorage()
         await initDB()
-        void backfillLocalFromSupabase() // ORA-024 — réamorce SQLite si vide (non bloquant)
+        // backfill SQLite déclenché par l'effet auth ci-dessous (après initDB → getDB OK),
+        // pour couvrir la session restaurée ET un login ultérieur (cause 3).
       } catch (e) {
         log.error('[_layout] init', e)
       } finally {
@@ -110,6 +113,18 @@ export default function RootLayout() {
       }
     })()
   }, [])
+
+  // ORA-024 / cause 3 — réamorce SQLite si vide. Déclenché une fois initDB faite (`hydrated`),
+  // puis à chaque (re)connexion : sans ça, un backfill lancé avant que la session soit prête
+  // sortait à vide → top3 PR muets toute la séance. Idempotent (no-op si SQLite déjà peuplé).
+  useEffect(() => {
+    if (!hydrated) return
+    void backfillLocalFromSupabase()
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') void backfillLocalFromSupabase()
+    })
+    return () => sub.subscription.unsubscribe()
+  }, [hydrated])
 
   useEffect(() => {
     if ((fontsLoaded || fontError) && hydrated) {
@@ -131,20 +146,25 @@ export default function RootLayout() {
       >
         <GestureHandlerRootView style={{ flex: 1 }}>
           <ThemeProvider>
-            <WorkoutProvider>
-              <Stack
-                screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0A0A0F' } }}
-              >
-                <Stack.Screen
-                  name="workout/session"
-                  options={{ animation: 'none', gestureEnabled: false }}
-                />
-                <Stack.Screen
-                  name="workout/timer"
-                  options={{ animation: 'none', gestureEnabled: false }}
-                />
-              </Stack>
-            </WorkoutProvider>
+            <WeightUnitProvider>
+              <WorkoutProvider>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: '#0A0A0F' },
+                  }}
+                >
+                  <Stack.Screen
+                    name="workout/session"
+                    options={{ animation: 'none', gestureEnabled: false }}
+                  />
+                  <Stack.Screen
+                    name="workout/timer"
+                    options={{ animation: 'none', gestureEnabled: false }}
+                  />
+                </Stack>
+              </WorkoutProvider>
+            </WeightUnitProvider>
           </ThemeProvider>
         </GestureHandlerRootView>
       </PostHogProvider>

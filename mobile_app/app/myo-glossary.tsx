@@ -1,12 +1,5 @@
 import React, { useRef } from 'react'
-import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  StyleSheet,
-  StatusBar,
-} from 'react-native'
+import { View, Text, ScrollView, Pressable, StyleSheet, StatusBar } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
@@ -43,15 +36,13 @@ const FAMILIES: FamilyEntry[] = [
     ],
   },
   {
-    name: 'INTENSITÉ',
+    name: 'CHARGE',
     color: '#ef4444',
-    description: 'Effort relatif déployé pendant la séance.',
+    description: 'Lourdeur et densité du travail — charge réelle soulevée, pas effort perçu.',
     dims: [
-      { name: 'RPE moy.', desc: 'Moyenne des RPE sur tous les sets' },
-      { name: 'Facteur int.', desc: 'Poids utilisé vs 1RM Epley estimé' },
-      { name: 'RPE pic', desc: 'Effort maximal atteint dans la séance' },
-      { name: 'Constance', desc: '1 − (σ RPE / μ RPE) — faible variance = score haut' },
-      { name: 'Int. relative', desc: 'Score composite vs ton historique personnel' },
+      { name: 'Densité', desc: 'Volume (poids × reps) rapporté à la durée de séance' },
+      { name: 'Charge rel.', desc: 'Poids utilisé vs 1RM Epley estimé (% du max)' },
+      { name: 'Poids max', desc: 'Charge absolue la plus lourde de la séance' },
     ],
   },
   {
@@ -59,10 +50,10 @@ const FAMILIES: FamilyEntry[] = [
     color: '#8b5cf6',
     description: 'Organisation logique et cohérence de la séance.',
     dims: [
-      { name: 'Nb exercices', desc: 'Nombre d\'exercices distincts' },
+      { name: 'Nb exercices', desc: "Nombre d'exercices distincts" },
       { name: 'Sets/exercice', desc: 'Nombre moyen de sets par exercice' },
       { name: 'Variété', desc: 'Diversité des groupes musculaires ciblés' },
-      { name: 'Score struct.', desc: 'Cohérence de l\'enchaînement push/pull/legs' },
+      { name: 'Score struct.', desc: "Cohérence de l'enchaînement push/pull/legs" },
       { name: 'Rég. repos', desc: '1 − (σ repos / μ repos) entre sets' },
     ],
   },
@@ -87,16 +78,16 @@ const FAMILIES: FamilyEntry[] = [
       { name: 'Amp. PRs', desc: 'Amplitude moyenne Δ% vs précédent record' },
       { name: 'Force rel.', desc: 'Poids max rapporté au poids de corps' },
       { name: 'Prog. 1RM', desc: 'Δ 1RM Epley vs dernière séance même exercice' },
-      { name: 'Constance perf.', desc: 'Stabilité des perfs entre sets d\'un même exercice' },
+      { name: 'Constance perf.', desc: "Stabilité des perfs entre sets d'un même exercice" },
     ],
   },
   {
     name: 'RÉGULARITÉ',
     color: '#22c55e',
-    description: 'Discipline d\'entraînement sur la durée.',
+    description: "Discipline d'entraînement sur la durée.",
     dims: [
       { name: 'Fréquence', desc: 'Séances / semaine (rolling 4 semaines)' },
-      { name: 'Streak', desc: 'Semaines consécutives d\'entraînement' },
+      { name: 'Streak', desc: "Semaines consécutives d'entraînement" },
       { name: 'Var. séances', desc: 'Variabilité du volume séance à séance' },
       { name: 'Planning', desc: 'Régularité créneaux horaires et jours de semaine' },
       { name: 'Régularité', desc: 'Score composite des 4 dimensions précédentes' },
@@ -133,7 +124,7 @@ const FAMILIES: FamilyEntry[] = [
     description: 'Gestion du temps et efficacité de la séance.',
     dims: [
       { name: 'Durée', desc: 'Durée totale de la séance' },
-      { name: 'Tempo', desc: 'Cadence d\'enchaînement (durée / transitions)' },
+      { name: 'Tempo', desc: "Cadence d'enchaînement (durée / transitions)" },
       { name: 'Densité', desc: 'Temps actif (sets) / durée totale' },
       { name: 'Efficacité', desc: 'Volume produit par seconde de séance' },
       { name: 'Timing', desc: 'Créneau horaire vs ton profil circadien' },
@@ -143,7 +134,9 @@ const FAMILIES: FamilyEntry[] = [
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
-export default function MyoGlossaryScreen({ onClose }: { onClose?: () => void } = {}): React.JSX.Element {
+export default function MyoGlossaryScreen({
+  onClose,
+}: { onClose?: () => void } = {}): React.JSX.Element {
   const { colors } = useTheme()
   const router = useRouter()
   const insets = useSafeAreaInsets()
@@ -157,12 +150,7 @@ export default function MyoGlossaryScreen({ onClose }: { onClose?: () => void } 
 
       {/* Header */}
       <View style={s.header}>
-        <Pressable
-          style={s.backBtn}
-          onPress={handleBack}
-          hitSlop={8}
-          accessibilityLabel="Retour"
-        >
+        <Pressable style={s.backBtn} onPress={handleBack} hitSlop={8} accessibilityLabel="Retour">
           <ChevronLeft size={24} color={colors.textPrimary} strokeWidth={2} />
         </Pressable>
         <View style={s.headerCenter}>
@@ -184,9 +172,9 @@ export default function MyoGlossaryScreen({ onClose }: { onClose?: () => void } 
             <Text style={[s.introTitle, { color: colors.textPrimary }]}>Score Myo 0 → 100</Text>
           </View>
           <Text style={[s.introBody, { color: colors.textSecondary }]}>
-            Chaque dimension est normalisée sur ton historique personnel. Un score de
-            {' '}<Text style={{ color: colors.textPrimary, fontFamily: font.bold }}>100</Text>{' '}
-            représente ton meilleur niveau sur cette variable.
+            Chaque dimension est normalisée sur ton historique personnel. Un score de{' '}
+            <Text style={{ color: colors.textPrimary, fontFamily: font.bold }}>100</Text> représente
+            ton meilleur niveau sur cette variable.
           </Text>
           <View style={s.introStats}>
             <View style={s.introStat}>
@@ -239,19 +227,13 @@ function FamilySection({
           <View style={[s.familyDot, { backgroundColor: family.color }]} />
           <Text style={[s.familyName, { color: colors.textPrimary }]}>{family.name}</Text>
           <View style={[s.dimCountBadge, { backgroundColor: family.color + '22' }]}>
-            <Text style={[s.dimCountText, { color: family.color }]}>
-              {family.dims.length}
-            </Text>
+            <Text style={[s.dimCountText, { color: family.color }]}>{family.dims.length}</Text>
           </View>
-          <Text style={[s.familyIndexLabel, { color: colors.textTertiary }]}>
-            F{index + 1}
-          </Text>
+          <Text style={[s.familyIndexLabel, { color: colors.textTertiary }]}>F{index + 1}</Text>
         </View>
 
         {/* Description */}
-        <Text style={[s.familyDesc, { color: colors.textSecondary }]}>
-          {family.description}
-        </Text>
+        <Text style={[s.familyDesc, { color: colors.textSecondary }]}>{family.description}</Text>
 
         {/* Separator */}
         <View style={[s.dimSeparator, { backgroundColor: colors.separator }]} />
@@ -260,7 +242,10 @@ function FamilySection({
         {family.grid ? (
           <View style={s.dimGrid}>
             {family.dims.map((dim, di) => (
-              <View key={di} style={[s.dimGridItem, { backgroundColor: colors.backgroundTertiary }]}>
+              <View
+                key={di}
+                style={[s.dimGridItem, { backgroundColor: colors.backgroundTertiary }]}
+              >
                 <View style={[s.dimGridIndex, { backgroundColor: family.color + '33' }]}>
                   <Text style={[s.dimIndexText, { color: family.color }]}>
                     {String(di).padStart(2, '0')}

@@ -25,16 +25,21 @@ z-score Supabase : `myo_signatures.z_volume`
 
 ---
 
-## Famille 1 — INTENSITÉ `#ef4444` (5 dims)
-Effort relatif déployé.
+## Famille 1 — CHARGE `#ef4444` (3 dims réelles + 2 à câbler)
+Lourdeur et densité du travail — **charge réelle soulevée, pas l'effort perçu**.
+⚠️ Renommée « INTENSITÉ » → « CHARGE » (ORA-087) : le RPE n'est jamais persisté
+(colonne `workout_sets.rpe` existe mais le client le jette avant le save — picker → state → RPC).
+La colonne DB reste `myo_signatures.z_intensite` (pas de migration) ; `z_intensite = z(densité)`.
 
 | Dim | Nom | Source |
 |---|---|---|
-| 0 | RPE moy. | Moyenne `workout_sets.rpe` |
-| 1 | Facteur int. | Poids utilisé / 1RM Epley estimé |
-| 2 | RPE pic | Max `workout_sets.rpe` dans la séance |
-| 3 | Constance | 1 − (σ RPE / μ RPE) — faible variance = score haut |
-| 4 | Int. relative | Score composite vs historique personnel |
+| 0 | Densité | Volume (poids × reps) / durée séance (= `z_intensite`) |
+| 1 | Charge rel. | Poids utilisé / 1RM Epley estimé (% du max) |
+| 2 | — | placeholder `0` (à câbler — ORA-088) |
+| 3 | Poids max | Charge absolue la plus lourde de la séance |
+| 4 | — | placeholder `0` (à câbler — ORA-088) |
+
+> Pour faire de cette famille une vraie mesure d'effort perçu (RPE) : ORA-087 option B (migration RPC `create_workout` + `WorkoutSet.rpe`).
 
 z-score Supabase : `myo_signatures.z_intensite`
 

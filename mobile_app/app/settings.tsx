@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { ChevronLeft, ChevronRight, Check } from 'lucide-react-native'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography, spring, font } from '@/constants/theme'
 import { toggleRecipe } from '@/constants/recipes'
 import { supabase } from '@/lib/supabase'
@@ -80,18 +81,15 @@ function ToggleRow({
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type WeightUnit = 'kg' | 'lbs'
-
 interface SettingsState {
-  weightUnit: WeightUnit
   vibrationEnabled: boolean
   defaultTimerSeconds: number
   publicWorkoutsByDefault: boolean
   ghostEnabled: boolean
 }
 
+// weightUnit géré par WeightUnitContext (clé `settings_weight_unit`) — réactif dans toute l'app.
 const STORAGE_KEYS = {
-  weightUnit: 'settings_weight_unit',
   vibration: 'settings_vibration',
   publicWorkouts: 'settings_public_workouts',
   ghost: 'settings_ghost',
@@ -117,10 +115,10 @@ function formatTimerLabel(seconds: number): string {
 
 export default function SettingsScreen(): React.JSX.Element {
   const { colors } = useTheme()
+  const { unit: weightUnit, setUnit: setWeightUnit } = useWeightUnit()
   const router = useRouter()
 
   const [settings, setSettings] = useState<SettingsState>({
-    weightUnit: 'kg',
     vibrationEnabled: true,
     defaultTimerSeconds: 90,
     publicWorkoutsByDefault: false,
@@ -134,8 +132,7 @@ export default function SettingsScreen(): React.JSX.Element {
   useEffect(() => {
     async function loadSettings(): Promise<void> {
       try {
-        const [unit, vibration, publicWorkouts, ghost] = await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.weightUnit),
+        const [vibration, publicWorkouts, ghost] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEYS.vibration),
           AsyncStorage.getItem(STORAGE_KEYS.publicWorkouts),
           AsyncStorage.getItem(STORAGE_KEYS.ghost),
@@ -143,7 +140,6 @@ export default function SettingsScreen(): React.JSX.Element {
 
         setSettings((prev) => ({
           ...prev,
-          weightUnit: (unit === 'lbs' ? 'lbs' : 'kg') as WeightUnit,
           vibrationEnabled: vibration !== 'false',
           // lu depuis le wrapper `storage` (cache RAM synchrone) — même source que timer.tsx
           defaultTimerSeconds: storage.getNumber(TIMER_PRESET_KEY) ?? 90,
@@ -174,11 +170,7 @@ export default function SettingsScreen(): React.JSX.Element {
   }, [])
 
   // ─── Persistance save ─────────────────────────────────────────────────────
-
-  async function setWeightUnit(unit: WeightUnit): Promise<void> {
-    setSettings((prev) => ({ ...prev, weightUnit: unit }))
-    await AsyncStorage.setItem(STORAGE_KEYS.weightUnit, unit)
-  }
+  // setWeightUnit vient de useWeightUnit() (réactif app-wide).
 
   async function setVibration(enabled: boolean): Promise<void> {
     setSettings((prev) => ({ ...prev, vibrationEnabled: enabled }))
@@ -233,26 +225,22 @@ export default function SettingsScreen(): React.JSX.Element {
             <Text style={s.rowLabel}>Unité de poids</Text>
             <View style={s.segmented}>
               <Pressable
-                style={[s.segBtn, settings.weightUnit === 'kg' && s.segBtnActive]}
+                style={[s.segBtn, weightUnit === 'kg' && s.segBtnActive]}
                 onPress={() => setWeightUnit('kg')}
                 accessibilityRole="button"
                 accessibilityLabel="Kilogrammes"
-                accessibilityState={{ selected: settings.weightUnit === 'kg' }}
+                accessibilityState={{ selected: weightUnit === 'kg' }}
               >
-                <Text style={[s.segLabel, settings.weightUnit === 'kg' && s.segLabelActive]}>
-                  kg
-                </Text>
+                <Text style={[s.segLabel, weightUnit === 'kg' && s.segLabelActive]}>kg</Text>
               </Pressable>
               <Pressable
-                style={[s.segBtn, settings.weightUnit === 'lbs' && s.segBtnActive]}
+                style={[s.segBtn, weightUnit === 'lbs' && s.segBtnActive]}
                 onPress={() => setWeightUnit('lbs')}
                 accessibilityRole="button"
                 accessibilityLabel="Livres"
-                accessibilityState={{ selected: settings.weightUnit === 'lbs' }}
+                accessibilityState={{ selected: weightUnit === 'lbs' }}
               >
-                <Text style={[s.segLabel, settings.weightUnit === 'lbs' && s.segLabelActive]}>
-                  lbs
-                </Text>
+                <Text style={[s.segLabel, weightUnit === 'lbs' && s.segLabelActive]}>lbs</Text>
               </Pressable>
             </View>
           </View>

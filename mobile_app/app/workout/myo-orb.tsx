@@ -47,7 +47,7 @@ const H_BOT = 0.22
 // ─── Familles ──────────────────────────────────────────────────────────────
 const FAMILY_NAMES = [
   'VOLUME',
-  'INTENSITÉ',
+  'CHARGE',
   'STRUCTURE',
   'RÉCUP',
   'PERF',
@@ -58,7 +58,7 @@ const FAMILY_NAMES = [
 
 const DIM_NAMES = [
   ['Vol. total', 'Vol. sets', 'Vol./rep', 'Vol./set', 'Tendance', 'Densité'],
-  ['RPE moy.', 'Facteur int.', 'RPE pic', 'Constance', 'Int. relative'],
+  ['Densité', 'Charge rel.', '—', 'Poids max', '—'],
   ['Nb exercices', 'Sets/exercice', 'Variété', 'Score struct.', 'Rég. repos'],
   ['Repos moy.', 'Var. repos', 'Complétion', 'Qualité repos', 'Récup. est.'],
   ['Nb PRs', 'Amp. PRs', 'Force rel.', 'Prog. 1RM', 'Constance perf.'],

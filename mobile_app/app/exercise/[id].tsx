@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Zap, Flame, Image as ImageIcon } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography, font } from '@/constants/theme'
 import { MUSCLE_LABELS_DETAILED } from '@/lib/muscles'
 
@@ -93,6 +94,7 @@ function muscleName(m: MuscleMapping): string {
 export default function ExerciseDetailScreen(): React.JSX.Element {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { colors } = useTheme()
+  const { formatWeight } = useWeightUnit()
   const router = useRouter()
 
   const [exercise, setExercise] = useState<Exercise | null>(null)
@@ -411,7 +413,7 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
                   records.maxCharge != null ? `${records.maxCharge} kilogrammes` : 'Aucun record'
                 }
               >
-                {records.maxCharge != null ? `${records.maxCharge} kg` : '—'}
+                {records.maxCharge != null ? formatWeight(records.maxCharge) : '—'}
               </Text>
             </View>
 
@@ -428,7 +430,7 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
                 }
               >
                 {records.maxSerie != null
-                  ? `${records.maxSerie.weight} × ${records.maxSerie.reps}`
+                  ? `${formatWeight(records.maxSerie.weight, { suffix: false })} × ${records.maxSerie.reps}`
                   : '—'}
               </Text>
             </View>
@@ -463,8 +465,8 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
                   !hasDelta || deltaZero
                     ? '—'
                     : deltaPositive
-                      ? `+${session.delta!} kg`
-                      : `${session.delta!} kg`
+                      ? `+${formatWeight(session.delta!)}`
+                      : `-${formatWeight(Math.abs(session.delta!))}`
 
                 return (
                   <Pressable
@@ -482,7 +484,7 @@ export default function ExerciseDetailScreen(): React.JSX.Element {
 
                     <Text style={s.historyStats} numberOfLines={1}>
                       {session.nSets} série{session.nSets > 1 ? 's' : ''}
-                      {session.maxWeight != null ? ` · ${session.maxWeight} kg max` : ''}
+                      {session.maxWeight != null ? ` · ${formatWeight(session.maxWeight)} max` : ''}
                     </Text>
 
                     <Text style={[s.historyDelta, { color: deltaColor }]}>{deltaText}</Text>

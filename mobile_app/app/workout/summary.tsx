@@ -28,6 +28,7 @@ import { useRouter } from 'expo-router'
 import { Camera, Dumbbell, Flame, Image as ImageIcon, Trophy, Zap } from 'lucide-react-native'
 import * as ImagePicker from 'expo-image-picker'
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography, touchTarget, spring, font } from '@/constants/theme'
 import { prBadgeRecipe, type PrType } from '@/constants/recipes'
 import { useWorkout, computePodium, WorkoutExercise, PrLevel } from '@/context/WorkoutContext'
@@ -341,6 +342,7 @@ function muscleLabelFr(key: string): string {
 
 function VolumeTrendSparkline({ history, current }: { history: number[]; current: number }) {
   const { colors } = useTheme()
+  const { formatVolume } = useWeightUnit()
   const all = useMemo(() => [...history, current], [history, current])
   const W = SCREEN_W - spacing.s4 * 2
   const H = 52
@@ -537,7 +539,7 @@ function VolumeTrendSparkline({ history, current }: { history: number[]; current
                   letterSpacing: -0.2,
                 }}
               >
-                {Math.round(activeVal!).toLocaleString('fr-FR')} kg
+                {formatVolume(activeVal!, { suffix: true })}
               </Text>
             </View>
           </View>
@@ -552,6 +554,7 @@ function VolumeTrendSparkline({ history, current }: { history: number[]; current
 export default function SummaryScreen() {
   const router = useRouter()
   const { colors } = useTheme()
+  const { unit: weightUnit, formatWeight, formatVolume } = useWeightUnit()
   const { status, startedAt, exercises, elapsedSeconds, resetWorkout } = useWorkout()
 
   const [isPublic, setIsPublic] = useState(false)
@@ -1201,9 +1204,9 @@ export default function SummaryScreen() {
           <Text style={[styles.heroLabel, { color: colors.textTertiary }]}>VOLUME TOTAL</Text>
           <View style={styles.heroRow}>
             <Text style={[styles.heroValue, { color: colors.accent }]} allowFontScaling={false}>
-              {displayVolume.toLocaleString('fr-FR')}
+              {formatVolume(displayVolume)}
             </Text>
-            <Text style={[styles.heroUnit, { color: colors.accent }]}>kg</Text>
+            <Text style={[styles.heroUnit, { color: colors.accent }]}>{weightUnit}</Text>
           </View>
 
           {/* Stats row: 3 pills */}
@@ -1212,7 +1215,7 @@ export default function SummaryScreen() {
             <StatPill label="SETS" value={String(nbSeries)} colors={colors} />
             <StatPill label="EXOS" value={String(nbExercices)} colors={colors} />
             {poidsMaxSeance > 0 && (
-              <StatPill label="MAX" value={`${poidsMaxSeance}kg`} colors={colors} />
+              <StatPill label="MAX" value={formatWeight(poidsMaxSeance)} colors={colors} />
             )}
           </View>
         </Animated.View>
@@ -1242,7 +1245,7 @@ export default function SummaryScreen() {
                     <PrRow
                       level={bestPrCharge}
                       type="charge"
-                      value={`${best.weight_kg} kg`}
+                      value={formatWeight(best.weight_kg)}
                       delay={80}
                       exerciseName={exForCharge?.name ?? ''}
                       setNumber={best.set_number}
@@ -1264,7 +1267,7 @@ export default function SummaryScreen() {
                     <PrRow
                       level={bestPrSerie}
                       type="serie"
-                      value={`${best.weight_kg} kg × ${best.reps}`}
+                      value={`${formatWeight(best.weight_kg)} × ${best.reps}`}
                       delay={160}
                       exerciseName={exForSerie?.name ?? ''}
                       setNumber={best.set_number}
@@ -1335,8 +1338,8 @@ export default function SummaryScreen() {
                       </Text>
                       <Text style={[styles.recapExMeta, { color: colors.textTertiary }]}>
                         {exSets.length} set{exSets.length > 1 ? 's' : ''}
-                        {maxW > 0 ? ` · ${maxW} kg max` : ''}
-                        {exVol > 0 ? ` · ${Math.round(exVol)} kg vol.` : ''}
+                        {maxW > 0 ? ` · ${formatWeight(maxW)} max` : ''}
+                        {exVol > 0 ? ` · ${formatVolume(exVol, { suffix: true })} vol.` : ''}
                       </Text>
                     </View>
                   </View>
@@ -1398,7 +1401,7 @@ export default function SummaryScreen() {
                           <Text
                             style={[styles.recapSetWeight, { color: colors.textPrimary, flex: 1 }]}
                           >
-                            {s.weight_kg > 0 ? `${s.weight_kg} kg` : 'Poids corps'}
+                            {s.weight_kg > 0 ? formatWeight(s.weight_kg) : 'Poids corps'}
                           </Text>
                           <Text style={[styles.recapSetReps, { color: colors.textPrimary }]}>
                             {s.reps}

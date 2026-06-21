@@ -163,7 +163,7 @@ DimConfig précalculé une fois (IIFE module) — zéro coût runtime.
 | # | Famille | Couleur |
 |---|---|---|
 | 0 | VOLUME | #f97316 |
-| 1 | INTENSITÉ | #ef4444 |
+| 1 | CHARGE | #ef4444 |
 | 2 | STRUCTURE | #8b5cf6 |
 | 3 | RÉCUP | #06b6d4 |
 | 4 | PERF | #fac775 |

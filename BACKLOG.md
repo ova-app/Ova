@@ -205,6 +205,47 @@ RevenueCat (ORA-010), suppression compte (ORA-001), RGPD UI (ORA-003), service_r
 
 ---
 
+## Phase C — Myo (sens & lisibilité)
+
+> Issue de l'avis produit sur Myo (21/06/2026). Constat : l'**exécution technique de l'orbe est excellente** (raycasting, zéro GC, conformité expo-gl), mais la **couche sens est fragile** — score non discriminant, familles mal nommées vs leurs specs, moitié de l'orbe en `0` hardcodés, baseline inventée, et aucun « so what » lisible pour l'utilisateur. Distinct d'ORA-026 (baseline mockée) qu'il complète. Détail des familles : `.claude/rules/myo.md`.
+>
+> Séquencement : **Tier 1** (ORA-086, ORA-087) = rendre le score utile + honnête. **Tier 2** (ORA-088, ORA-089) = densité de l'orbe + héros muscles. **Tier 3** (ORA-090, ORA-091) = le « so what ». ORA-092 = doc onboarding.
+
+### Tier 1
+
+#### ORA-086 · ✅ [DATA] Score Myo discriminant
+`lib/myo.ts:753-755` — `score = (moyenne de ~41 z + 3)/6 × 100`. **Cause mathématique :** moyenner N z-scores indépendants divise la variance par √N → le score converge vers 0 → **figé autour de 50** quelle que soit la séance. La métrique hero de l'app ne bouge jamais. **Action :** n'agréger que **3-5 dims à fort signal**, pondérées, autour de **50 = ta séance type** (`effort` = volume/densité/charge relative ; `output` = PR/progression 1RM), mappées sur 0-100 avec amplitude réelle. Fait le 21/06/2026 : `computeSessionScore(zAll)` pure + exportée + testée par import réel (`__tests__/myoScore.test.ts`). 50 = norme perso, >66 grosse séance, <33 jour léger → les seuils couleur de l'arc (≥66 gold / ≥33 orange) redeviennent signifiants.
+
+#### ORA-087 · 🟡 [DATA/HONNÊTETÉ] Les familles Myo ne mesurent pas ce qu'elles affichent + RPE collecté puis jeté — **option A faite, B reportée**
+Deux dettes liées :
+1. **Mapping malhonnête.** `lib/myo.ts:718` `z_intensite = zAll.densite` (densité kg/min, **pas** le RPE) ; `myo.ts:719` `z_structure = zAll.nb_series`. Or les labels orb/chart/glossaire (`myo-orb.tsx:61`, `myo-chart.tsx:65`, `myo-glossary.tsx:50-53`) et `rules/myo.md` annoncent « RPE moy. / RPE pic / Constance RPE ». La famille « INTENSITÉ » affiche en réalité la densité.
+2. **RPE jamais persisté.** `WorkoutSet` n'a aucun champ `rpe` (`WorkoutContext.tsx:11-21`), `updateDraftSet` n'accepte que `weight_kg`/`reps` (`WorkoutContext.tsx:54`), le payload de save n'envoie pas de `rpe` (`summary.tsx:909-919`), et la RPC `create_workout` ne l'insère pas (`rules/database.md`) — **alors que** la colonne `workout_sets.rpe` existe et que le picker mentionne le RPE (`session.tsx:1226`). Le RPE saisi est silencieusement perdu.
+
+**Action — trancher :**
+- ✅ **(A) Honnêteté immédiate (sans migration) — FAIT le 21/06/2026** : famille « INTENSITÉ » → « **CHARGE** » + libellés de dims au réel (Densité / Charge rel. / Poids max ; 2 placeholders `—` en attente d'ORA-088) dans `myo-orb.tsx`, `myo-chart.tsx` (+ `FAMILY_NAMES_SHORT` `INT.`→`CHRG.`), `myo-glossary.tsx`, `onboarding/index.tsx`, `rules/myo.md`, `rules/workout.md`. `DIM_LABELS.densite` `'intensité'`→`'densité'`. **La colonne DB `myo_signatures.z_intensite` reste inchangée (pas de migration)** — `z_intensite = z(densité)`.
+- ⏳ **(B) Câbler le vrai RPE** (le « bon » fix, reporté) : `rpe` dans `WorkoutSet` + `updateDraftSet` + payload `summary.tsx` + **migration RPC `create_workout` (INSERT rpe)** + extraction dans `myo.ts`. ⚠️ **Migration SQL requise.** À faire si on veut une vraie famille « effort perçu » distincte de la charge.
+
+#### ORA-090 · ⏳ [PRODUIT] Une phrase d'insight par séance (le « so what »)
+Aujourd'hui « Myo 62 » ne dit rien d'actionnable. **Action :** moteur de règles on-device (`lib/insights.ts`) déclenché par seuils sur les `z` déjà calculés (`z_extended`) → **une** phrase en hero du summary (« Volume +18 % vs ton trimestre », « Dos négligé depuis 3 semaines », « Repos irréguliers »). Prendre l'insight au plus fort `|z|`. Faible coût, impact max sur la perception. Évolutif : remplaçable plus tard par une rédaction via le SDK Claude à partir du même blob. **Dépend partiellement d'ORA-086/088** (z fiables).
+
+### Tier 2
+
+#### ORA-088 · ⏳ [DATA] Supprimer les `0` placeholders de l'orbe
+`lib/myo.ts` — `computeSessionValues` (500-547), `sessionValuesFromSignature` (550-599) et le retour de `saveMyoSignature` (801-821) bourrent chaque famille de `0` hardcodés → la moitié du relief « 53 dims » est plate (fausse richesse). **Action :** soit remplir avec les vraies sous-dims déjà dans `MyoRaw` (beaucoup existent : `volume_max_serie_kg`, `ratio_actif`, `std_temps_repos_par_ex`…), soit réduire honnêtement chaque famille à ses dims réelles et resserrer l'arc. Un orbe de 5 familles denses > 8 familles à moitié vides.
+
+#### ORA-089 · ⏳ [PRODUIT] Famille MUSCLES en héros (équilibre musculaire)
+La famille 6 (17 dims = `Σ weight × reps × activation_pct`) est la **seule donnée non-bidouillée** de Myo : du vrai signal, lisible. Aujourd'hui c'est un secteur parmi 8. **Action :** en faire un livrable à part entière — carte d'**équilibre musculaire** (« push/pull déséquilibré », « dos sous-travaillé 3 semaines ») comparée au rolling perso 30j (`z_extended.muscles_raw`). C'est le chemin le plus direct vers le « so what ». **Lié à ORA-026** (rolling personnel) et **ORA-090** (insights).
+
+### Tier 3
+
+#### ORA-091 · ⏳ [DATA/PRODUIT] Cold-start honnête de la baseline
+`lib/myo.ts:62-148` (`POP_MEAN`/`POP_STD` devinés à la main) + `fetchBaselines` bascule sur ces constantes tant que `< 5` séances (`myo.ts:460`). Les scores des premières séances se comparent à une population fictive. **Action court terme :** assumer le cold-start — afficher « Myo se calibre (n/5 séances) » au lieu d'un faux score (crée de l'anticipation, règle UX « reveal »). **Long terme :** vraies stats population via vue Supabase une fois ~100 users. **Complète ORA-026** (volet baseline musculaire).
+
+#### ORA-092 · ⏳ [DOC/PRODUIT] Document onboarding « comment marche Myo »
+Aucune explication utilisateur de ce qu'est Myo, comment lire le score, les 8 familles, l'orbe 3D et la comparaison « ta moyenne ». **Action :** rédiger un document d'onboarding Myo (concept, lecture du score = vs ta norme perso, les 8 familles, interaction orbe, cold-start) — base d'un écran d'onboarding dédié (`app/onboarding/`) et/ou d'une section enrichie du glossaire (`app/myo-glossary.tsx`). Prérequis : ORA-086 (sémantique du score stabilisée) + idéalement ORA-087 (familles honnêtes) pour ne pas documenter une version trompeuse.
+
+---
+
 ## Points positifs vérifiés (à préserver)
 
 - Résidence EU (Supabase Frankfurt + PostHog `eu.i.posthog.com`), tokens en SecureStore, requêtes paramétrées (**aucune injection SQL** — vérifié), `is_public` DEFAULT `false`, **aucune coordonnée lat/lng précise écrite** (seule `location_city`).

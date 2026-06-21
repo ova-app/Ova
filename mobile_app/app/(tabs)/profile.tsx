@@ -56,8 +56,9 @@ import * as Haptics from 'expo-haptics'
 import { supabase } from '@/lib/supabase'
 
 import { useTheme } from '@/context/ThemeContext'
+import { useWeightUnit } from '@/context/WeightUnitContext'
 import { spacing, radius, typography, font, spring, touchTarget } from '@/constants/theme'
-import { formatVolume, formatDuration } from '@/lib/utils'
+import { formatDuration } from '@/lib/utils'
 import { type WorkoutRow } from '@/lib/hooks/useHistoryData'
 import {
   useProfileData,
@@ -195,6 +196,10 @@ function ClaimBand({
   onRefresh: () => void
 }) {
   const s = buildStyles(colors)
+  const { unit: weightUnit, toDisplay } = useWeightUnit()
+  // Claims poids : target_value stocké en kg (unit 'kg') → afficher dans l'unité. Séances inchangées.
+  const fmtClaimVal = (val: number, claimUnit: string): string =>
+    claimUnit === 'kg' ? `${Math.round(toDisplay(val))} ${weightUnit}` : `${val} ${claimUnit}`
   const mount = useSharedValue(0)
   useEffect(() => {
     mount.value = withDelay(120, withTiming(1, { duration: 350, easing: Easing.out(Easing.cubic) }))
@@ -256,7 +261,7 @@ function ClaimBand({
       const gapLabel =
         gap != null && gap > 0
           ? isW
-            ? `à ${gap} kg près`
+            ? `à ${Math.round(toDisplay(gap))} ${weightUnit} près`
             : `à ${gap} séance${gap > 1 ? 's' : ''} près`
           : null
       return (
@@ -267,12 +272,12 @@ function ClaimBand({
               {gapLabel && <Text style={s.nearMissGapLabel}>{gapLabel}</Text>}
             </View>
             <Text style={s.nearMissTarget} numberOfLines={1}>
-              {recentFailed.target_value} {recentFailed.unit}
+              {fmtClaimVal(recentFailed.target_value, recentFailed.unit)}
               {isW && recentFailed.exercise_name ? ` · ${recentFailed.exercise_name}` : ''}
             </Text>
             {recentFailed.resolved_value != null && (
               <Text style={s.nearMissReached}>
-                Atteint : {recentFailed.resolved_value} {recentFailed.unit}
+                Atteint : {fmtClaimVal(recentFailed.resolved_value, recentFailed.unit)}
               </Text>
             )}
             <View style={s.nearMissActions}>
@@ -344,8 +349,8 @@ function ClaimBand({
         {/* cible */}
         <View style={s.claimTargetRow}>
           <Text style={s.claimTargetValue} allowFontScaling={false}>
-            {claim.target_value}
-            <Text style={s.claimTargetUnit}> {claim.unit}</Text>
+            {isWeight ? Math.round(toDisplay(claim.target_value)) : claim.target_value}
+            <Text style={s.claimTargetUnit}> {isWeight ? weightUnit : claim.unit}</Text>
           </Text>
           {isWeight && claim.exercise_name && (
             <Text style={s.claimExercise} numberOfLines={1}>
@@ -437,6 +442,7 @@ function PrVedetteCard({
   onLongPress: () => void
 }) {
   const s = buildStyles(colors)
+  const { unit: weightUnit, toDisplay } = useWeightUnit()
   const mount = useSharedValue(0)
   useEffect(() => {
     mount.value = withDelay(200, withSpring(1, spring.standard))
@@ -511,15 +517,15 @@ function PrVedetteCard({
           <ChevronRight size={18} color={colors.textTertiary} />
           <View style={s.prVedetteTextCol}>
             <Text style={s.prVedetteValue} allowFontScaling={false}>
-              {pr.weight_kg}
-              <Text style={s.prVedetteUnit}> kg</Text>
+              {Math.round(toDisplay(pr.weight_kg))}
+              <Text style={s.prVedetteUnit}> {weightUnit}</Text>
             </Text>
             <Text style={s.prVedetteExercise} numberOfLines={1}>
               {pr.exercise_name}
             </Text>
             <Text style={s.prVedetteDelta}>
               {pr.delta_kg != null && pr.delta_kg > 0
-                ? `+${Math.round(pr.delta_kg)} kg vs ton ancien record`
+                ? `+${Math.round(toDisplay(pr.delta_kg))} ${weightUnit} vs ton ancien record`
                 : 'Premier record'}
             </Text>
           </View>
@@ -590,6 +596,7 @@ function WeekCalendar({
   colors: ReturnType<typeof useTheme>['colors']
 }) {
   const s = buildStyles(colors)
+  const { formatVolume: formatVolumeU } = useWeightUnit()
   const [w, setW] = useState(0)
   const [sel, setSel] = useState<number | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -617,7 +624,7 @@ function WeekCalendar({
           containerW={w}
           colors={colors}
           title={dayTitle(d.date)}
-          value={d.hasSession ? `${formatVolume(d.volumeKg)} kg` : 'Repos'}
+          value={d.hasSession ? formatVolumeU(d.volumeKg, { suffix: true }) : 'Repos'}
           accent={d.hasSession}
         />
       )}
@@ -630,7 +637,7 @@ function WeekCalendar({
             hitSlop={6}
             accessibilityRole="button"
             accessibilityLabel={`${dayTitle(day.date)} — ${
-              day.hasSession ? `${Math.round(day.volumeKg)} kg` : 'repos'
+              day.hasSession ? formatVolumeU(day.volumeKg, { suffix: true }) : 'repos'
             }`}
           >
             <Text style={[s.weekLabel, day.isToday && s.weekLabelToday]}>{day.label}</Text>
@@ -677,6 +684,7 @@ function MonthCalendar({
   onClose: () => void
 }) {
   const s = buildStyles(colors)
+  const { formatVolume: formatVolumeU } = useWeightUnit()
   const [offset, setOffset] = useState(0) // 0 = mois courant ; négatif = passé
   const [sel, setSel] = useState<MonthCell | null>(null)
 
@@ -783,7 +791,7 @@ function MonthCalendar({
                       hitSlop={2}
                       accessibilityRole="button"
                       accessibilityLabel={`${cell.day} — ${
-                        cell.hasSession ? `${Math.round(cell.volumeKg)} kg` : 'repos'
+                        cell.hasSession ? formatVolumeU(cell.volumeKg, { suffix: true }) : 'repos'
                       }`}
                     >
                       <View
@@ -819,7 +827,7 @@ function MonthCalendar({
                 {sel.hasSession ? (
                   <Text
                     style={{ color: colors.prGold }}
-                  >{`  ·  ${formatVolume(sel.volumeKg)} kg`}</Text>
+                  >{`  ·  ${formatVolumeU(sel.volumeKg, { suffix: true })}`}</Text>
                 ) : (
                   <Text style={{ color: colors.textTertiary }}>{'  ·  Repos'}</Text>
                 )}
@@ -878,6 +886,7 @@ function WeeklyVolumeChart({
   colors: ReturnType<typeof useTheme>['colors']
 }) {
   const s = buildStyles(colors)
+  const { formatVolume: formatVolumeU } = useWeightUnit()
   const [w, setW] = useState(0)
   const [sel, setSel] = useState<number | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -913,7 +922,7 @@ function WeeklyVolumeChart({
       <View style={s.volAxisCol}>
         {ticks.map((t, i) => (
           <Text key={i} style={s.volAxisLabel} numberOfLines={1} allowFontScaling={false}>
-            {formatVolume(Math.round(t))}
+            {formatVolumeU(Math.round(t))}
           </Text>
         ))}
       </View>
@@ -930,7 +939,7 @@ function WeeklyVolumeChart({
             containerW={w}
             colors={colors}
             title={`Sem. ${weekRangeTitle(sw.weekStart)}`}
-            value={sw.volumeKg > 0 ? `${formatVolume(sw.volumeKg)} kg` : 'Aucun volume'}
+            value={sw.volumeKg > 0 ? formatVolumeU(sw.volumeKg, { suffix: true }) : 'Aucun volume'}
             accent={sw.volumeKg > 0}
           />
         )}
@@ -1391,10 +1400,11 @@ interface HistoryRowProps {
 }
 
 function HistoryRowInProfile({ item, onPress, colors }: HistoryRowProps) {
+  const { unit: weightUnit, formatVolume: formatVolumeU } = useWeightUnit()
   const d = new Date(item.started_at)
   const day = d.getDate().toString()
   const weekday = DAYS_FR[d.getDay()]
-  const volumeStr = formatVolume(item.total_volume_kg ?? 0)
+  const volumeStr = formatVolumeU(item.total_volume_kg ?? 0)
   const subtitleParts = [
     `${item.total_sets} série${item.total_sets > 1 ? 's' : ''}`,
     formatDuration(item.duration_sec),
@@ -1476,7 +1486,7 @@ function HistoryRowInProfile({ item, onPress, colors }: HistoryRowProps) {
                 fontSize: 12,
               }}
             >
-              kg
+              {weightUnit}
             </Text>
           </Text>
           <ChevronRight size={14} color={colors.textTertiary} style={{ marginTop: 2 }} />
@@ -1495,6 +1505,7 @@ function ClaimHistoryRowInProfile({
   claim: Claim
   colors: ReturnType<typeof useTheme>['colors']
 }) {
+  const { unit: weightUnit, toDisplay } = useWeightUnit()
   const succeeded = claim.status === 'succeeded'
   const tone = succeeded ? colors.success : colors.error
   const d = new Date(claim.resolved_at ?? claim.created_at)
@@ -1502,6 +1513,10 @@ function ClaimHistoryRowInProfile({
   const weekday = DAYS_FR[d.getDay()]
   const isWeight = claim.type === 'weight'
   const sub = isWeight ? (claim.exercise_name ?? 'Claim de charge') : 'Claim de séances'
+  const targetLabel =
+    claim.unit === 'kg'
+      ? `${Math.round(toDisplay(claim.target_value))} ${weightUnit}`
+      : `${claim.target_value} ${claim.unit}`
 
   return (
     <View
@@ -1548,7 +1563,7 @@ function ClaimHistoryRowInProfile({
             style={[typography.body, { color: colors.textPrimary, fontFamily: font.bold }]}
             numberOfLines={1}
           >
-            Claim · {claim.target_value} {claim.unit}
+            Claim · {targetLabel}
           </Text>
           <Text
             style={[typography.caption, { color: colors.textSecondary, marginTop: 2 }]}

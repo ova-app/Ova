@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite'
+import { log } from './logger'
 
 let _db: SQLite.SQLiteDatabase | null = null
 
@@ -207,7 +208,25 @@ function firstOf<T>(v: T | T[] | null | undefined): T | null {
   return Array.isArray(v) ? (v[0] ?? null) : v
 }
 
-export async function backfillLocalFromSupabase(): Promise<void> {
+// Garde anti-concurrence + handle attendable (cause 3). Le backfill est déclenché au boot
+// ET sur SIGNED_IN (cf. _layout.tsx) → sans garde, deux exécutions concurrentes ; avec garde,
+// les appelants partagent la même promesse. addExercise peut attendre `whenBackfillSettled()`
+// pour ne pas lire un top3 vide pendant qu'un backfill de boot est encore en cours.
+let backfillInFlight: Promise<void> | null = null
+
+export function whenBackfillSettled(): Promise<void> {
+  return backfillInFlight ?? Promise.resolve()
+}
+
+export function backfillLocalFromSupabase(): Promise<void> {
+  if (backfillInFlight) return backfillInFlight
+  backfillInFlight = runBackfill().finally(() => {
+    backfillInFlight = null
+  })
+  return backfillInFlight
+}
+
+async function runBackfill(): Promise<void> {
   try {
     const db = getDB()
     const countRow = await db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM local_sets`)
@@ -215,9 +234,12 @@ export async function backfillLocalFromSupabase(): Promise<void> {
 
     // Import paresseux : garde db.ts chargeable sans le client Supabase (tests, démarrage léger).
     const { supabase } = await import('./supabase')
+    // getSession() lit la session stockée (SecureStore) sans réseau → fiable dès le boot,
+    // contrairement à getUser() qui peut renvoyer null tant que le token n'est pas rafraîchi (cause 3).
     const {
-      data: { user },
-    } = await supabase.auth.getUser()
+      data: { session },
+    } = await supabase.auth.getSession()
+    const user = session?.user
     if (!user) return
 
     const { data: setData } = await supabase
@@ -283,7 +305,9 @@ export async function backfillLocalFromSupabase(): Promise<void> {
         )
       }
     })
-  } catch {
-    // Best-effort — l'absence de backfill n'est pas bloquante (ghost/predictor reprendront au prochain save)
+  } catch (e) {
+    // Best-effort — l'absence de backfill n'est pas bloquante (ghost/predictor/top3 PR reprendront
+    // au prochain save). On log au lieu d'avaler en silence (cause 3 : échec backfill = PRs muets).
+    log.error('[db] backfillLocalFromSupabase', e)
   }
 }

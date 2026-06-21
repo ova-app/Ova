@@ -29,11 +29,11 @@ import type { PrLevel } from '../context/WorkoutContext'
 // ─── computePodium — machine à état des PRs ──────────────────────────────────
 
 describe('computePodium — workout state transitions', () => {
-  // Simule l'état initial : pas d'historique → top3 vide
-  it('should return null when there is no history (pr1 = 0)', () => {
+  // Simule l'état initial : pas d'historique → top3 vide → 1er passage = gold (cause 2)
+  it('should return gold when there is no history (pr1 = 0)', () => {
     const emptyTop3 = { pr1: 0, pr2: null, pr3: null }
     const result = computePodium(150, emptyTop3)
-    expect(result).toBeNull()
+    expect(result).toBe('gold')
   })
 
   // Premier PR enregistré : désormais pr1 > 0, nouvelle valeur bat le record
@@ -45,10 +45,10 @@ describe('computePodium — workout state transitions', () => {
   // Séquence complète : gold → silver → bronze → null
   it('should assign correct PR levels across a full top-3', () => {
     const top3 = { pr1: 200, pr2: 180, pr3: 160 }
-    const gold:   PrLevel = computePodium(210, top3)
+    const gold: PrLevel = computePodium(210, top3)
     const silver: PrLevel = computePodium(190, top3)
     const bronze: PrLevel = computePodium(170, top3)
-    const none:   PrLevel = computePodium(150, top3)
+    const none: PrLevel = computePodium(150, top3)
 
     expect(gold).toBe('gold')
     expect(silver).toBe('silver')
