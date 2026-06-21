@@ -20,6 +20,7 @@ Les fichiers de `migrations/` ci-dessous sont les **changements incrémentaux do
 | `20260519120000_exercise_muscles_mapping.sql` | 113 exercices × mappings muscles/fascicules | ✅ appliquée |
 | `20260519130000_myo_famille6_dims.sql` | Myo Famille 6 — 17 dims + `myo_muscle_dims` | ✅ appliquée |
 | `20260614120000_create_workout_rpc.sql` | RPC transactionnelle `create_workout` | ⚠️ **NON appliquée** |
+| ORA-082 à ORA-085 (appliquées hors `migrations/`, SQL Editor manuel) | `claims.scope` étendu (week/month/custom) · `claim_likes` + `claim_comments` · `users.featured_photo` · `users.bio` | ✅ appliquées (21/06/2026) |
 
 > `planned/` = migrations **rédigées mais non encore appliquées** — **pas** dans
 > `migrations/`, donc jamais exécutées par le CLI. Les déplacer dans `migrations/`
@@ -31,7 +32,6 @@ Les fichiers de `migrations/` ci-dessous sont les **changements incrémentaux do
 | `ora023_comment_length_check.sql` | CHECK `comments.content` ≤ 500 | ⚠️ À appliquer |
 | `claims_and_featured_pr.sql` | `users.featured_pr` (jsonb) + tables `claims` + `claim_votes` (+RLS) — vitrine sociale du profil (called-shot + PR vedette) | ⚠️ **À appliquer** (client déjà codé : profil/feed/summary) |
 | `profile_name_fields.sql` | `users.first_name` + `last_name` + `name_display` — nom décomposé (prénom/nom) + préférence d'affichage profil. Backfill du `full_name` existant | ⚠️ **À appliquer** (client déjà codé : edit-profile/profile, lecture/écriture isolée no-op pré-migration) |
-| `ora085_profile_bio.sql` | `users.bio` (text, CHECK ≤ 70) — bio courte affichée sous l'avatar sur le profil | ⚠️ **À appliquer** (client déjà codé : edit-profile/profile, lecture/écriture isolée no-op pré-migration) |
 | `ora077_resolve_claims_cron.sql` | Cron horaire `resolve_overdue_claims()` — expiration serveur des claims (ORA-077) | ⚠️ À appliquer **après** `claims_and_featured_pr.sql` (active pg_cron) |
 | `phase3_athletic_dna.sql` · `phase3_programs_marketplace.sql` | Phase 3 (ADN, marketplace) | ⏳ à l'implémentation |
 
